@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Foundation model only — domain models land in later sprints.
+model HealthProbe {
+  id        String   @id @default(cuid())
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("health_probes")
+}

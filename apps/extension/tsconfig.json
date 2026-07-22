@@ -1,0 +1,14 @@
+{
+  "extends": "@project-x/tsconfig/react-library.json",
+  "compilerOptions": {
+    "paths": {
+      "~/*": ["./*"]
+    },
+    "baseUrl": ".",
+    "strict": true,
+    "noEmit": true,
+    "types": ["chrome"]
+  },
+  "include": [".plasmo/index.d.ts", "index.d.ts", "./**/*.ts", "./**/*.tsx"],
+  "exclude": ["node_modules", "build", ".plasmo"]
+}

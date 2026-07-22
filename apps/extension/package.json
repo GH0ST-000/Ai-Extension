@@ -1,0 +1,49 @@
+{
+  "name": "@project-x/extension",
+  "displayName": "Project X",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Project X Chrome extension (Plasmo)",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf build .plasmo"
+  },
+  "dependencies": {
+    "@floating-ui/react": "^0.27.20",
+    "@project-x/shared": "workspace:*",
+    "clsx": "^2.1.1",
+    "framer-motion": "11",
+    "plasmo": "^0.89.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@plasmohq/prettier-plugin-sort-imports": "^4.0.1",
+    "@project-x/eslint-config": "workspace:*",
+    "@project-x/tsconfig": "workspace:*",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.17.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "3.4.17",
+    "typescript": "^5.7.2"
+  },
+  "manifest": {
+    "host_permissions": [
+      "https://*/*",
+      "http://*/*"
+    ],
+    "permissions": [
+      "storage"
+    ]
+  }
+}

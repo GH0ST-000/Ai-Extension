@@ -267,6 +267,9 @@ importers:
       '@project-x/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: '22'
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)
@@ -312,6 +315,9 @@ importers:
       '@project-x/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: '22'
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)
@@ -329,6 +335,9 @@ importers:
       '@project-x/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: '22'
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)

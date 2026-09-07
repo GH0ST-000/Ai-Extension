@@ -7,11 +7,40 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Foundation model only — domain models land in later sprints.
 model HealthProbe {
   id        String   @id @default(cuid())
   label     String
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("health_probes")
+}
+
+enum ResponseStyle {
+  CONCISE
+  BALANCED
+  DETAILED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  name         String?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  settings     UserSettings?
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                 String        @id @default(cuid())
+  userId             String        @unique @map("user_id")
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  maxOutputTokens    Int           @default(600) @map("max_output_tokens")
+  responseStyle      ResponseStyle @default(CONCISE) @map("response_style")
+  includePageContext Boolean       @default(true) @map("include_page_context")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  @@map("user_settings")
 }

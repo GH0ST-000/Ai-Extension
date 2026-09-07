@@ -1,0 +1,16 @@
+export const AI_DEFAULT_MAX_INPUT_CHARACTERS = 12_000;
+export const AI_DEFAULT_MAX_CUSTOM_PROMPT_CHARACTERS = 2_000;
+export const AI_DEFAULT_MAX_CONTEXT_URL_CHARACTERS = 400;
+export const AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS = 160;
+export const AI_DEFAULT_MAX_CONTEXT_SURROUNDING_CHARACTERS = 900;
+export const AI_DEFAULT_MAX_CONTEXT_DESCRIPTION_CHARACTERS = 240;
+export const AI_DEFAULT_MAX_CONTEXT_CODE_CHARACTERS = 1_400;
+export const AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS = 240;
+
+/** Compact delimiters keep injection boundaries while using fewer tokens. */
+export const SELECTED_TEXT_OPEN = '<<SEL>>';
+export const SELECTED_TEXT_CLOSE = '<<END_SEL>>';
+export const CUSTOM_INSTRUCTION_OPEN = '<<CMD>>';
+export const CUSTOM_INSTRUCTION_CLOSE = '<<END_CMD>>';
+export const PAGE_CONTEXT_OPEN = '<<CTX>>';
+export const PAGE_CONTEXT_CLOSE = '<<END_CTX>>';

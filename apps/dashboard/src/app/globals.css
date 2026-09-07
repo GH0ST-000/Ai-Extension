@@ -3,12 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --border: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
+  /* Signal Studio — cool mist + ink + teal accent */
+  --background: 214 40% 97%;
+  --foreground: 222 47% 8%;
+  --muted: 214 28% 92%;
+  --muted-foreground: 215 16% 40%;
+  --border: 214 24% 86%;
+  --ring: 173 80% 32%;
+
+  --ink: 222 47% 8%;
+  --mist: 214 40% 97%;
+  --panel: 0 0% 100%;
+  --panel-soft: 210 40% 98%;
+  --accent: 173 80% 32%;
+  --accent-soft: 168 55% 92%;
+  --accent-foreground: 0 0% 100%;
+  --spark: 28 95% 55%;
+  --line: 214 24% 86%;
+
+  --font-display: 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Figtree', ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -23,13 +37,162 @@ body {
 }
 
 body {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  background-color: hsl(var(--mist));
+  color: hsl(var(--ink));
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.22);
+  color: hsl(var(--ink));
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .atmosphere {
+    background-color: hsl(var(--mist));
+    background-image:
+      radial-gradient(ellipse 80% 55% at 12% -10%, hsl(173 70% 70% / 0.28), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 92% 8%, hsl(210 90% 78% / 0.35), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 70% 100%, hsl(28 90% 70% / 0.14), transparent 55%),
+      linear-gradient(180deg, hsl(214 40% 98%) 0%, hsl(214 32% 95%) 100%);
+  }
+
+  .panel-glass {
+    background: hsl(var(--panel) / 0.78);
+    border: 1px solid hsl(var(--line) / 0.9);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .grid-fade {
+    background-image:
+      linear-gradient(hsl(var(--line) / 0.45) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--line) / 0.45) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 75%);
+  }
+
+  .rise-in {
+    animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .rise-in-delay-1 {
+    animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
+  }
+
+  .rise-in-delay-2 {
+    animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.16s both;
+  }
+
+  .rise-in-delay-3 {
+    animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both;
+  }
+
+  .float-soft {
+    animation: float-soft 7s ease-in-out infinite;
+  }
+
+  .health-backdrop-in {
+    animation: health-backdrop-in 0.28s ease-out both;
+  }
+
+  .health-panel-in {
+    animation: health-panel-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .health-card-in {
+    animation: rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .health-spin {
+    animation: health-spin 0.85s linear infinite;
+  }
+
+  .health-pulse {
+    animation: health-pulse 1.6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise-in,
+    .rise-in-delay-1,
+    .rise-in-delay-2,
+    .rise-in-delay-3,
+    .float-soft,
+    .health-backdrop-in,
+    .health-panel-in,
+    .health-card-in,
+    .health-spin,
+    .health-pulse {
+      animation: none;
+    }
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes health-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes health-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes health-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes health-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
 }

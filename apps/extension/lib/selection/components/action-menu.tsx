@@ -4,11 +4,11 @@ import { motion } from 'framer-motion';
 import { cn } from '~/lib/utils/cn';
 
 import { AI_ACTIONS } from '../constants';
-import type { AiAction } from '../types';
+import type { AiActionDefinition } from '../types';
 import { ActionMenuItem } from './action-menu-item';
 
 type ActionMenuProps = {
-  onSelect: (action: AiAction) => void;
+  onSelect: (action: AiActionDefinition) => void;
 };
 
 export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function ActionMenu(

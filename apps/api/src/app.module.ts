@@ -9,6 +9,9 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { QueuesModule } from './queues/queues.module';
+import { AiModule } from './ai/ai.module';
+import { AuthModule } from './auth/auth.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -56,6 +59,9 @@ import { QueuesModule } from './queues/queues.module';
     RedisModule,
     QueuesModule,
     HealthModule,
+    AuthModule,
+    SettingsModule,
+    AiModule,
   ],
 })
 export class AppModule {}

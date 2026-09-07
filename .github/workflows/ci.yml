@@ -45,5 +45,13 @@ jobs:
         run: pnpm build
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectx?schema=public
+          OPENAI_API_KEY: sk-test-ci-placeholder
           NEXT_TELEMETRY_DISABLED: '1'
           NEXT_PUBLIC_API_URL: http://localhost:3001
+          PLASMO_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Test
+        run: pnpm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectx?schema=public
+          OPENAI_API_KEY: sk-test-ci-placeholder

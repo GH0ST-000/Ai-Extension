@@ -3,13 +3,13 @@ import { motion } from 'framer-motion';
 
 import { cn } from '~/lib/utils/cn';
 
-import type { AiAction } from '../types';
+import type { AiActionDefinition } from '../types';
 import { ACTION_ICONS } from './action-icons';
 
 type ActionMenuItemProps = {
-  action: AiAction;
+  action: AiActionDefinition;
   index: number;
-  onSelect: (action: AiAction) => void;
+  onSelect: (action: AiActionDefinition) => void;
 };
 
 export const ActionMenuItem = forwardRef<HTMLButtonElement, ActionMenuItemProps>(

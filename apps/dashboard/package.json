@@ -4,12 +4,12 @@
   "private": true,
   "description": "Project X Next.js dashboard",
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "pnpm run clean && next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf .next"
+    "clean": "rm -rf .next .turbo node_modules/.cache"
   },
   "dependencies": {
     "@project-x/shared": "workspace:*",

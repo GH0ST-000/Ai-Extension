@@ -11,6 +11,30 @@ export interface ApiConfig {
     port: number;
     password: string;
   };
+  ai: {
+    provider: ApiEnv['AI_PROVIDER'];
+    model: string;
+    openaiApiKey: string;
+    maxOutputTokens: number;
+    requestTimeoutMs: number;
+    maxInputCharacters: number;
+    corsOrigins: string[];
+  };
+  jwt: {
+    secret: string;
+    expiresIn: string;
+  };
+}
+
+function parseCorsOrigins(raw: string | undefined): string[] {
+  if (!raw || raw.trim().length === 0) {
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 }
 
 export default (): ApiConfig => {
@@ -26,6 +50,19 @@ export default (): ApiConfig => {
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD ?? '',
+    },
+    ai: {
+      provider: env.AI_PROVIDER,
+      model: env.AI_MODEL,
+      openaiApiKey: env.OPENAI_API_KEY,
+      maxOutputTokens: env.AI_MAX_OUTPUT_TOKENS,
+      requestTimeoutMs: env.AI_REQUEST_TIMEOUT_MS,
+      maxInputCharacters: env.AI_MAX_INPUT_CHARACTERS,
+      corsOrigins: parseCorsOrigins(env.AI_CORS_ORIGINS),
+    },
+    jwt: {
+      secret: env.JWT_SECRET,
+      expiresIn: env.JWT_EXPIRES_IN,
     },
   };
 };

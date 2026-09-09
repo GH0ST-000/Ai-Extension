@@ -3,11 +3,13 @@ import { useEffect } from 'react';
 import { useSelectionToolbarStore } from '../store';
 
 /**
- * ESC closes the menu first, then the trigger — matches Raycast-like dismissal.
+ * Esc closes nested assistant views first, then the trigger.
  */
 export function useEscapeToDismiss(): void {
   const phase = useSelectionToolbarStore((s) => s.phase);
+  const assistant = useSelectionToolbarStore((s) => s.assistant);
   const closeMenu = useSelectionToolbarStore((s) => s.closeMenu);
+  const backToMenu = useSelectionToolbarStore((s) => s.backToMenu);
   const dismiss = useSelectionToolbarStore((s) => s.dismiss);
 
   useEffect(() => {
@@ -23,9 +25,21 @@ export function useEscapeToDismiss(): void {
       event.preventDefault();
       event.stopPropagation();
 
-      if (phase === 'menu') {
-        closeMenu();
-        return;
+      if (phase === 'assistant') {
+        if (assistant.status === 'menu') {
+          closeMenu();
+          return;
+        }
+        if (
+          assistant.status === 'custom-prompt' ||
+          assistant.status === 'loading' ||
+          assistant.status === 'streaming' ||
+          assistant.status === 'success' ||
+          assistant.status === 'error'
+        ) {
+          backToMenu();
+          return;
+        }
       }
 
       dismiss();
@@ -33,5 +47,5 @@ export function useEscapeToDismiss(): void {
 
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [closeMenu, dismiss, phase]);
+  }, [assistant, backToMenu, closeMenu, dismiss, phase]);
 }

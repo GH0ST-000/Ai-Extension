@@ -25,7 +25,12 @@ export function useTextSelection(): void {
     const syncAfterGesture = () => {
       const snapshot = readDomSelection();
       if (!snapshot) {
-        if (useSelectionToolbarStore.getState().phase !== 'hidden') {
+        const { phase } = useSelectionToolbarStore.getState();
+        // Inputs often clear selection when focus moves; keep the assistant open.
+        if (phase === 'assistant') {
+          return;
+        }
+        if (phase !== 'hidden') {
           dismiss();
         }
         return;
@@ -61,6 +66,9 @@ export function useTextSelection(): void {
         const { phase } = useSelectionToolbarStore.getState();
 
         if (!snapshot) {
+          if (phase === 'assistant') {
+            return;
+          }
           if (phase !== 'hidden') {
             dismiss();
           }
@@ -86,6 +94,10 @@ export function useTextSelection(): void {
     const onScrollOrResize = () => {
       const snapshot = readDomSelection();
       if (!snapshot) {
+        const { phase } = useSelectionToolbarStore.getState();
+        if (phase === 'assistant') {
+          return;
+        }
         dismiss();
         return;
       }

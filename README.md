@@ -79,6 +79,7 @@ pnpm --filter @project-x/extension dev    # load apps/extension/build/chrome-mv3
 | `pnpm build` | Build all packages and apps |
 | `pnpm lint` | Lint the monorepo |
 | `pnpm typecheck` | TypeScript checks |
+| `pnpm test` | Run unit tests (API + extension) |
 | `pnpm format` | Prettier write |
 | `pnpm docker:up` | Start Postgres + Redis |
 | `pnpm docker:down` | Stop Docker services |
@@ -88,11 +89,19 @@ pnpm --filter @project-x/extension dev    # load apps/extension/build/chrome-mv3
 - Deep: `GET http://localhost:3001/api/health`
 - Live: `GET http://localhost:3001/api/health/live`
 
-## Architecture notes (Day 1)
+## AI streaming + auth
+
+- Extension selects text → Ask AI → action → streams from `POST /api/ai/actions/stream` (**JWT required**)
+- Normalized `context` (generic or GitHub) is sent with each request — never full HTML
+- Register/login via dashboard (`/login`) or extension popup; tune AI settings at `/app/settings`
+- Requires `OPENAI_API_KEY`, `JWT_SECRET`, and related AI env vars in root `.env`
+- Extension uses `PLASMO_PUBLIC_API_URL` (no secrets); dashboard uses `NEXT_PUBLIC_API_URL`
+
+## Architecture notes
 
 - **Apps own runtime**; **packages own shared contracts/utilities**.
 - Env validation fails fast via Zod (`@project-x/config`) at API boot.
-- No business domains yet — only infrastructure modules (config, prisma, redis, queues, health).
+- AI: Controller → Service (loads user settings) → PromptRegistry + ModelFactory → Vercel AI SDK.
 - UI package holds shadcn-style primitives so dashboard/extension stay consistent later.
 - React is pinned to **18.3** across the monorepo so Plasmo and Next.js share one React type graph.
 
@@ -102,7 +111,6 @@ Commit messages must follow [Conventional Commits](https://www.conventionalcommi
 
 Examples: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `ci:`.
 
-## Day 1 scope
+## Current scope
 
-This foundation intentionally excludes authentication, tenancy, billing, and product features. Those start on Day 2+.
-# Ai-Extension
+Auth, user AI settings, and extension ↔ API AI streaming are in place. History, billing, and third-party integrations remain out of scope.

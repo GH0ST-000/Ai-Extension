@@ -3,16 +3,16 @@ import { motion } from 'framer-motion';
 
 import { cn } from '~/lib/utils/cn';
 
-import { AI_ACTIONS } from '../constants';
-import type { AiAction } from '../types';
+import type { AiActionDefinition } from '../types';
 import { ActionMenuItem } from './action-menu-item';
 
 type ActionMenuProps = {
-  onSelect: (action: AiAction) => void;
+  actions: readonly AiActionDefinition[];
+  onSelect: (action: AiActionDefinition) => void;
 };
 
 export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function ActionMenu(
-  { onSelect },
+  { actions, onSelect },
   ref,
 ) {
   return (
@@ -38,7 +38,7 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Actions</p>
       </div>
       <div className="flex flex-col">
-        {AI_ACTIONS.map((action, index) => (
+        {actions.map((action, index) => (
           <ActionMenuItem key={action.id} action={action} index={index} onSelect={onSelect} />
         ))}
       </div>

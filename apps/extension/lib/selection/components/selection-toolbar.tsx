@@ -1,18 +1,31 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AnimatePresence } from 'framer-motion';
+import { AIAction } from '@project-x/types';
 
-import { dispatchAiAction } from '../actions';
-import { AI_ACTIONS, MENU_OFFSET_PX, TRIGGER_OFFSET_PX } from '../constants';
+import {
+  AI_ACTIONS,
+  MENU_OFFSET_PX,
+  TRIGGER_OFFSET_PX,
+  actionFromShortcut,
+  getActionDefinition,
+} from '../constants';
 import { useCompactTrigger } from '../hooks/use-compact-trigger';
 import { useEscapeToDismiss } from '../hooks/use-escape-to-dismiss';
 import { useOutsideClickToDismiss } from '../hooks/use-outside-click-to-dismiss';
 import { useTextSelection } from '../hooks/use-text-selection';
+import { getRankedActions, sniffRankingHints } from '../smart-actions';
 import { useSelectionToolbarStore } from '../store';
-import type { AiAction } from '../types';
+import type { AiActionDefinition } from '../types';
 import { createVirtualElement } from '../utils/dom-selection';
+import { extractFixClipboardText } from '../utils/parse-suggest-fix';
+import type { ParsedPrFinding } from '../utils/parse-pr-review';
 import { ActionMenu } from './action-menu';
+import { CustomPromptPanel } from './custom-prompt-panel';
+import { ErrorPanel } from './error-panel';
 import { FloatingTriggerButton } from './floating-trigger-button';
+import { LoadingPanel } from './loading-panel';
+import { ResultPanel } from './result-panel';
 
 export function SelectionToolbar() {
   useTextSelection();
@@ -21,11 +34,28 @@ export function SelectionToolbar() {
   const phase = useSelectionToolbarStore((s) => s.phase);
   const anchorRect = useSelectionToolbarStore((s) => s.anchorRect);
   const selectedText = useSelectionToolbarStore((s) => s.selectedText);
+  const assistant = useSelectionToolbarStore((s) => s.assistant);
+  const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
   const openMenu = useSelectionToolbarStore((s) => s.openMenu);
   const dismiss = useSelectionToolbarStore((s) => s.dismiss);
+  const openCustomPrompt = useSelectionToolbarStore((s) => s.openCustomPrompt);
+  const setCustomPromptInput = useSelectionToolbarStore((s) => s.setCustomPromptInput);
+  const backToMenu = useSelectionToolbarStore((s) => s.backToMenu);
+  const startAction = useSelectionToolbarStore((s) => s.startAction);
+  const retry = useSelectionToolbarStore((s) => s.retry);
+  const replaceSelection = useSelectionToolbarStore((s) => s.replaceSelection);
+  const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
+  const canReplace = Boolean(editableSnapshot);
+
+  const rankedActions = useMemo(() => {
+    if (!selectedText.trim()) {
+      return AI_ACTIONS;
+    }
+    return getRankedActions(selectedText, sniffRankingHints()).actions;
+  }, [selectedText]);
 
   const compactTrigger = useCompactTrigger(anchorRect);
-
+  const assistantOpen = phase === 'assistant';
   useOutsideClickToDismiss(phase !== 'hidden');
 
   const virtualAnchor = useMemo(
@@ -35,11 +65,11 @@ export function SelectionToolbar() {
 
   const { refs, floatingStyles, update } = useFloating({
     open: phase !== 'hidden',
-    placement: phase === 'menu' ? 'bottom-start' : 'top',
+    placement: assistantOpen ? 'bottom-start' : 'top',
     strategy: 'fixed',
     whileElementsMounted: autoUpdate,
     middleware: [
-      offset(phase === 'menu' ? MENU_OFFSET_PX : TRIGGER_OFFSET_PX),
+      offset(assistantOpen ? MENU_OFFSET_PX : TRIGGER_OFFSET_PX),
       flip({
         padding: 12,
         fallbackPlacements: ['top-start', 'bottom', 'top', 'right-start', 'left-start'],
@@ -57,16 +87,65 @@ export function SelectionToolbar() {
     void update();
   }, [refs, update, virtualAnchor]);
 
-  const handleAction = useCallback(
-    (action: AiAction) => {
-      dispatchAiAction(action.id, selectedText);
-      dismiss();
+  const handleSelectAction = useCallback(
+    (action: AiActionDefinition) => {
+      if (action.id === AIAction.CUSTOM) {
+        openCustomPrompt();
+        return;
+      }
+      void startAction(action.id);
     },
-    [dismiss, selectedText],
+    [openCustomPrompt, startAction],
+  );
+
+  const handleCopy = useCallback(async () => {
+    if (assistant.status !== 'success' && assistant.status !== 'streaming') {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(assistant.content);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [assistant]);
+
+  const handleCopyFix = useCallback(async () => {
+    if (assistant.status !== 'success' && assistant.status !== 'streaming') {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(extractFixClipboardText(assistant.content));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [assistant]);
+
+  const handleSuggestFix = useCallback(() => {
+    if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_CODE) {
+      return;
+    }
+    void startAction(AIAction.SUGGEST_FIX, {
+      customPrompt: `Prior review findings:\n${assistant.content.trim()}`,
+    });
+  }, [assistant, startAction]);
+
+  const handleSuggestFixForFinding = useCallback(
+    (finding: ParsedPrFinding) => {
+      if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_ENTIRE_PR) {
+        return;
+      }
+      const focus = finding.filePath ? `File: ${finding.filePath}\n` : '';
+      void startAction(AIAction.SUGGEST_FIX, {
+        customPrompt: `Prior PR finding to fix:\n${focus}${finding.raw}`,
+      });
+    },
+    [assistant, startAction],
   );
 
   useEffect(() => {
-    if (phase !== 'menu') {
+    if (!assistantOpen || assistant.status !== 'menu') {
       return;
     }
 
@@ -75,21 +154,25 @@ export function SelectionToolbar() {
         return;
       }
 
-      const action = AI_ACTIONS.find(
-        (item) => item.shortcut?.toLowerCase() === event.key.toLowerCase(),
-      );
+      // Bind by AIAction identity — never by ranked menu index.
+      const actionId = actionFromShortcut(event.key);
+      if (!actionId) {
+        return;
+      }
+
+      const action = getActionDefinition(actionId);
       if (!action) {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
-      handleAction(action);
+      handleSelectAction(action);
     };
 
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [handleAction, phase]);
+  }, [assistant.status, assistantOpen, handleSelectAction]);
 
   const visible = phase !== 'hidden' && Boolean(anchorRect);
 
@@ -101,7 +184,75 @@ export function SelectionToolbar() {
             {phase === 'trigger' ? (
               <FloatingTriggerButton key="trigger" compact={compactTrigger} onOpen={openMenu} />
             ) : null}
-            {phase === 'menu' ? <ActionMenu key="menu" onSelect={handleAction} /> : null}
+
+            {phase === 'assistant' && assistant.status === 'menu' ? (
+              <ActionMenu key="menu" actions={rankedActions} onSelect={handleSelectAction} />
+            ) : null}
+
+            {phase === 'assistant' && assistant.status === 'custom-prompt' ? (
+              <CustomPromptPanel
+                key="custom-prompt"
+                value={customPrompt}
+                onChange={setCustomPromptInput}
+                onSubmit={() => {
+                  void startAction(AIAction.CUSTOM, { customPrompt });
+                }}
+                onBack={backToMenu}
+                onClose={dismiss}
+              />
+            ) : null}
+
+            {phase === 'assistant' && assistant.status === 'loading' ? (
+              <LoadingPanel key="loading" action={assistant.action} onClose={dismiss} />
+            ) : null}
+
+            {phase === 'assistant' &&
+            (assistant.status === 'streaming' || assistant.status === 'success') ? (
+              <ResultPanel
+                key="result"
+                action={assistant.action}
+                content={assistant.content}
+                streaming={assistant.status === 'streaming'}
+                canReplace={canReplace && assistant.status === 'success'}
+                onCopy={handleCopy}
+                onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
+                onSuggestFix={
+                  assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
+                    ? handleSuggestFix
+                    : undefined
+                }
+                onSuggestFixForFinding={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
+                    ? handleSuggestFixForFinding
+                    : undefined
+                }
+                onReplace={() => {
+                  const result = replaceSelection();
+                  return {
+                    ok: result.ok,
+                    message: result.ok ? undefined : result.message,
+                  };
+                }}
+                onRetry={() => {
+                  void retry();
+                }}
+                onBack={backToMenu}
+                onClose={dismiss}
+              />
+            ) : null}
+
+            {phase === 'assistant' && assistant.status === 'error' ? (
+              <ErrorPanel
+                key="error"
+                action={assistant.action}
+                message={assistant.message}
+                onRetry={() => {
+                  void retry();
+                }}
+                onBack={backToMenu}
+                onClose={dismiss}
+              />
+            ) : null}
           </AnimatePresence>
         </div>
       ) : null}

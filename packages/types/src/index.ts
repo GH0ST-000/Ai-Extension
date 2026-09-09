@@ -170,3 +170,49 @@ export interface ExecuteAiActionResponse {
     result: string;
   };
 }
+
+/** Day 10 — structured PR review artifact (client-built from Day 9 markdown). */
+export type PRReviewRiskLevel = 'high' | 'medium' | 'low';
+
+export type PRReviewFindingSeverity = 'high' | 'medium' | 'low';
+
+export interface PRReviewFinding {
+  id: string;
+  index: number;
+  severity: PRReviewFindingSeverity;
+  filePath?: string;
+  title: string;
+  why: string;
+  /** Original markdown block for Suggest Fix follow-ups. */
+  raw: string;
+}
+
+export interface PRReviewReportStats {
+  analyzedFiles: number;
+  skippedFiles: number;
+  findings: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  suggestions: number;
+}
+
+export interface PRReviewReport {
+  repository: {
+    owner: string;
+    name: string;
+  };
+  pullRequest: {
+    number: number;
+    title?: string;
+  };
+  riskLevel: PRReviewRiskLevel;
+  overview: string;
+  stats: PRReviewReportStats;
+  findings: PRReviewFinding[];
+  reviewScope?: {
+    truncated: boolean;
+    partialFailureCount: number;
+  };
+}

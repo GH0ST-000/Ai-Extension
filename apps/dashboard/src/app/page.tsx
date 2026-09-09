@@ -51,8 +51,8 @@ export default function HomePage() {
               AI that reads the page with you.
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Highlight anything in Chrome. Smart actions, in-place replace, full PR review, and a
-              safe patch preview — without leaving the tab.
+              Highlight anything in Chrome. Smart actions, in-place replace, full PR review reports,
+              and a safe patch preview — without leaving the tab.
             </p>
 
             <div className="mt-9 flex flex-wrap gap-3">
@@ -130,19 +130,19 @@ export default function HomePage() {
             Review Entire PR
           </p>
           <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            Summary, risk findings, then a fix for one issue.
+            A structured report you can filter, resolve, and export.
           </h2>
           <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            Open the PR Files tab, highlight anything to open Ask AI, and run Review Entire PR.
-            You’ll get an overall summary plus severity-tagged findings — then Suggest Fix on a
-            single finding when you want a patch preview.
+            Open the PR Files tab, run Review Entire PR, then work the findings in a compact report:
+            filter by severity, mark items resolved for the session, generate a handoff summary, and
+            Copy Full Review as Markdown — still read-only, never posted to GitHub.
           </p>
           <ol className="mt-10 max-w-2xl space-y-4 text-sm text-ink">
             {[
               ['Files tab', 'Load the PR files so diffs are in the page'],
               ['Review Entire PR', 'Collect bounded changed-file context and stream risks'],
-              ['Inspect findings', 'Read severity, file path, and why it matters'],
-              ['Suggest Fix', 'Generate a minimal patch for one finding — Copy Fix only'],
+              ['Filter & resolve', 'Inspect findings; mark open items for this session only'],
+              ['Export', 'Copy Full Review Markdown and share manually with your team'],
             ].map(([label, detail], index) => (
               <li key={label} className="flex gap-4 border-b border-line/60 pb-4">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-ink font-display text-xs font-bold text-inverse">

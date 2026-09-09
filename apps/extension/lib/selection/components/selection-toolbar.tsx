@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AnimatePresence } from 'framer-motion';
-import { AIAction } from '@project-x/types';
+import { AIAction, type PRReviewFinding } from '@project-x/types';
 
 import {
   AI_ACTIONS,
@@ -17,9 +17,10 @@ import { useTextSelection } from '../hooks/use-text-selection';
 import { getRankedActions, sniffRankingHints } from '../smart-actions';
 import { useSelectionToolbarStore } from '../store';
 import type { AiActionDefinition } from '../types';
+import { buildPrReviewReport } from '../utils/build-pr-review-report';
 import { createVirtualElement } from '../utils/dom-selection';
+import { formatPrReviewMarkdown } from '../utils/format-pr-review-markdown';
 import { extractFixClipboardText } from '../utils/parse-suggest-fix';
-import type { ParsedPrFinding } from '../utils/parse-pr-review';
 import { ActionMenu } from './action-menu';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
@@ -36,6 +37,9 @@ export function SelectionToolbar() {
   const selectedText = useSelectionToolbarStore((s) => s.selectedText);
   const assistant = useSelectionToolbarStore((s) => s.assistant);
   const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
+  const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
+  const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
+  const resolvedFindingIds = useSelectionToolbarStore((s) => s.resolvedFindingIds);
   const openMenu = useSelectionToolbarStore((s) => s.openMenu);
   const dismiss = useSelectionToolbarStore((s) => s.dismiss);
   const openCustomPrompt = useSelectionToolbarStore((s) => s.openCustomPrompt);
@@ -44,6 +48,8 @@ export function SelectionToolbar() {
   const startAction = useSelectionToolbarStore((s) => s.startAction);
   const retry = useSelectionToolbarStore((s) => s.retry);
   const replaceSelection = useSelectionToolbarStore((s) => s.replaceSelection);
+  const setFindingFilter = useSelectionToolbarStore((s) => s.setFindingFilter);
+  const toggleFindingResolved = useSelectionToolbarStore((s) => s.toggleFindingResolved);
   const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
   const canReplace = Boolean(editableSnapshot);
 
@@ -132,7 +138,7 @@ export function SelectionToolbar() {
   }, [assistant, startAction]);
 
   const handleSuggestFixForFinding = useCallback(
-    (finding: ParsedPrFinding) => {
+    (finding: PRReviewFinding) => {
       if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_ENTIRE_PR) {
         return;
       }
@@ -143,6 +149,32 @@ export function SelectionToolbar() {
     },
     [assistant, startAction],
   );
+
+  const handleCopyFullReview = useCallback(async () => {
+    if (
+      (assistant.status !== 'success' && assistant.status !== 'streaming') ||
+      assistant.action !== AIAction.REVIEW_ENTIRE_PR
+    ) {
+      return false;
+    }
+    const report = buildPrReviewReport({
+      markdown: assistant.content,
+      context: lastReviewContext,
+    });
+    if (!report) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(
+        formatPrReviewMarkdown(report, {
+          resolvedIds: new Set(resolvedFindingIds),
+        }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }, [assistant, lastReviewContext, resolvedFindingIds]);
 
   useEffect(() => {
     if (!assistantOpen || assistant.status !== 'menu') {
@@ -214,8 +246,16 @@ export function SelectionToolbar() {
                 content={assistant.content}
                 streaming={assistant.status === 'streaming'}
                 canReplace={canReplace && assistant.status === 'success'}
+                reviewContext={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
+                }
+                findingFilter={findingFilter}
+                resolvedFindingIds={resolvedFindingIds}
                 onCopy={handleCopy}
                 onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
+                onCopyFullReview={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopyFullReview : undefined
+                }
                 onSuggestFix={
                   assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
                     ? handleSuggestFix
@@ -226,6 +266,8 @@ export function SelectionToolbar() {
                     ? handleSuggestFixForFinding
                     : undefined
                 }
+                onFindingFilterChange={setFindingFilter}
+                onToggleFindingResolved={toggleFindingResolved}
                 onReplace={() => {
                   const result = replaceSelection();
                   return {

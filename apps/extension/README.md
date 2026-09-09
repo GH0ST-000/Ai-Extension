@@ -38,6 +38,17 @@ On a GitHub PR (best on the **Files** tab), **Review Entire PR** (`REVIEW_ENTIRE
 
 Limits: only files currently loaded in the page, capped file count / excerpt size — incomplete PRs set `changedFilesTruncated`.
 
+## Day 10 — PR Review Report + handoff
+
+After Review Entire PR finishes, the result panel becomes a **compact review report** (still ~400px — not a dashboard):
+
+- Repo / PR header, risk level, and compact stats
+- Filter findings: All · High · Med · Low · Open
+- Session-only **Resolve / Reopen** (cleared on dismiss or a new PR review)
+- Client-built **Review summary** + **Copy Full Review** (Markdown export for manual sharing)
+
+No GitHub write access — export is clipboard-only. Types live in `@project-x/types` (`PRReviewReport` / `PRReviewFinding`); the report is assembled client-side from Day 9 markdown + page context.
+
 ## Day 6 — In-place Replace
 
 When the selection is inside an editable field (`textarea`, supported text-like `input`s, or `contenteditable`), the result panel shows **Replace**.

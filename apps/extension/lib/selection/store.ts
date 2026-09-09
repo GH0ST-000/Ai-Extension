@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AIAction } from '@project-x/types';
+import { AIAction, type PageContext } from '@project-x/types';
 
 import {
   captureEditableSelectionSnapshot,
@@ -11,6 +11,7 @@ import { extractPageContext } from '../context/extract-page-context';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
 import { USER_FACING_AI_ERROR } from './constants';
 import type { AssistantView, SelectionRect, ToolbarPhase } from './types';
+import type { PrFindingFilter } from './utils/build-pr-review-report';
 import { extractFixClipboardText } from './utils/parse-suggest-fix';
 
 type SelectionToolbarState = {
@@ -22,6 +23,11 @@ type SelectionToolbarState = {
   customPrompt: string;
   requestId: number;
   abortController: AbortController | null;
+  /** Page context captured for the latest REVIEW_ENTIRE_PR run. */
+  lastReviewContext: PageContext | null;
+  /** Session-only finding resolution (cleared on dismiss / new PR review). */
+  resolvedFindingIds: string[];
+  findingFilter: PrFindingFilter;
   showTrigger: (text: string, rect: SelectionRect) => void;
   updateAnchor: (rect: SelectionRect) => void;
   openMenu: () => void;
@@ -34,6 +40,9 @@ type SelectionToolbarState = {
   retry: () => Promise<void>;
   replaceSelection: () => ReplacementResult;
   cancelActiveRequest: () => void;
+  setFindingFilter: (filter: PrFindingFilter) => void;
+  toggleFindingResolved: (findingId: string) => void;
+  clearFindingResolutions: () => void;
 };
 
 const MENU_VIEW: AssistantView = { status: 'menu' };
@@ -47,6 +56,9 @@ const INITIAL_STATE = {
   customPrompt: '',
   requestId: 0,
   abortController: null as AbortController | null,
+  lastReviewContext: null as PageContext | null,
+  resolvedFindingIds: [] as string[],
+  findingFilter: 'all' as PrFindingFilter,
 };
 
 function isAbortError(error: unknown): boolean {
@@ -222,6 +234,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     }
 
     const editableSnapshot = resolveEditableSnapshot(selectedText, get().editableSnapshot);
+    const resetReviewSession = action === AIAction.REVIEW_ENTIRE_PR;
 
     set({
       phase: 'assistant',
@@ -233,12 +246,22 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           ? (prompt ?? '')
           : get().customPrompt,
       assistant: { status: 'loading', action },
+      ...(resetReviewSession
+        ? {
+            resolvedFindingIds: [],
+            findingFilter: 'all' as const,
+            lastReviewContext: null,
+          }
+        : {}),
     });
 
     let receivedChunk = false;
 
     try {
       const pageContext = extractPageContext();
+      if (action === AIAction.REVIEW_ENTIRE_PR) {
+        set({ lastReviewContext: pageContext });
+      }
       const finalText = await streamAiAction(
         buildAiRequest({
           action,
@@ -346,5 +369,24 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
       });
     }
     return result;
+  },
+
+  setFindingFilter: (filter) => {
+    set({ findingFilter: filter });
+  },
+
+  toggleFindingResolved: (findingId) => {
+    set((state) => {
+      const exists = state.resolvedFindingIds.includes(findingId);
+      return {
+        resolvedFindingIds: exists
+          ? state.resolvedFindingIds.filter((id) => id !== findingId)
+          : [...state.resolvedFindingIds, findingId],
+      };
+    });
+  },
+
+  clearFindingResolutions: () => {
+    set({ resolvedFindingIds: [] });
   },
 }));

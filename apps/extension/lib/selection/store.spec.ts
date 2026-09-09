@@ -30,6 +30,7 @@ describe('selection toolbar store AI flow', () => {
       phase: 'hidden',
       selectedText: '',
       anchorRect: null,
+      editableSnapshot: null,
       assistant: { status: 'menu' },
       customPrompt: '',
       requestId: 0,

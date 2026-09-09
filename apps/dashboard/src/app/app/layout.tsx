@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { BrandMark } from '../../components/brand-mark';
 import { DashboardNav } from '../../components/dashboard-nav';
 import { AuthGate, useAuthUser } from '../../components/auth-gate';
+import { ThemeToggle } from '../../components/theme-toggle';
 import { clearSession } from '../../lib/auth-storage';
 
 function DashboardShell({ children }: { children: ReactNode }) {
@@ -39,10 +40,10 @@ function DashboardShell({ children }: { children: ReactNode }) {
           <DashboardNav />
 
           <div className="mt-auto space-y-3 pt-8">
-            <div className="rounded-2xl bg-ink px-4 py-4 text-white">
+            <div className="rounded-2xl bg-ink px-4 py-4 text-inverse">
               <p className="font-display text-sm font-semibold tracking-tight">Browser AI</p>
-              <p className="mt-1 text-[12px] leading-relaxed text-white/70">
-                Select text anywhere. Project X brings page context into the answer.
+              <p className="mt-1 text-[12px] leading-relaxed text-inverse/70">
+                Smart actions, Replace, Review Entire PR, and Suggest Fix — from the selection.
               </p>
             </div>
             <p className="truncate px-1 text-[11px] text-muted-foreground">
@@ -63,14 +64,15 @@ function DashboardShell({ children }: { children: ReactNode }) {
               <p className="font-display text-sm font-semibold tracking-tight">Personal studio</p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="hidden max-w-[180px] truncate items-center gap-2 rounded-full border border-line bg-white/70 px-3 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+              <ThemeToggle compact />
+              <span className="hidden max-w-[160px] truncate items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1 text-[11px] font-medium text-muted-foreground lg:inline-flex">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                 {user?.email ?? 'Account'}
               </span>
               <button
                 type="button"
                 onClick={signOut}
-                className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-ink/90"
+                className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90"
               >
                 Sign out
               </button>
@@ -80,13 +82,13 @@ function DashboardShell({ children }: { children: ReactNode }) {
           <div className="mt-0 flex gap-2 overflow-x-auto px-4 py-3 md:hidden">
             <Link
               href="/app"
-              className="shrink-0 rounded-full border border-line bg-white/80 px-3 py-1.5 text-xs font-semibold"
+              className="shrink-0 rounded-full border border-line bg-panel/80 px-3 py-1.5 text-xs font-semibold"
             >
               Overview
             </Link>
             <Link
               href="/app/settings"
-              className="shrink-0 rounded-full border border-line bg-white/80 px-3 py-1.5 text-xs font-semibold"
+              className="shrink-0 rounded-full border border-line bg-panel/80 px-3 py-1.5 text-xs font-semibold"
             >
               Settings
             </Link>

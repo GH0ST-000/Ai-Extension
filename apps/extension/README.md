@@ -8,6 +8,42 @@ Ask AI requires a signed-in account. Use the extension popup to **register** or 
 
 Tune response length, style, and page context from the dashboard **Settings** page (`/app/settings`).
 
+## Day 5 — Smart action ranking
+
+Action order adapts to the selection using **local heuristics only** (no AI call before the user picks an action):
+
+1. Classify selection → `code` | `error` | `prose` | `short-text` | `structured-data` | `unknown`
+2. Rank the existing catalog actions (nothing removed)
+3. Render the menu (and keyboard shortcuts) in that order
+
+GitHub / `pre`/`code` hints promote **Explain Code** when appropriate. Implementation: `lib/selection/smart-actions/`.
+
+Keyboard shortcuts (`E I S T C R F A P`) always map to **AIAction** identities via `SHORTCUT_TO_ACTION` — never to the visible menu index after ranking.
+
+## Day 7 — GitHub intelligence
+
+On GitHub PRs and file views, Project X extracts richer context (PR title/body, base/head when available, nearby diff hunk / file path) and adds **Code Review** (`REVIEW_CODE`, shortcut `R`).
+
+On PR diffs, Smart Actions promote **Review Entire PR → Code Review → Suggest Fix**. Streaming still uses the existing NestJS / Vercel AI SDK path — no parallel GitHub backend.
+
+## Day 8 — Suggest Fix + patch preview
+
+After **Code Review**, the result panel offers **Suggest Fix** (`SUGGEST_FIX`, shortcut `F`). The model returns a minimal corrected snippet; the UI shows a **patch preview** and **Copy Fix** (clipboard only — no GitHub write / OAuth).
+
+You can also run Suggest Fix directly from the menu. Prior review text is passed as `customPrompt` when launched from the review panel.
+
+## Day 9 — Review Entire PR
+
+On a GitHub PR (best on the **Files** tab), **Review Entire PR** (`REVIEW_ENTIRE_PR`, shortcut `A`) collects a **bounded** multi-file slice from the DOM (`changedFiles` on `PageContextGitHub`), streams a **Summary + Risk Findings**, and lets you **Suggest Fix** per finding.
+
+Limits: only files currently loaded in the page, capped file count / excerpt size — incomplete PRs set `changedFilesTruncated`.
+
+## Day 6 — In-place Replace
+
+When the selection is inside an editable field (`textarea`, supported text-like `input`s, or `contenteditable`), the result panel shows **Replace**.
+
+Flow: capture editable snapshot → run AI → **Replace** writes the result back into the original field (native value setter + input/change events). Password / disabled / readonly fields are never modified. DOM logic lives in `lib/editing/` — not in React components and not on the API.
+
 ## Day 4 — Context-aware AI
 
 Before each AI request, the extension extracts a limited **page context** object:
@@ -50,7 +86,9 @@ All actions call `POST {PLASMO_PUBLIC_API_URL}/api/ai/actions/stream`. The API k
 contents/selection-toolbar.tsx   Plasmo CSUI entry (shadow DOM + Tailwind)
 lib/services/ai-client.ts        Typed streaming fetch client
 lib/context/                     Page context extractors (generic + GitHub)
+lib/editing/                     Editable detect + safe in-place replace (Day 6)
 lib/selection/
+  smart-actions/                 Content classifier + action ranking (Day 5)
   store.ts                       Zustand assistant view state
   hooks/                         Selection + dismiss behaviors
   components/                    FAB, menu, loading, result, error, custom prompt

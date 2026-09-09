@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -15,9 +17,12 @@ import { Transform, Type } from 'class-transformer';
 import { AIAction, PAGE_CONTEXT_TYPES } from '@project-x/types';
 
 import {
+  AI_DEFAULT_MAX_CHANGED_FILE_EXCERPT_CHARACTERS,
+  AI_DEFAULT_MAX_CHANGED_FILES,
   AI_DEFAULT_MAX_CONTEXT_CODE_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_DESCRIPTION_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS,
+  AI_DEFAULT_MAX_CONTEXT_PR_BODY_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_SURROUNDING_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_URL_CHARACTERS,
@@ -78,6 +83,20 @@ export class PageContextCodeDto {
   surroundingCode?: string | null;
 }
 
+export class PageContextChangedFileDto {
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS)
+  path!: string;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CHANGED_FILE_EXCERPT_CHARACTERS)
+  patchExcerpt?: string | null;
+}
+
 export class PageContextGitHubDto {
   @Transform(emptyToNull)
   @IsOptional()
@@ -114,6 +133,38 @@ export class PageContextGitHubDto {
   @Min(1)
   @Max(10_000_000)
   pullRequestNumber?: number | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_PR_BODY_CHARACTERS)
+  pullRequestBody?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  baseBranch?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  headBranch?: string | null;
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => PageContextChangedFileDto)
+  @ArrayMaxSize(AI_DEFAULT_MAX_CHANGED_FILES)
+  changedFiles?: PageContextChangedFileDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  changedFilesTruncated?: boolean | null;
+
+  @IsOptional()
+  @IsBoolean()
+  filesTab?: boolean | null;
 }
 
 export class PageContextDto {

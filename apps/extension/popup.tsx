@@ -8,6 +8,47 @@ import { getSession } from './lib/services/auth-storage';
 
 type Mode = 'login' | 'register';
 
+function BrandHeader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+      <svg width={36} height={36} viewBox="0 0 128 128" aria-hidden style={{ borderRadius: 12 }}>
+        <rect width="128" height="128" rx="32" fill="#0B1220" />
+        <g fill="none" stroke="#14B8A6" strokeWidth="18" strokeLinecap="round">
+          <path d="M34 34 L94 94" />
+          <path d="M94 34 L34 94" />
+        </g>
+        <circle cx="94" cy="34" r="9" fill="#F59E0B" />
+        <circle cx="94" cy="34" r="3.5" fill="#FFF7ED" fillOpacity="0.9" />
+      </svg>
+      <div>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            color: '#0f172a',
+          }}
+        >
+          {APP_NAME}
+        </p>
+        <p
+          style={{
+            margin: '2px 0 0',
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: '#64748b',
+          }}
+        >
+          Studio
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function IndexPopup() {
   const [mode, setMode] = useState<Mode>('login');
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -66,7 +107,8 @@ function IndexPopup() {
   if (loading) {
     return (
       <div style={shellStyle}>
-        <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Loading…</p>
+        <BrandHeader />
+        <p style={{ margin: '12px 0 0', fontSize: 13, color: '#64748b' }}>Loading…</p>
       </div>
     );
   }
@@ -74,7 +116,7 @@ function IndexPopup() {
   if (user) {
     return (
       <div style={shellStyle}>
-        <p style={eyebrowStyle}>{APP_NAME}</p>
+        <BrandHeader />
         <h1 style={titleStyle}>Signed in</h1>
         <p style={bodyStyle}>
           {user.name?.trim() ? `${user.name} · ` : ''}
@@ -93,7 +135,7 @@ function IndexPopup() {
 
   return (
     <div style={shellStyle}>
-      <p style={eyebrowStyle}>{APP_NAME}</p>
+      <BrandHeader />
       <h1 style={titleStyle}>{mode === 'login' ? 'Sign in' : 'Create account'}</h1>
       <p style={bodyStyle}>
         Authentication is required for Ask AI. Use the same account as the dashboard.
@@ -163,15 +205,6 @@ const shellStyle: CSSProperties = {
   padding: 16,
   fontFamily: 'ui-sans-serif, system-ui, sans-serif',
   color: '#0f172a',
-};
-
-const eyebrowStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 11,
-  fontWeight: 600,
-  letterSpacing: '0.16em',
-  textTransform: 'uppercase',
-  color: '#64748b',
 };
 
 const titleStyle: CSSProperties = {

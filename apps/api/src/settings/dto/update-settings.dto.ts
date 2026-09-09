@@ -1,5 +1,5 @@
-import { IsBoolean, IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
-import { ResponseStyle } from '@prisma/client';
+import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { RESPONSE_STYLES, type ResponseStyle } from '@project-x/types';
 
 export class UpdateSettingsDto {
   @IsOptional()
@@ -9,7 +9,7 @@ export class UpdateSettingsDto {
   maxOutputTokens?: number;
 
   @IsOptional()
-  @IsEnum(ResponseStyle)
+  @IsIn(RESPONSE_STYLES)
   responseStyle?: ResponseStyle;
 
   @IsOptional()

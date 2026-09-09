@@ -36,10 +36,28 @@ export enum AIAction {
   SUMMARIZE = 'SUMMARIZE',
   TRANSLATE = 'TRANSLATE',
   EXPLAIN_CODE = 'EXPLAIN_CODE',
+  REVIEW_CODE = 'REVIEW_CODE',
+  SUGGEST_FIX = 'SUGGEST_FIX',
+  REVIEW_ENTIRE_PR = 'REVIEW_ENTIRE_PR',
   CUSTOM = 'CUSTOM',
 }
 
 export const AI_ACTION_VALUES = Object.values(AIAction) as AIAction[];
+
+/**
+ * Lightweight content classification for smart action ranking (extension-local heuristics).
+ * Not sent to the API unless a future feature needs it.
+ */
+export type ContentType = 'code' | 'error' | 'prose' | 'short-text' | 'structured-data' | 'unknown';
+
+export const CONTENT_TYPES = [
+  'code',
+  'error',
+  'prose',
+  'short-text',
+  'structured-data',
+  'unknown',
+] as const;
 
 /**
  * Page context collected in the extension and sent with AI requests.
@@ -60,6 +78,13 @@ export interface PageContextCode {
   surroundingCode?: string;
 }
 
+export interface PageContextChangedFile {
+  /** Repo-relative path of a changed file. */
+  path: string;
+  /** Bounded excerpt of visible diff lines for this file. */
+  patchExcerpt?: string;
+}
+
 export interface PageContextGitHub {
   owner?: string;
   repository?: string;
@@ -67,6 +92,19 @@ export interface PageContextGitHub {
   filePath?: string;
   pullRequestTitle?: string;
   pullRequestNumber?: number;
+  /** Truncated PR description / body for review context. */
+  pullRequestBody?: string;
+  baseBranch?: string;
+  headBranch?: string;
+  /**
+   * Bounded multi-file slice from the PR Files tab (Day 9).
+   * Only includes files currently present in the DOM.
+   */
+  changedFiles?: PageContextChangedFile[];
+  /** True when more files/lines existed than the budget allowed. */
+  changedFilesTruncated?: boolean;
+  /** True when the URL looks like the PR Files tab. */
+  filesTab?: boolean;
 }
 
 export interface PageContext {

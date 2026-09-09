@@ -93,6 +93,26 @@ export function formatPageContext(
           : `#${g.pullRequestNumber}`,
       );
     }
+    if (g.baseBranch || g.headBranch) {
+      pushLine(lines, 'branches', `${g.baseBranch ?? '?'}←${g.headBranch ?? '?'}`);
+    }
+    pushLine(lines, 'prBody', g.pullRequestBody);
+    if (g.filesTab != null) {
+      pushLine(lines, 'filesTab', g.filesTab ? '1' : '0');
+    }
+    if (g.changedFilesTruncated) {
+      pushLine(lines, 'filesTruncated', '1');
+    }
+    if (g.changedFiles && g.changedFiles.length > 0) {
+      const fileBlocks = g.changedFiles.map((file, index) => {
+        const excerpt = file.patchExcerpt?.trim();
+        return excerpt
+          ? `file${index + 1}:${file.path}\n${excerpt}`
+          : `file${index + 1}:${file.path}`;
+      });
+      lines.push(`files:${g.changedFiles.length}`);
+      lines.push(fileBlocks.join('\n---\n'));
+    }
   }
 
   if (lines.length === 0) {

@@ -26,6 +26,10 @@ module.exports = {
         },
         spark: 'hsl(var(--spark))',
         line: 'hsl(var(--line))',
+        inverse: {
+          DEFAULT: 'hsl(var(--inverse))',
+          foreground: 'hsl(var(--inverse-fg))',
+        },
       },
       fontFamily: {
         display: ['var(--font-display)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
@@ -37,8 +41,8 @@ module.exports = {
         sm: '0.375rem',
       },
       boxShadow: {
-        panel: '0 1px 0 hsl(222 47% 8% / 0.04), 0 18px 40px -28px hsl(222 47% 8% / 0.35)',
-        soft: '0 10px 30px -22px hsl(173 80% 20% / 0.35)',
+        panel: 'var(--shadow-panel)',
+        soft: 'var(--shadow-soft)',
       },
     },
   },

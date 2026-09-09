@@ -9,7 +9,7 @@ const navItems = [
 ] as const;
 
 export function DashboardNav() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
 
   return (
     <nav className="space-y-1" aria-label="Dashboard">
@@ -24,7 +24,7 @@ export function DashboardNav() {
               'group flex flex-col rounded-xl px-3 py-2.5 transition-colors duration-200',
               active
                 ? 'bg-accent-soft text-ink'
-                : 'text-muted-foreground hover:bg-white/70 hover:text-ink',
+                : 'text-muted-foreground hover:bg-panel/70 hover:text-ink',
             ].join(' ')}
           >
             <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">

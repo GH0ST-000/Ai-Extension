@@ -10,6 +10,9 @@ import { customPrompt } from './custom.prompt';
 import { explainCodePrompt } from './explain-code.prompt';
 import { explainPrompt } from './explain.prompt';
 import { improveWritingPrompt } from './improve-writing.prompt';
+import { reviewCodePrompt } from './review-code.prompt';
+import { reviewEntirePrPrompt } from './review-entire-pr.prompt';
+import { suggestFixPrompt } from './suggest-fix.prompt';
 import { summarizePrompt } from './summarize.prompt';
 import { translatePrompt } from './translate.prompt';
 
@@ -24,6 +27,9 @@ export class PromptRegistry {
       summarizePrompt,
       translatePrompt,
       explainCodePrompt,
+      reviewCodePrompt,
+      suggestFixPrompt,
+      reviewEntirePrPrompt,
       customPrompt,
     ];
 

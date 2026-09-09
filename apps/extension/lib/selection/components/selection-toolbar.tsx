@@ -3,14 +3,23 @@ import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react
 import { AnimatePresence } from 'framer-motion';
 import { AIAction } from '@project-x/types';
 
-import { AI_ACTIONS, MENU_OFFSET_PX, TRIGGER_OFFSET_PX } from '../constants';
+import {
+  AI_ACTIONS,
+  MENU_OFFSET_PX,
+  TRIGGER_OFFSET_PX,
+  actionFromShortcut,
+  getActionDefinition,
+} from '../constants';
 import { useCompactTrigger } from '../hooks/use-compact-trigger';
 import { useEscapeToDismiss } from '../hooks/use-escape-to-dismiss';
 import { useOutsideClickToDismiss } from '../hooks/use-outside-click-to-dismiss';
 import { useTextSelection } from '../hooks/use-text-selection';
+import { getRankedActions, sniffRankingHints } from '../smart-actions';
 import { useSelectionToolbarStore } from '../store';
 import type { AiActionDefinition } from '../types';
 import { createVirtualElement } from '../utils/dom-selection';
+import { extractFixClipboardText } from '../utils/parse-suggest-fix';
+import type { ParsedPrFinding } from '../utils/parse-pr-review';
 import { ActionMenu } from './action-menu';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
@@ -24,6 +33,7 @@ export function SelectionToolbar() {
 
   const phase = useSelectionToolbarStore((s) => s.phase);
   const anchorRect = useSelectionToolbarStore((s) => s.anchorRect);
+  const selectedText = useSelectionToolbarStore((s) => s.selectedText);
   const assistant = useSelectionToolbarStore((s) => s.assistant);
   const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
   const openMenu = useSelectionToolbarStore((s) => s.openMenu);
@@ -33,6 +43,16 @@ export function SelectionToolbar() {
   const backToMenu = useSelectionToolbarStore((s) => s.backToMenu);
   const startAction = useSelectionToolbarStore((s) => s.startAction);
   const retry = useSelectionToolbarStore((s) => s.retry);
+  const replaceSelection = useSelectionToolbarStore((s) => s.replaceSelection);
+  const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
+  const canReplace = Boolean(editableSnapshot);
+
+  const rankedActions = useMemo(() => {
+    if (!selectedText.trim()) {
+      return AI_ACTIONS;
+    }
+    return getRankedActions(selectedText, sniffRankingHints()).actions;
+  }, [selectedText]);
 
   const compactTrigger = useCompactTrigger(anchorRect);
   const assistantOpen = phase === 'assistant';
@@ -90,6 +110,40 @@ export function SelectionToolbar() {
     }
   }, [assistant]);
 
+  const handleCopyFix = useCallback(async () => {
+    if (assistant.status !== 'success' && assistant.status !== 'streaming') {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(extractFixClipboardText(assistant.content));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [assistant]);
+
+  const handleSuggestFix = useCallback(() => {
+    if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_CODE) {
+      return;
+    }
+    void startAction(AIAction.SUGGEST_FIX, {
+      customPrompt: `Prior review findings:\n${assistant.content.trim()}`,
+    });
+  }, [assistant, startAction]);
+
+  const handleSuggestFixForFinding = useCallback(
+    (finding: ParsedPrFinding) => {
+      if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_ENTIRE_PR) {
+        return;
+      }
+      const focus = finding.filePath ? `File: ${finding.filePath}\n` : '';
+      void startAction(AIAction.SUGGEST_FIX, {
+        customPrompt: `Prior PR finding to fix:\n${focus}${finding.raw}`,
+      });
+    },
+    [assistant, startAction],
+  );
+
   useEffect(() => {
     if (!assistantOpen || assistant.status !== 'menu') {
       return;
@@ -100,9 +154,13 @@ export function SelectionToolbar() {
         return;
       }
 
-      const action = AI_ACTIONS.find(
-        (item) => item.shortcut?.toLowerCase() === event.key.toLowerCase(),
-      );
+      // Bind by AIAction identity — never by ranked menu index.
+      const actionId = actionFromShortcut(event.key);
+      if (!actionId) {
+        return;
+      }
+
+      const action = getActionDefinition(actionId);
       if (!action) {
         return;
       }
@@ -128,7 +186,7 @@ export function SelectionToolbar() {
             ) : null}
 
             {phase === 'assistant' && assistant.status === 'menu' ? (
-              <ActionMenu key="menu" onSelect={handleSelectAction} />
+              <ActionMenu key="menu" actions={rankedActions} onSelect={handleSelectAction} />
             ) : null}
 
             {phase === 'assistant' && assistant.status === 'custom-prompt' ? (
@@ -155,7 +213,26 @@ export function SelectionToolbar() {
                 action={assistant.action}
                 content={assistant.content}
                 streaming={assistant.status === 'streaming'}
+                canReplace={canReplace && assistant.status === 'success'}
                 onCopy={handleCopy}
+                onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
+                onSuggestFix={
+                  assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
+                    ? handleSuggestFix
+                    : undefined
+                }
+                onSuggestFixForFinding={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
+                    ? handleSuggestFixForFinding
+                    : undefined
+                }
+                onReplace={() => {
+                  const result = replaceSelection();
+                  return {
+                    ok: result.ok,
+                    message: result.ok ? undefined : result.message,
+                  };
+                }}
                 onRetry={() => {
                   void retry();
                 }}

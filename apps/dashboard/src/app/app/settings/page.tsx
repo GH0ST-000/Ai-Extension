@@ -108,13 +108,13 @@ export default function SettingsPage() {
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Assistant</h2>
 
         {loading ? (
-          <div className="rounded-3xl border border-line bg-white/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
+          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
             Loading settings…
           </div>
         ) : draft ? (
           <form
             onSubmit={onSubmit}
-            className="overflow-hidden rounded-3xl border border-line bg-white/75 shadow-panel"
+            className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel"
           >
             <div className="flex flex-col gap-3 border-b border-line/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -196,16 +196,16 @@ export default function SettingsPage() {
               <button
                 type="submit"
                 disabled={saving || !dirty}
-                className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:opacity-50"
+                className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
               >
                 {saving ? 'Saving…' : 'Save changes'}
               </button>
               {message ? <p className="text-sm text-accent">{message}</p> : null}
-              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+              {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
             </div>
           </form>
         ) : (
-          <div className="rounded-3xl border border-line bg-white/75 px-5 py-8 text-sm text-red-600 shadow-panel">
+          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-red-600 dark:text-red-400 shadow-panel">
             {error ?? 'Settings unavailable.'}
           </div>
         )}
@@ -213,7 +213,7 @@ export default function SettingsPage() {
 
       <section className="rise-in-delay-2 space-y-3">
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Account</h2>
-        <div className="rounded-3xl border border-line bg-white/75 p-6 shadow-panel">
+        <div className="rounded-3xl border border-line bg-panel/75 p-6 shadow-panel">
           <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="font-display text-xl font-semibold tracking-tight text-ink">
@@ -229,7 +229,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={signOut}
-              className="inline-flex rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist"
+              className="inline-flex rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist"
             >
               Sign out
             </button>
@@ -249,7 +249,7 @@ export default function SettingsPage() {
             OpenAI keys never ship in the extension. Selected text is not written to product logs.
           </p>
         </div>
-        <div className="rounded-3xl border border-line bg-white/70 p-6 shadow-panel">
+        <div className="rounded-3xl border border-line bg-panel/70 p-6 shadow-panel">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Cost control
           </p>

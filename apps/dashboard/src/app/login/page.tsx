@@ -8,6 +8,7 @@ import { APP_NAME } from '@project-x/shared';
 
 import { ApiError, login, register } from '../../lib/api';
 import { BrandMark } from '../../components/brand-mark';
+import { ThemeToggle } from '../../components/theme-toggle';
 
 type Mode = 'login' | 'register';
 
@@ -51,6 +52,10 @@ export default function LoginPage() {
         aria-hidden
       />
 
+      <div className="absolute right-6 top-6 z-10">
+        <ThemeToggle compact />
+      </div>
+
       <div className="relative w-full max-w-md rise-in">
         <div className="mb-8 flex justify-center">
           <BrandMark size="lg" />
@@ -83,7 +88,7 @@ export default function LoginPage() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="Optional"
-                  className="w-full rounded-xl border border-line bg-white/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
+                  className="w-full rounded-xl border border-line bg-panel/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
                 />
               </div>
             ) : null}
@@ -101,7 +106,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="you@company.com"
-                className="w-full rounded-xl border border-line bg-white/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
+                className="w-full rounded-xl border border-line bg-panel/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
               />
             </div>
 
@@ -119,18 +124,18 @@ export default function LoginPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="At least 8 characters"
-                className="w-full rounded-xl border border-line bg-white/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
+                className="w-full rounded-xl border border-line bg-panel/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
               />
             </div>
 
             {error ? (
-              <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
                 {error}
               </p>
             ) : null}
 
             <button
-              className="w-full rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:opacity-60"
+              className="w-full rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-60"
               disabled={pending}
               type="submit"
             >

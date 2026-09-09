@@ -24,6 +24,16 @@ describe('parseGitHubUrl', () => {
     expect(parseGitHubUrl(new URL('https://github.com/acme/app/pull/42'))).toEqual({
       owner: 'acme',
       repository: 'app',
+      isPullRequest: true,
+      pullRequestNumber: 42,
+    });
+  });
+
+  it('parses pull request files tab URLs', () => {
+    expect(parseGitHubUrl(new URL('https://github.com/acme/app/pull/42/files'))).toEqual({
+      owner: 'acme',
+      repository: 'app',
+      isPullRequest: true,
       pullRequestNumber: 42,
     });
   });

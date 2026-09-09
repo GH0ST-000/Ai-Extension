@@ -122,7 +122,7 @@ export function HealthCheckButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-xl border border-line bg-white/80 px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-white"
+        className="rounded-xl border border-line bg-panel/80 px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-panel"
       >
         Check API health
       </button>
@@ -135,7 +135,7 @@ export function HealthCheckButton() {
           <button
             type="button"
             aria-label="Close health dialog"
-            className="fixed inset-0 bg-ink/45 backdrop-blur-[6px] health-backdrop-in"
+            className="fixed inset-0 bg-black/45 backdrop-blur-[6px] health-backdrop-in"
             onClick={() => setOpen(false)}
           />
 
@@ -143,7 +143,7 @@ export function HealthCheckButton() {
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}
-            className="relative z-10 my-auto w-full max-w-lg rounded-[1.75rem] border border-line bg-white shadow-[0_28px_80px_-24px_rgba(15,23,42,0.45)] health-panel-in"
+            className="relative z-10 my-auto w-full max-w-lg rounded-[1.75rem] border border-line bg-panel shadow-panel health-panel-in"
           >
             <div
               className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.75rem]"
@@ -248,7 +248,7 @@ export function HealthCheckButton() {
                       return (
                         <div
                           key={name}
-                          className="flex min-h-[7.5rem] flex-col rounded-2xl border border-line/90 bg-white px-5 py-5 health-card-in"
+                          className="flex min-h-[7.5rem] flex-col rounded-2xl border border-line/90 bg-panel-soft px-5 py-5 health-card-in"
                           style={{ animationDelay: `${80 + index * 70}ms` }}
                         >
                           <div className="flex items-center justify-between gap-3">
@@ -281,7 +281,7 @@ export function HealthCheckButton() {
                 type="button"
                 onClick={() => void refresh()}
                 disabled={state.kind === 'loading'}
-                className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:opacity-50"
+                className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
               >
                 {state.kind === 'loading' ? 'Checking…' : 'Refresh'}
               </button>

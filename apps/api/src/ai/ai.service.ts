@@ -191,6 +191,15 @@ export class AiService {
             filePath: context.github.filePath ?? undefined,
             pullRequestTitle: context.github.pullRequestTitle ?? undefined,
             pullRequestNumber: context.github.pullRequestNumber ?? undefined,
+            pullRequestBody: context.github.pullRequestBody ?? undefined,
+            baseBranch: context.github.baseBranch ?? undefined,
+            headBranch: context.github.headBranch ?? undefined,
+            changedFiles: context.github.changedFiles?.slice(0, 12).map((file) => ({
+              path: file.path,
+              patchExcerpt: file.patchExcerpt ?? undefined,
+            })),
+            changedFilesTruncated: context.github.changedFilesTruncated ?? undefined,
+            filesTab: context.github.filesTab ?? undefined,
           }
         : undefined,
     };

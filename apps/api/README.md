@@ -98,9 +98,9 @@ Send `Authorization: Bearer <accessToken>` on protected routes.
 
 The API never scrapes websites. It only consumes the normalized context object from the extension and injects it into prompts inside `<<CTX>>` delimiters.
 
-Supported `action` values: `EXPLAIN`, `IMPROVE_WRITING`, `SUMMARIZE`, `TRANSLATE`, `EXPLAIN_CODE`, `CUSTOM`.
+Supported `action` values: `EXPLAIN`, `IMPROVE_WRITING`, `SUMMARIZE`, `TRANSLATE`, `EXPLAIN_CODE`, `REVIEW_CODE`, `SUGGEST_FIX`, `REVIEW_ENTIRE_PR`, `CUSTOM`.
 
-`CUSTOM` requires a non-empty `customPrompt`.
+`CUSTOM` requires a non-empty `customPrompt`. `SUGGEST_FIX` may include optional `customPrompt` with prior review findings. `REVIEW_ENTIRE_PR` uses `context.github.changedFiles` when present.
 
 Response: `Content-Type: text/plain; charset=utf-8` progressive text stream.
 

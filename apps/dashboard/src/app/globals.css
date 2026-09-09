@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+
   /* Signal Studio — cool mist + ink + teal accent */
   --background: 214 40% 97%;
   --foreground: 222 47% 8%;
@@ -21,8 +23,53 @@
   --spark: 28 95% 55%;
   --line: 214 24% 86%;
 
+  --inverse: 0 0% 100%;
+  --inverse-fg: 222 47% 8%;
+
+  --atmosphere-a: 173 70% 70% / 0.28;
+  --atmosphere-b: 210 90% 78% / 0.35;
+  --atmosphere-c: 28 90% 70% / 0.14;
+  --atmosphere-from: 214 40% 98%;
+  --atmosphere-to: 214 32% 95%;
+
+  --shadow-panel: 0 1px 0 hsl(222 47% 8% / 0.04), 0 18px 40px -28px hsl(222 47% 8% / 0.35);
+  --shadow-soft: 0 10px 30px -22px hsl(173 80% 20% / 0.35);
+
   --font-display: 'Syne', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Figtree', ui-sans-serif, system-ui, sans-serif;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: 222 28% 7%;
+  --foreground: 210 40% 96%;
+  --muted: 222 22% 14%;
+  --muted-foreground: 215 14% 65%;
+  --border: 222 16% 22%;
+  --ring: 173 65% 42%;
+
+  --ink: 210 40% 96%;
+  --mist: 222 28% 7%;
+  --panel: 222 24% 11%;
+  --panel-soft: 222 22% 14%;
+  --accent: 173 70% 42%;
+  --accent-soft: 173 40% 16%;
+  --accent-foreground: 0 0% 100%;
+  --spark: 28 95% 58%;
+  --line: 222 16% 22%;
+
+  --inverse: 222 28% 7%;
+  --inverse-fg: 210 40% 96%;
+
+  --atmosphere-a: 173 55% 35% / 0.22;
+  --atmosphere-b: 210 70% 40% / 0.2;
+  --atmosphere-c: 28 70% 40% / 0.12;
+  --atmosphere-from: 222 28% 8%;
+  --atmosphere-to: 222 26% 6%;
+
+  --shadow-panel: 0 1px 0 hsl(0 0% 100% / 0.04), 0 22px 48px -28px hsl(0 0% 0% / 0.65);
+  --shadow-soft: 0 12px 32px -20px hsl(173 80% 20% / 0.45);
 }
 
 * {
@@ -61,10 +108,10 @@ body {
   .atmosphere {
     background-color: hsl(var(--mist));
     background-image:
-      radial-gradient(ellipse 80% 55% at 12% -10%, hsl(173 70% 70% / 0.28), transparent 55%),
-      radial-gradient(ellipse 70% 50% at 92% 8%, hsl(210 90% 78% / 0.35), transparent 50%),
-      radial-gradient(ellipse 60% 40% at 70% 100%, hsl(28 90% 70% / 0.14), transparent 55%),
-      linear-gradient(180deg, hsl(214 40% 98%) 0%, hsl(214 32% 95%) 100%);
+      radial-gradient(ellipse 80% 55% at 12% -10%, hsl(var(--atmosphere-a)), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 92% 8%, hsl(var(--atmosphere-b)), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 70% 100%, hsl(var(--atmosphere-c)), transparent 55%),
+      linear-gradient(180deg, hsl(var(--atmosphere-from)) 0%, hsl(var(--atmosphere-to)) 100%);
   }
 
   .panel-glass {
@@ -80,6 +127,14 @@ body {
       linear-gradient(90deg, hsl(var(--line) / 0.45) 1px, transparent 1px);
     background-size: 48px 48px;
     mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 75%);
+  }
+
+  .shadow-panel {
+    box-shadow: var(--shadow-panel);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
   }
 
   .rise-in {

@@ -1,4 +1,9 @@
-import type { AIAction, ExecuteAiActionRequest, PageContext } from '@project-x/types';
+import type {
+  AIAction,
+  ErrorIntelligenceContext,
+  ExecuteAiActionRequest,
+  PageContext,
+} from '@project-x/types';
 
 import { USER_FACING_AI_ERROR, USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from './auth-storage';
@@ -118,6 +123,7 @@ export function buildAiRequest(input: {
   customPrompt?: string | null;
   targetLanguage?: string | null;
   context?: PageContext | null;
+  errorIntelligence?: ErrorIntelligenceContext | null;
 }): ExecuteAiActionRequest {
   return {
     action: input.action,
@@ -125,5 +131,6 @@ export function buildAiRequest(input: {
     customPrompt: input.customPrompt ?? null,
     targetLanguage: input.targetLanguage ?? null,
     context: input.context ?? null,
+    errorIntelligence: input.errorIntelligence ?? null,
   };
 }

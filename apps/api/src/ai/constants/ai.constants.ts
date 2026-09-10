@@ -11,6 +11,12 @@ export const AI_DEFAULT_MAX_CHANGED_FILES = 12;
 export const AI_DEFAULT_MAX_CHANGED_FILE_EXCERPT_CHARACTERS = 900;
 export const AI_DEFAULT_MAX_CHANGED_FILES_TOTAL_CHARACTERS = 7_000;
 
+/** Day 11 — error intelligence payload limits */
+export const AI_DEFAULT_MAX_ERROR_TEXT_CHARACTERS = 12_000;
+export const AI_DEFAULT_MAX_STACK_TRACE_CHARACTERS = 8_000;
+export const AI_DEFAULT_MAX_ERROR_CODE_CONTEXT_CHARACTERS = 6_000;
+export const AI_DEFAULT_MAX_STACK_FRAMES = 20;
+
 /** Compact delimiters keep injection boundaries while using fewer tokens. */
 export const SELECTED_TEXT_OPEN = '<<SEL>>';
 export const SELECTED_TEXT_CLOSE = '<<END_SEL>>';
@@ -18,3 +24,9 @@ export const CUSTOM_INSTRUCTION_OPEN = '<<CMD>>';
 export const CUSTOM_INSTRUCTION_CLOSE = '<<END_CMD>>';
 export const PAGE_CONTEXT_OPEN = '<<CTX>>';
 export const PAGE_CONTEXT_CLOSE = '<<END_CTX>>';
+export const ERROR_INTEL_OPEN = '<<ERR>>';
+export const ERROR_INTEL_CLOSE = '<<END_ERR>>';
+export const STACK_TRACE_OPEN = '<<STACK>>';
+export const STACK_TRACE_CLOSE = '<<END_STACK>>';
+export const ERROR_CODE_OPEN = '<<ERR_CODE>>';
+export const ERROR_CODE_CLOSE = '<<END_ERR_CODE>>';

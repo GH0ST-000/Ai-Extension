@@ -180,4 +180,33 @@ describe('PromptRegistry', () => {
     expect(content).toContain(SELECTED_TEXT_OPEN);
     expect(content).toContain('handlePaymentFailure()');
   });
+
+  it('registers Day 11 error intelligence prompts', () => {
+    expect(registry.has(AIAction.UNDERSTAND_ERROR)).toBe(true);
+    expect(registry.has(AIAction.FIND_ROOT_CAUSE)).toBe(true);
+    expect(registry.has(AIAction.SUGGEST_FIX)).toBe(true);
+
+    const root = registry.build({
+      action: AIAction.FIND_ROOT_CAUSE,
+      text: "TypeError: Cannot read properties of undefined (reading 'id')",
+      errorIntelligence: {
+        classification: {
+          isError: true,
+          confidence: 0.9,
+          category: 'runtime',
+          technology: 'javascript',
+          signals: ['js-runtime', 'cannot-read'],
+        },
+        errorText: "TypeError: Cannot read properties of undefined (reading 'id')",
+        code: {
+          surroundingCode: 'const user = await userRepository.findByEmail(email)\nreturn user.id',
+        },
+      },
+    });
+    const content = String(root.messages.find((m) => m.role === 'user')?.content);
+    expect(content).toContain('<<ERR>>');
+    expect(content).toContain('<<ERR_CODE>>');
+    expect(content).toContain('untrusted data');
+    expect(root.instructions.toLowerCase()).toContain('root cause');
+  });
 });

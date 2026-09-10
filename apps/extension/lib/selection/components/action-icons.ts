@@ -23,5 +23,7 @@ export const ACTION_ICONS: Record<AIAction, ComponentType<SVGProps<SVGSVGElement
   [AIAction.REVIEW_CODE]: ReviewIcon,
   [AIAction.SUGGEST_FIX]: FixIcon,
   [AIAction.REVIEW_ENTIRE_PR]: PrReviewIcon,
+  [AIAction.UNDERSTAND_ERROR]: ExplainIcon,
+  [AIAction.FIND_ROOT_CAUSE]: ReviewIcon,
   [AIAction.CUSTOM]: PromptIcon,
 };

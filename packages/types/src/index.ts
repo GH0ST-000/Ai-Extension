@@ -39,6 +39,8 @@ export enum AIAction {
   REVIEW_CODE = 'REVIEW_CODE',
   SUGGEST_FIX = 'SUGGEST_FIX',
   REVIEW_ENTIRE_PR = 'REVIEW_ENTIRE_PR',
+  UNDERSTAND_ERROR = 'UNDERSTAND_ERROR',
+  FIND_ROOT_CAUSE = 'FIND_ROOT_CAUSE',
   CUSTOM = 'CUSTOM',
 }
 
@@ -155,12 +157,68 @@ export interface UpdateUserSettingsRequest {
   includePageContext?: boolean;
 }
 
+/** Day 11 — local error classification (extension → API for error actions). */
+export type ErrorCategory =
+  | 'runtime'
+  | 'type'
+  | 'network'
+  | 'http'
+  | 'database'
+  | 'dependency'
+  | 'build'
+  | 'framework'
+  | 'unknown';
+
+export interface ErrorClassification {
+  isError: boolean;
+  confidence: number;
+  category?: ErrorCategory;
+  technology?: string;
+  errorCode?: string;
+  signals: string[];
+}
+
+export interface StackFrame {
+  functionName?: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
+export interface ErrorIntelligenceContext {
+  classification: ErrorClassification;
+  /** Already redacted / size-bounded error text. */
+  errorText: string;
+  stackTrace?: {
+    raw?: string;
+    frames?: StackFrame[];
+  };
+  page?: {
+    url?: string;
+    title?: string;
+  };
+  code?: {
+    language?: string;
+    fileName?: string;
+    surroundingCode?: string;
+  };
+  github?: {
+    owner?: string;
+    repository?: string;
+    filePath?: string;
+    pullRequestNumber?: number;
+    pullRequestTitle?: string;
+  };
+}
+
 export interface ExecuteAiActionRequest {
   action: AIAction;
   text: string;
   customPrompt?: string | null;
   targetLanguage?: string | null;
   context?: PageContext | null;
+  /** Present for Day 11 error-intelligence actions when classification is strong. */
+  errorIntelligence?: ErrorIntelligenceContext | null;
 }
 
 export interface ExecuteAiActionResponse {

@@ -5,6 +5,7 @@ import { AIAction, type PRReviewFinding } from '@project-x/types';
 
 import {
   AI_ACTIONS,
+  DIAGNOSTIC_AI_ACTIONS,
   MENU_OFFSET_PX,
   TRIGGER_OFFSET_PX,
   actionFromShortcut,
@@ -245,7 +246,11 @@ export function SelectionToolbar() {
                 action={assistant.action}
                 content={assistant.content}
                 streaming={assistant.status === 'streaming'}
-                canReplace={canReplace && assistant.status === 'success'}
+                canReplace={
+                  canReplace &&
+                  assistant.status === 'success' &&
+                  !DIAGNOSTIC_AI_ACTIONS.has(assistant.action)
+                }
                 reviewContext={
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
                 }

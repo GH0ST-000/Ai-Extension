@@ -9,12 +9,14 @@ import type {
 import { customPrompt } from './custom.prompt';
 import { explainCodePrompt } from './explain-code.prompt';
 import { explainPrompt } from './explain.prompt';
+import { findRootCausePrompt } from './find-root-cause.prompt';
 import { improveWritingPrompt } from './improve-writing.prompt';
 import { reviewCodePrompt } from './review-code.prompt';
 import { reviewEntirePrPrompt } from './review-entire-pr.prompt';
 import { suggestFixPrompt } from './suggest-fix.prompt';
 import { summarizePrompt } from './summarize.prompt';
 import { translatePrompt } from './translate.prompt';
+import { understandErrorPrompt } from './understand-error.prompt';
 
 @Injectable()
 export class PromptRegistry {
@@ -30,6 +32,8 @@ export class PromptRegistry {
       reviewCodePrompt,
       suggestFixPrompt,
       reviewEntirePrPrompt,
+      understandErrorPrompt,
+      findRootCausePrompt,
       customPrompt,
     ];
 

@@ -158,6 +158,60 @@ export class AiService {
       customPrompt: input.customPrompt ?? null,
       targetLanguage: input.targetLanguage ?? null,
       context: includePageContext ? this.toPageContext(input.context) : null,
+      errorIntelligence: this.toErrorIntelligence(input.errorIntelligence),
+    };
+  }
+
+  private toErrorIntelligence(
+    errorIntelligence: ExecuteAiActionDto['errorIntelligence'],
+  ): AiActionRequest['errorIntelligence'] {
+    if (!errorIntelligence) {
+      return null;
+    }
+
+    return {
+      classification: {
+        isError: errorIntelligence.classification.isError,
+        confidence: errorIntelligence.classification.confidence,
+        category: errorIntelligence.classification.category ?? undefined,
+        technology: errorIntelligence.classification.technology ?? undefined,
+        errorCode: errorIntelligence.classification.errorCode ?? undefined,
+        signals: errorIntelligence.classification.signals ?? [],
+      },
+      errorText: errorIntelligence.errorText,
+      stackTrace: errorIntelligence.stackTrace
+        ? {
+            raw: errorIntelligence.stackTrace.raw ?? undefined,
+            frames: errorIntelligence.stackTrace.frames?.map((frame) => ({
+              functionName: frame.functionName ?? undefined,
+              file: frame.file ?? undefined,
+              line: frame.line ?? undefined,
+              column: frame.column ?? undefined,
+            })),
+          }
+        : undefined,
+      page: errorIntelligence.page
+        ? {
+            url: errorIntelligence.page.url ?? undefined,
+            title: errorIntelligence.page.title ?? undefined,
+          }
+        : undefined,
+      code: errorIntelligence.code
+        ? {
+            language: errorIntelligence.code.language ?? undefined,
+            fileName: errorIntelligence.code.fileName ?? undefined,
+            surroundingCode: errorIntelligence.code.surroundingCode ?? undefined,
+          }
+        : undefined,
+      github: errorIntelligence.github
+        ? {
+            owner: errorIntelligence.github.owner ?? undefined,
+            repository: errorIntelligence.github.repository ?? undefined,
+            filePath: errorIntelligence.github.filePath ?? undefined,
+            pullRequestNumber: errorIntelligence.github.pullRequestNumber ?? undefined,
+            pullRequestTitle: errorIntelligence.github.pullRequestTitle ?? undefined,
+          }
+        : undefined,
     };
   }
 

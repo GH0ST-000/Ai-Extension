@@ -12,6 +12,7 @@ import {
   ValidateIf,
   ValidateNested,
   IsEnum,
+  IsNumber,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { AIAction, PAGE_CONTEXT_TYPES } from '@project-x/types';
@@ -27,8 +28,24 @@ import {
   AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS,
   AI_DEFAULT_MAX_CONTEXT_URL_CHARACTERS,
   AI_DEFAULT_MAX_CUSTOM_PROMPT_CHARACTERS,
+  AI_DEFAULT_MAX_ERROR_CODE_CONTEXT_CHARACTERS,
+  AI_DEFAULT_MAX_ERROR_TEXT_CHARACTERS,
   AI_DEFAULT_MAX_INPUT_CHARACTERS,
+  AI_DEFAULT_MAX_STACK_FRAMES,
+  AI_DEFAULT_MAX_STACK_TRACE_CHARACTERS,
 } from '../constants/ai.constants';
+
+const ERROR_CATEGORIES = [
+  'runtime',
+  'type',
+  'network',
+  'http',
+  'database',
+  'dependency',
+  'build',
+  'framework',
+  'unknown',
+] as const;
 
 function trimString({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.trim() : value;
@@ -247,4 +264,183 @@ export class ExecuteAiActionDto {
   @ValidateNested()
   @Type(() => PageContextDto)
   context?: PageContextDto | null;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ErrorIntelligenceContextDto)
+  errorIntelligence?: ErrorIntelligenceContextDto | null;
+}
+
+export class ErrorClassificationDto {
+  @IsBoolean()
+  isError!: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  confidence!: number;
+
+  @IsOptional()
+  @IsIn([...ERROR_CATEGORIES])
+  category?: (typeof ERROR_CATEGORIES)[number];
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  technology?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  errorCode?: string | null;
+
+  @IsOptional()
+  @IsString({ each: true })
+  @ArrayMaxSize(40)
+  signals!: string[];
+}
+
+export class StackFrameDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  functionName?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS)
+  file?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10_000_000)
+  line?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10_000_000)
+  column?: number | null;
+}
+
+export class ErrorStackTraceDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_STACK_TRACE_CHARACTERS)
+  raw?: string | null;
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => StackFrameDto)
+  @ArrayMaxSize(AI_DEFAULT_MAX_STACK_FRAMES)
+  frames?: StackFrameDto[];
+}
+
+export class ErrorIntelligencePageDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_URL_CHARACTERS)
+  url?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS)
+  title?: string | null;
+}
+
+export class ErrorIntelligenceCodeDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  language?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS)
+  fileName?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_ERROR_CODE_CONTEXT_CHARACTERS)
+  surroundingCode?: string | null;
+}
+
+export class ErrorIntelligenceGitHubDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  owner?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  repository?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_PATH_CHARACTERS)
+  filePath?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10_000_000)
+  pullRequestNumber?: number | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS)
+  pullRequestTitle?: string | null;
+}
+
+export class ErrorIntelligenceContextDto {
+  @ValidateNested()
+  @Type(() => ErrorClassificationDto)
+  classification!: ErrorClassificationDto;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(AI_DEFAULT_MAX_ERROR_TEXT_CHARACTERS)
+  errorText!: string;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ErrorStackTraceDto)
+  stackTrace?: ErrorStackTraceDto;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ErrorIntelligencePageDto)
+  page?: ErrorIntelligencePageDto;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ErrorIntelligenceCodeDto)
+  code?: ErrorIntelligenceCodeDto;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ErrorIntelligenceGitHubDto)
+  github?: ErrorIntelligenceGitHubDto;
 }

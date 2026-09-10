@@ -9,7 +9,12 @@ import {
 } from '../editing';
 import { extractPageContext } from '../context/extract-page-context';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
-import { USER_FACING_AI_ERROR } from './constants';
+import { ERROR_INTELLIGENCE_ACTIONS, USER_FACING_AI_ERROR } from './constants';
+import {
+  buildErrorIntelligenceContext,
+  MAX_ERROR_TEXT_CHARACTERS,
+  redactSensitiveText,
+} from './error-intelligence';
 import type { AssistantView, SelectionRect, ToolbarPhase } from './types';
 import type { PrFindingFilter } from './utils/build-pr-review-report';
 import { extractFixClipboardText } from './utils/parse-suggest-fix';
@@ -262,12 +267,25 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
       if (action === AIAction.REVIEW_ENTIRE_PR) {
         set({ lastReviewContext: pageContext });
       }
+
+      const useErrorIntel = ERROR_INTELLIGENCE_ACTIONS.has(action);
+      const errorIntelligence = useErrorIntel
+        ? buildErrorIntelligenceContext({ text: selectedText, context: pageContext })
+        : null;
+      const { text: redactedSelection } = useErrorIntel
+        ? redactSensitiveText(selectedText)
+        : { text: selectedText };
+      const requestText = useErrorIntel
+        ? redactedSelection.trim().slice(0, MAX_ERROR_TEXT_CHARACTERS)
+        : selectedText;
+
       const finalText = await streamAiAction(
         buildAiRequest({
           action,
-          text: selectedText,
+          text: requestText,
           customPrompt: prompt,
           context: pageContext,
+          errorIntelligence,
         }),
         {
           signal: abortController.signal,

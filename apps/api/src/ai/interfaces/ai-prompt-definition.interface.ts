@@ -1,4 +1,4 @@
-import type { AIAction, PageContext } from '@project-x/types';
+import type { AIAction, ErrorIntelligenceContext, PageContext } from '@project-x/types';
 import type { ModelMessage } from 'ai';
 
 export interface AiActionRequest {
@@ -7,6 +7,7 @@ export interface AiActionRequest {
   customPrompt?: string | null;
   targetLanguage?: string | null;
   context?: PageContext | null;
+  errorIntelligence?: ErrorIntelligenceContext | null;
 }
 
 export interface AiPromptBuildResult {

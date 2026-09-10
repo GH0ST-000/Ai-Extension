@@ -17,6 +17,8 @@ export const SHORTCUT_TO_ACTION: Readonly<Record<string, AIAction>> = {
   r: AIAction.REVIEW_CODE,
   f: AIAction.SUGGEST_FIX,
   a: AIAction.REVIEW_ENTIRE_PR,
+  u: AIAction.UNDERSTAND_ERROR,
+  o: AIAction.FIND_ROOT_CAUSE,
   p: AIAction.CUSTOM,
 };
 
@@ -60,7 +62,7 @@ export const AI_ACTIONS: readonly AiActionDefinition[] = [
   {
     id: AIAction.SUGGEST_FIX,
     label: 'Suggest Fix',
-    description: 'Minimal patch',
+    description: 'Show practical fixes',
     shortcut: 'F',
   },
   {
@@ -70,12 +72,37 @@ export const AI_ACTIONS: readonly AiActionDefinition[] = [
     shortcut: 'A',
   },
   {
+    id: AIAction.UNDERSTAND_ERROR,
+    label: 'Understand Error',
+    description: 'Explain what failed',
+    shortcut: 'U',
+  },
+  {
+    id: AIAction.FIND_ROOT_CAUSE,
+    label: 'Find Root Cause',
+    description: 'Identify why this failed',
+    shortcut: 'O',
+  },
+  {
     id: AIAction.CUSTOM,
     label: 'Custom Prompt',
-    description: 'Freeform ask',
+    description: 'Ask anything',
     shortcut: 'P',
   },
 ] as const;
+
+/** Diagnostic actions — never offer in-place Replace. */
+export const DIAGNOSTIC_AI_ACTIONS: ReadonlySet<AIAction> = new Set([
+  AIAction.UNDERSTAND_ERROR,
+  AIAction.FIND_ROOT_CAUSE,
+  AIAction.SUGGEST_FIX,
+]);
+
+export const ERROR_INTELLIGENCE_ACTIONS: ReadonlySet<AIAction> = new Set([
+  AIAction.UNDERSTAND_ERROR,
+  AIAction.FIND_ROOT_CAUSE,
+  AIAction.SUGGEST_FIX,
+]);
 
 export const MIN_SELECTION_LENGTH = 1;
 export const TRIGGER_OFFSET_PX = 6;

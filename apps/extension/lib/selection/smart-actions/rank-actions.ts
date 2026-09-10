@@ -1,8 +1,9 @@
-import { AIAction, type ContentType } from '@project-x/types';
+import { AIAction, type ContentType, type ErrorClassification } from '@project-x/types';
 
 import { AI_ACTIONS } from '../constants';
 import type { AiActionDefinition } from '../types';
 import { classifyContent, type RankingHints } from './classify-content';
+import { classifyError } from '../error-intelligence';
 
 /**
  * Preferred action order per content type. Every AIAction must appear exactly once.
@@ -14,18 +15,22 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.SUGGEST_FIX,
     AIAction.REVIEW_ENTIRE_PR,
     AIAction.EXPLAIN,
+    AIAction.FIND_ROOT_CAUSE,
+    AIAction.UNDERSTAND_ERROR,
     AIAction.CUSTOM,
     AIAction.SUMMARIZE,
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
   ],
   error: [
-    AIAction.EXPLAIN,
-    AIAction.EXPLAIN_CODE,
-    AIAction.REVIEW_CODE,
+    AIAction.FIND_ROOT_CAUSE,
     AIAction.SUGGEST_FIX,
-    AIAction.REVIEW_ENTIRE_PR,
+    AIAction.UNDERSTAND_ERROR,
+    AIAction.EXPLAIN_CODE,
     AIAction.CUSTOM,
+    AIAction.EXPLAIN,
+    AIAction.REVIEW_CODE,
+    AIAction.REVIEW_ENTIRE_PR,
     AIAction.SUMMARIZE,
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
@@ -40,6 +45,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.REVIEW_ENTIRE_PR,
     AIAction.SUGGEST_FIX,
     AIAction.EXPLAIN_CODE,
+    AIAction.FIND_ROOT_CAUSE,
+    AIAction.UNDERSTAND_ERROR,
   ],
   'short-text': [
     AIAction.EXPLAIN,
@@ -51,6 +58,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.REVIEW_ENTIRE_PR,
     AIAction.SUGGEST_FIX,
     AIAction.EXPLAIN_CODE,
+    AIAction.FIND_ROOT_CAUSE,
+    AIAction.UNDERSTAND_ERROR,
   ],
   'structured-data': [
     AIAction.EXPLAIN,
@@ -62,6 +71,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.TRANSLATE,
     AIAction.EXPLAIN_CODE,
     AIAction.IMPROVE_WRITING,
+    AIAction.FIND_ROOT_CAUSE,
+    AIAction.UNDERSTAND_ERROR,
   ],
   unknown: [
     AIAction.EXPLAIN,
@@ -73,8 +84,28 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.SUGGEST_FIX,
     AIAction.REVIEW_ENTIRE_PR,
     AIAction.CUSTOM,
+    AIAction.FIND_ROOT_CAUSE,
+    AIAction.UNDERSTAND_ERROR,
   ],
 };
+
+/** Strong runtime / type errors — root cause first. */
+const ERROR_RUNTIME_PREFIX: readonly AIAction[] = [
+  AIAction.FIND_ROOT_CAUSE,
+  AIAction.SUGGEST_FIX,
+  AIAction.UNDERSTAND_ERROR,
+  AIAction.EXPLAIN_CODE,
+  AIAction.CUSTOM,
+];
+
+/** Network errors — understand first, then diagnose. */
+const ERROR_NETWORK_PREFIX: readonly AIAction[] = [
+  AIAction.UNDERSTAND_ERROR,
+  AIAction.FIND_ROOT_CAUSE,
+  AIAction.SUGGEST_FIX,
+  AIAction.EXPLAIN_CODE,
+  AIAction.CUSTOM,
+];
 
 /** GitHub PR + code/diff selection */
 const PR_CODE_PREFIX: readonly AIAction[] = [
@@ -84,6 +115,16 @@ const PR_CODE_PREFIX: readonly AIAction[] = [
   AIAction.EXPLAIN_CODE,
   AIAction.SUMMARIZE,
   AIAction.EXPLAIN,
+];
+
+/** GitHub PR + software error selection — keep error intel ahead of PR review. */
+const PR_ERROR_PREFIX: readonly AIAction[] = [
+  AIAction.FIND_ROOT_CAUSE,
+  AIAction.SUGGEST_FIX,
+  AIAction.UNDERSTAND_ERROR,
+  AIAction.REVIEW_CODE,
+  AIAction.REVIEW_ENTIRE_PR,
+  AIAction.EXPLAIN_CODE,
 ];
 
 /** GitHub PR description / comment prose */
@@ -138,6 +179,13 @@ function withPreferredPrefix(
   return result;
 }
 
+function errorCategoryPrefix(classification: ErrorClassification | undefined): readonly AIAction[] {
+  if (classification?.category === 'network' || classification?.category === 'http') {
+    return ERROR_NETWORK_PREFIX;
+  }
+  return ERROR_RUNTIME_PREFIX;
+}
+
 /**
  * Reorder the catalog so the most useful actions appear first.
  * Never drops an action.
@@ -146,14 +194,23 @@ export function rankActions(
   contentType: ContentType,
   catalog: readonly AiActionDefinition[] = AI_ACTIONS,
   hints?: RankingHints,
+  classification?: ErrorClassification,
 ): AiActionDefinition[] {
   let preferred = [...(RANKINGS[contentType] ?? RANKINGS.unknown)];
 
+  if (contentType === 'error') {
+    preferred = withPreferredPrefix(errorCategoryPrefix(classification), preferred);
+  }
+
   if (hints?.githubView === 'pr') {
-    preferred = withPreferredPrefix(
-      contentType === 'code' || hints.selectionInCodeElement ? PR_CODE_PREFIX : PR_PROSE_PREFIX,
-      preferred,
-    );
+    if (contentType === 'error') {
+      preferred = withPreferredPrefix(PR_ERROR_PREFIX, preferred);
+    } else {
+      preferred = withPreferredPrefix(
+        contentType === 'code' || hints.selectionInCodeElement ? PR_CODE_PREFIX : PR_PROSE_PREFIX,
+        preferred,
+      );
+    }
   } else if (hints?.githubView === 'blob' && contentType === 'code') {
     preferred = withPreferredPrefix(BLOB_CODE_PREFIX, preferred);
   }
@@ -186,7 +243,12 @@ export function getRankedActions(
   selectedText: string,
   hints?: RankingHints,
   catalog: readonly AiActionDefinition[] = AI_ACTIONS,
-): { contentType: ContentType; actions: AiActionDefinition[] } {
+): {
+  contentType: ContentType;
+  actions: AiActionDefinition[];
+  classification: ErrorClassification;
+} {
+  const classification = classifyError(selectedText);
   let contentType = classifyContent(selectedText, hints);
 
   if (
@@ -208,7 +270,8 @@ export function getRankedActions(
 
   return {
     contentType,
-    actions: rankActions(contentType, catalog, hints),
+    classification,
+    actions: rankActions(contentType, catalog, hints, classification),
   };
 }
 

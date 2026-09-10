@@ -184,9 +184,58 @@ export class PageContextGitHubDto {
   filesTab?: boolean | null;
 }
 
+export class PageContextJiraDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(253)
+  siteHost?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsIn(['issue', 'board', 'backlog', 'search', 'project', 'unknown'])
+  pageType?: 'issue' | 'board' | 'backlog' | 'search' | 'project' | 'unknown' | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  issueKey?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  projectKey?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS)
+  summary?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  issueType?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  status?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  priority?: string | null;
+}
+
 export class PageContextDto {
   @IsIn([...PAGE_CONTEXT_TYPES], {
-    message: 'context.type must be generic or github',
+    message: 'context.type must be generic, github, or jira',
   })
   type!: (typeof PAGE_CONTEXT_TYPES)[number];
 
@@ -225,6 +274,12 @@ export class PageContextDto {
   @ValidateNested()
   @Type(() => PageContextGitHubDto)
   github?: PageContextGitHubDto;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PageContextJiraDto)
+  jira?: PageContextJiraDto;
 }
 
 export class ExecuteAiActionDto {

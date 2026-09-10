@@ -8,13 +8,18 @@ import type {
 } from '../interfaces/ai-prompt-definition.interface';
 import { customPrompt } from './custom.prompt';
 import { analyzeCiFailurePrompt } from './analyze-ci-failure.prompt';
+import { analyzeJiraRisksPrompt } from './analyze-jira-risks.prompt';
+import { compareJiraWithPrPrompt } from './compare-jira-with-pr.prompt';
+import { createTechnicalPlanPrompt } from './create-technical-plan.prompt';
 import { explainCodePrompt } from './explain-code.prompt';
 import { explainPrompt } from './explain.prompt';
+import { extractAcceptanceCriteriaPrompt } from './extract-acceptance-criteria.prompt';
 import { findRootCausePrompt } from './find-root-cause.prompt';
 import { improveWritingPrompt } from './improve-writing.prompt';
 import { reviewCodePrompt } from './review-code.prompt';
 import { reviewEntirePrPrompt } from './review-entire-pr.prompt';
 import { suggestFixPrompt } from './suggest-fix.prompt';
+import { summarizeJiraIssuePrompt } from './summarize-jira-issue.prompt';
 import { summarizePrompt } from './summarize.prompt';
 import { translatePrompt } from './translate.prompt';
 import { understandErrorPrompt } from './understand-error.prompt';
@@ -36,6 +41,11 @@ export class PromptRegistry {
       understandErrorPrompt,
       findRootCausePrompt,
       analyzeCiFailurePrompt,
+      summarizeJiraIssuePrompt,
+      extractAcceptanceCriteriaPrompt,
+      createTechnicalPlanPrompt,
+      analyzeJiraRisksPrompt,
+      compareJiraWithPrPrompt,
       customPrompt,
     ];
 

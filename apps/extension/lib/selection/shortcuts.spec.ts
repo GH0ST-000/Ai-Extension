@@ -22,6 +22,7 @@ describe('shortcut → AIAction mapping', () => {
       a: AIAction.REVIEW_ENTIRE_PR,
       u: AIAction.UNDERSTAND_ERROR,
       o: AIAction.FIND_ROOT_CAUSE,
+      j: AIAction.SUMMARIZE_JIRA_ISSUE,
       p: AIAction.CUSTOM,
     });
   });
@@ -49,8 +50,10 @@ describe('shortcut → AIAction mapping', () => {
 
   it('catalog shortcuts stay aligned with SHORTCUT_TO_ACTION', () => {
     for (const action of AI_ACTIONS) {
-      expect(action.shortcut).toBeTruthy();
-      expect(SHORTCUT_TO_ACTION[action.shortcut!.toLowerCase()]).toBe(action.id);
+      if (!action.shortcut) {
+        continue;
+      }
+      expect(SHORTCUT_TO_ACTION[action.shortcut.toLowerCase()]).toBe(action.id);
     }
   });
 });

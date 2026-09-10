@@ -30,6 +30,7 @@ model User {
   updatedAt    DateTime      @updatedAt @map("updated_at")
   settings     UserSettings?
   githubConnection GitHubConnection?
+  jiraConnection   JiraConnection?
 
   @@map("users")
 }
@@ -58,4 +59,24 @@ model GitHubConnection {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("github_connections")
+}
+
+/**
+ * Per-user Jira Cloud API token connection — ciphertext only.
+ * Day 17 is read-only (no Jira write scopes/calls).
+ */
+model JiraConnection {
+  id               String   @id @default(cuid())
+  userId           String   @unique @map("user_id")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email            String
+  tokenCiphertext  String   @map("token_ciphertext") @db.Text
+  siteHost         String   @map("site_host")
+  siteDisplayName  String?  @map("site_display_name")
+  accountId        String?  @map("account_id")
+  displayName      String?  @map("display_name")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("jira_connections")
 }

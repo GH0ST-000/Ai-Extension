@@ -2,10 +2,12 @@ import type {
   AuthTokenResponse,
   AuthUser,
   GitHubConnectionStatus,
+  JiraConnectionStatus,
   LoginRequest,
   RegisterRequest,
   UpdateUserSettingsRequest,
   UpsertGitHubConnectionRequest,
+  UpsertJiraConnectionRequest,
   UserSettings,
 } from '@project-x/types';
 
@@ -151,6 +153,25 @@ export async function upsertGithubConnection(
 
 export async function deleteGithubConnection(): Promise<void> {
   await apiFetch<void>('/settings/github', {
+    method: 'DELETE',
+  });
+}
+
+export async function getJiraConnection(): Promise<JiraConnectionStatus> {
+  return apiFetch<JiraConnectionStatus>('/settings/jira');
+}
+
+export async function upsertJiraConnection(
+  input: UpsertJiraConnectionRequest,
+): Promise<JiraConnectionStatus> {
+  return apiFetch<JiraConnectionStatus>('/settings/jira', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteJiraConnection(): Promise<void> {
+  await apiFetch<void>('/settings/jira', {
     method: 'DELETE',
   });
 }

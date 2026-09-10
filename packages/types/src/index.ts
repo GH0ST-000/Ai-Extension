@@ -157,6 +157,37 @@ export interface UpdateUserSettingsRequest {
   includePageContext?: boolean;
 }
 
+/** Per-user GitHub connection status — never includes the raw PAT. */
+export interface GitHubConnectionStatus {
+  connected: boolean;
+  githubLogin?: string | null;
+  githubUserId?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpsertGitHubConnectionRequest {
+  /** Personal Access Token from GitHub settings (fine-grained or classic). */
+  token: string;
+}
+
+/** Day 12 — post a PR issue comment via server-side GitHub PAT. */
+export interface PostPullRequestCommentRequest {
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+  body: string;
+  /** Client-generated key; identical retries return the first successful result. */
+  idempotencyKey: string;
+}
+
+export interface PostPullRequestCommentResponse {
+  success: true;
+  commentId: number;
+  commentUrl: string;
+  /** True when this response was served from an earlier identical request. */
+  deduplicated: boolean;
+}
+
 /** Day 11 — local error classification (extension → API for error actions). */
 export type ErrorCategory =
   | 'runtime'

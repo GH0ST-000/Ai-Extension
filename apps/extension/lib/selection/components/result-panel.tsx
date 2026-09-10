@@ -5,7 +5,12 @@ import { AIAction, type PageContext, type PRReviewFinding } from '@project-x/typ
 import { cn } from '~/lib/utils/cn';
 
 import { getActionLabel } from '../constants';
-import { buildPrReviewReport, type PrFindingFilter } from '../utils/build-pr-review-report';
+import {
+  buildPrReviewReport,
+  type PrFindingDisposition,
+  type PrFindingDispositionMap,
+  type PrFindingFilter,
+} from '../utils/build-pr-review-report';
 import { parseSuggestFixContent } from '../utils/parse-suggest-fix';
 import { PrReviewReportView } from './pr-review-report-view';
 
@@ -16,14 +21,18 @@ type ResultPanelProps = {
   canReplace?: boolean;
   reviewContext?: PageContext | null;
   findingFilter?: PrFindingFilter;
-  resolvedFindingIds?: readonly string[];
+  findingDispositions?: PrFindingDispositionMap;
   onCopy: () => Promise<boolean>;
   onCopyFix?: () => Promise<boolean>;
   onCopyFullReview?: () => Promise<boolean>;
+  onCopySummary?: () => Promise<boolean>;
+  onCopyCommentDraft?: () => Promise<boolean>;
+  onPostComment?: (body: string) => Promise<{ ok: boolean; message?: string; commentUrl?: string }>;
+  githubConnected?: boolean | null;
   onSuggestFix?: () => void;
   onSuggestFixForFinding?: (finding: PRReviewFinding) => void;
   onFindingFilterChange?: (filter: PrFindingFilter) => void;
-  onToggleFindingResolved?: (findingId: string) => void;
+  onSetFindingDisposition?: (findingId: string, disposition: PrFindingDisposition | null) => void;
   onReplace?: () => { ok: boolean; message?: string };
   onRetry: () => void;
   onBack: () => void;
@@ -140,14 +149,18 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     canReplace = false,
     reviewContext = null,
     findingFilter = 'all',
-    resolvedFindingIds = [],
+    findingDispositions = {},
     onCopy,
     onCopyFix,
     onCopyFullReview,
+    onCopySummary,
+    onCopyCommentDraft,
+    onPostComment,
+    githubConnected = null,
     onSuggestFix,
     onSuggestFixForFinding,
     onFindingFilterChange,
-    onToggleFindingResolved,
+    onSetFindingDisposition,
     onReplace,
     onRetry,
     onBack,
@@ -173,7 +186,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     () => (isEntirePr ? buildPrReviewReport({ markdown: content, context: reviewContext }) : null),
     [content, isEntirePr, reviewContext],
   );
-  const resolvedIdSet = useMemo(() => new Set(resolvedFindingIds), [resolvedFindingIds]);
+  const dispositions = useMemo(() => findingDispositions, [findingDispositions]);
   const showSuggestFix = Boolean(
     isSuggestFix && parsedFix && (parsedFix.fixCode || parsedFix.issue || parsedFix.why),
   );
@@ -253,10 +266,14 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
             report={prReport}
             streaming={streaming}
             filter={findingFilter}
-            resolvedIds={resolvedIdSet}
+            dispositions={dispositions}
             onFilterChange={(next) => onFindingFilterChange?.(next)}
-            onToggleResolved={(id) => onToggleFindingResolved?.(id)}
+            onSetDisposition={(id, disposition) => onSetFindingDisposition?.(id, disposition)}
             onSuggestFixForFinding={onSuggestFixForFinding}
+            onCopySummary={onCopySummary}
+            onCopyCommentDraft={onCopyCommentDraft}
+            onPostComment={onPostComment}
+            githubConnected={githubConnected}
           />
         ) : showSuggestFix && parsedFix ? (
           <SuggestFixView content={content} streaming={streaming} parsed={parsedFix} />
@@ -296,7 +313,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
             }}
             className="rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
           >
-            {copiedReview ? 'Copied Review' : 'Copy Full Review'}
+            {copiedReview ? 'Copied Markdown' : 'Export Markdown'}
           </button>
         ) : null}
         {isSuggestFix && onCopyFix ? (

@@ -5,6 +5,7 @@ import type { GitHubConnectionStatus, ResponseStyle, UserSettings } from '@proje
 import { RESPONSE_STYLES } from '@project-x/types';
 import { useRouter } from 'next/navigation';
 
+import { GithubPatGuide } from '../../../components/github-pat-guide';
 import {
   ApiError,
   deleteGithubConnection,
@@ -20,8 +21,6 @@ const STYLE_LABELS: Record<ResponseStyle, string> = {
   BALANCED: 'Balanced',
   DETAILED: 'Detailed',
 };
-
-const GITHUB_PAT_DOCS = 'https://github.com/settings/personal-access-tokens/new';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -310,16 +309,9 @@ export default function SettingsPage() {
                 </label>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Fine-grained PAT with{' '}
-                  <span className="font-medium text-ink">Pull requests: Read and write</span>.{' '}
-                  <a
-                    href={GITHUB_PAT_DOCS}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-accent underline-offset-2 hover:underline"
-                  >
-                    Create token on GitHub
-                  </a>
+                  <span className="font-medium text-ink">Pull requests: Read and write</span>.
                 </p>
+                <GithubPatGuide />
                 <input
                   id="github-pat"
                   type="password"

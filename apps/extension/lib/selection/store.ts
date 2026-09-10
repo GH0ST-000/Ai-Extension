@@ -22,6 +22,7 @@ import { useGithubReviewDraftStore } from './review-draft';
 import type { SuggestFixApplyTarget } from './patch-apply/patch-apply.store';
 import { usePatchApplyStore } from './patch-apply/patch-apply.store';
 import { useGithubCiStore } from './ci';
+import { useCIFixSessionStore } from './ci/fix/ci-fix.store';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -185,6 +186,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     useGithubReviewDraftStore.getState().clearDraft();
     usePatchApplyStore.getState().reset();
     useGithubCiStore.getState().close();
+    useCIFixSessionStore.getState().clear();
     set({ ...INITIAL_STATE });
   },
 
@@ -350,6 +352,13 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         abortController: null,
         assistant: { status: 'success', action, content: finalText },
       });
+
+      if (action === AIAction.SUGGEST_FIX) {
+        const applyTarget = get().suggestFixApplyTarget;
+        if (applyTarget?.findingId?.startsWith('ci-fix:')) {
+          useCIFixSessionStore.getState().markSuggested(finalText.slice(0, 2_000));
+        }
+      }
     } catch (error) {
       if (get().requestId !== requestId) {
         return;

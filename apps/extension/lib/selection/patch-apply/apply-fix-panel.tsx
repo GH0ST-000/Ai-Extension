@@ -10,6 +10,7 @@ import {
 
 import { useGithubReviewDraftStore } from '../review-draft';
 import { useGithubCiStore } from '../ci';
+import { useCIFixSessionStore } from '../ci/fix/ci-fix.store';
 import { usePatchApplyStore, type SuggestFixApplyTarget } from './patch-apply.store';
 
 function createClientRequestId(): string {
@@ -105,11 +106,28 @@ export function ApplyFixPanel({
       );
       setPrepared(next);
       setPhase('preview');
+      const fixSession = useCIFixSessionStore.getState().session;
+      if (
+        fixSession &&
+        fixSession.sourceHeadSha === next.expectedHeadSha &&
+        target.findingId?.startsWith('ci-fix:')
+      ) {
+        useCIFixSessionStore.getState().markPatchReady();
+      }
     } catch (err) {
       const message = err instanceof GithubApiError ? err.message : 'Unable to prepare the fix.';
       const code = err instanceof GithubApiError ? err.code : null;
       setError(message, code);
-      setPhase(code === 'PR_HEAD_CHANGED' || code === 'FILE_CHANGED' ? 'stale' : 'error');
+      if (code === 'PR_HEAD_CHANGED' || code === 'FILE_CHANGED') {
+        setPhase('stale');
+        useCIFixSessionStore
+          .getState()
+          .markStale(
+            'The pull request changed since this CI failure was analyzed. Refresh CI and start a new fix attempt.',
+          );
+      } else {
+        setPhase('error');
+      }
     }
   }
 
@@ -131,6 +149,9 @@ export function ApplyFixPanel({
     setPhase('applying');
     setError(null);
     const previousHead = prepared.expectedHeadSha;
+    if (target.findingId?.startsWith('ci-fix:')) {
+      useCIFixSessionStore.getState().markApplying();
+    }
     try {
       const applied = await applyPullRequestPatch(
         target.owner,
@@ -146,6 +167,20 @@ export function ApplyFixPanel({
       setPhase('success');
 
       useGithubCiStore.getState().invalidateAfterCommit(previousHead);
+      const fixSession = useCIFixSessionStore.getState().session;
+      if (
+        fixSession &&
+        fixSession.repository.owner === target.owner &&
+        fixSession.repository.name === target.repository &&
+        fixSession.pullRequestNumber === target.pullRequestNumber
+      ) {
+        useCIFixSessionStore.getState().recordCommit({
+          sha: applied.commitSha,
+          url: applied.commitUrl,
+          branch: applied.branch,
+          previousHeadSha: previousHead,
+        });
+      }
 
       // Invalidate review drafts bound to the previous head.
       const draft = markReviewDraftStale;

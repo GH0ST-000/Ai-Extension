@@ -240,6 +240,14 @@ export type GitHubWriteErrorCode =
   | 'CI_EVIDENCE_TOO_LARGE'
   | 'STALE_CI_CONTEXT'
   | 'AI_ANALYSIS_FAILED'
+  | 'FIX_SESSION_STALE'
+  | 'FIX_TARGET_NOT_FOUND'
+  | 'FIX_TARGET_AMBIGUOUS'
+  | 'FIX_TARGET_INVALID'
+  | 'FIX_CONTEXT_INSUFFICIENT'
+  | 'NEW_CI_NOT_AVAILABLE'
+  | 'VERIFICATION_CHECK_NOT_FOUND'
+  | 'VERIFICATION_CONTEXT_STALE'
   | 'RATE_LIMITED'
   | 'GITHUB_UNAVAILABLE'
   | 'WRITE_OUTCOME_UNKNOWN'
@@ -675,4 +683,114 @@ export interface AnalyzeCIFailureRequest {
 export interface AnalyzeCIFailureResponse {
   analysis: CIFailureAnalysis;
   evidence: CICheckFailureEvidence;
+}
+
+/** Day 16 — CI Fix Session status (single state machine; not booleans). */
+export type CIFixSessionStatus =
+  | 'IDLE'
+  | 'ANALYZING'
+  | 'ANALYZED'
+  | 'TARGET_REQUIRED'
+  | 'READY_TO_SUGGEST'
+  | 'SUGGESTING'
+  | 'SUGGESTED'
+  | 'PATCH_READY'
+  | 'APPLYING'
+  | 'COMMIT_CREATED'
+  | 'WAITING_FOR_NEW_CI'
+  | 'VERIFYING'
+  | 'PASSED'
+  | 'STILL_FAILING'
+  | 'DIFFERENT_FAILURE'
+  | 'CHECK_NOT_FOUND'
+  | 'STALE'
+  | 'ERROR';
+
+export type CIFixTargetSource = 'annotation' | 'log' | 'changed-file-correlation' | 'ai-suggestion';
+
+export type CIFixTargetTrust = 'trusted' | 'correlated' | 'suggested';
+
+export interface CIFixTarget {
+  filePath: string;
+  startLine?: number;
+  endLine?: number;
+  source: CIFixTargetSource;
+  trust: CIFixTargetTrust;
+  /** Path passed repository-relative validation. */
+  verified: boolean;
+  /** True when path appears in PR changed-files context. */
+  inPullRequestDiff?: boolean;
+  reason?: string;
+}
+
+export type CIFixVerificationStatus =
+  | 'PENDING'
+  | 'PASSED'
+  | 'STILL_FAILING'
+  | 'DIFFERENT_FAILURE'
+  | 'CHECK_NOT_FOUND'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'NEUTRAL'
+  | 'UNKNOWN';
+
+export interface CIFixVerification {
+  originalCheckId: string;
+  originalCheckName: string;
+  originalHeadSha: string;
+  newHeadSha: string;
+  matchedCheckId?: string;
+  matchedCheckName?: string;
+  status: CIFixVerificationStatus;
+  comparedAt: string;
+  previousFailureSignature?: string;
+  currentFailureSignature?: string;
+  /** True when overall PR CI still has other failures after targeted pass. */
+  otherChecksFailing?: boolean;
+  overallStatus?: CIOverallStatus;
+}
+
+export interface CIFixSessionSourceCheck {
+  id: string;
+  name: string;
+  status: CICheckRunStatus;
+  conclusion?: CICheckConclusion;
+}
+
+export interface CIFixAppliedCommit {
+  sha: string;
+  url?: string;
+  branch?: string;
+}
+
+export interface CIFixSuggestionSnapshot {
+  /** Bounded text used for Suggest Fix (not a verified patch). */
+  summary: string;
+  createdAt: string;
+}
+
+/** Session-scoped CI remediation loop (Day 16) — not persisted to PostgreSQL. */
+export interface CIFixSession {
+  id: string;
+  repository: {
+    owner: string;
+    name: string;
+  };
+  pullRequestNumber: number;
+  sourceHeadSha: string;
+  sourceCheck: CIFixSessionSourceCheck;
+  analysis?: CIFailureAnalysis;
+  candidateTargets: CIFixTarget[];
+  selectedTarget?: CIFixTarget;
+  suggestion?: CIFixSuggestionSnapshot;
+  appliedCommit?: CIFixAppliedCommit;
+  currentHeadSha?: string;
+  verification?: CIFixVerification;
+  previousFailureSignature?: string;
+  originalFailureCleared?: boolean;
+  status: CIFixSessionStatus;
+  errorMessage?: string;
+  errorCode?: GitHubWriteErrorCode;
+  createdAt: string;
+  updatedAt: string;
 }

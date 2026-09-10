@@ -1,3 +1,18 @@
+export { normalizeRepositoryPath } from './ci-fix/normalize-path';
+export {
+  extractPathsFromText,
+  resolveCIFixTargets,
+  selectPrimaryCIFixTarget,
+} from './ci-fix/resolve-targets';
+export type { ResolveCIFixTargetsInput } from './ci-fix/resolve-targets';
+export { buildCIFailureSignature, compareFailureSignatures } from './ci-fix/failure-signature';
+export {
+  matchCheckOnNewHead,
+  verifyCIFixAgainstSummary,
+  verificationToSessionStatus,
+} from './ci-fix/verify-fix';
+export type { VerifyCIFixInput } from './ci-fix/verify-fix';
+
 export const APP_NAME = 'Project X' as const;
 
 export const SERVICE_NAMES = {

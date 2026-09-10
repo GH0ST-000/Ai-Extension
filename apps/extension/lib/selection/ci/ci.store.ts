@@ -14,6 +14,7 @@ import {
   fetchPullRequestChecks,
   GithubApiError,
 } from '../../services/github-api';
+import { useCIFixSessionStore } from './fix/ci-fix.store';
 
 export type CiPanelView = 'closed' | 'overview' | 'check-detail';
 
@@ -71,15 +72,26 @@ function maybeStartPolling(
 ): void {
   stopPolling(get, set);
   const summary = get().summary;
-  if (get().view === 'closed' || !summary || summary.overallStatus !== 'PENDING') {
+  const fixSession = useCIFixSessionStore.getState().session;
+  const waitingForCi =
+    fixSession?.status === 'WAITING_FOR_NEW_CI' || fixSession?.status === 'VERIFYING';
+  const shouldPoll =
+    get().view !== 'closed' && (summary?.overallStatus === 'PENDING' || waitingForCi);
+  if (!shouldPoll) {
     return;
   }
+  const startedAt = Date.now();
+  const MAX_POLL_MS = 15 * 60 * 1000;
   const timer = setInterval(() => {
     if (get().view === 'closed') {
       stopPolling(get, set);
       return;
     }
-    if (get().summary?.overallStatus !== 'PENDING') {
+    const liveFix = useCIFixSessionStore.getState().session;
+    const stillWaiting =
+      liveFix?.status === 'WAITING_FOR_NEW_CI' || liveFix?.status === 'VERIFYING';
+    const stillPending = get().summary?.overallStatus === 'PENDING';
+    if ((!stillWaiting && !stillPending) || Date.now() - startedAt > MAX_POLL_MS) {
       stopPolling(get, set);
       return;
     }
@@ -127,6 +139,7 @@ export const useGithubCiStore = create<CiState>((set, get) => ({
   close: () => {
     get().abortController?.abort();
     stopPolling(get, set);
+    useCIFixSessionStore.getState().clear();
     set({
       view: 'closed',
       destination: null,
@@ -194,6 +207,21 @@ export const useGithubCiStore = create<CiState>((set, get) => ({
         return;
       }
       set({ summary, loadingSummary: false, abortController: null });
+      const fixStore = useCIFixSessionStore.getState();
+      if (
+        fixStore.session &&
+        (fixStore.session.status === 'WAITING_FOR_NEW_CI' ||
+          fixStore.session.status === 'VERIFYING')
+      ) {
+        fixStore.applyVerificationSummary(summary);
+      } else if (fixStore.session) {
+        fixStore.assertBinding({
+          owner: summary.owner,
+          repository: summary.repository,
+          pullRequestNumber: summary.pullRequestNumber,
+          headSha: summary.headSha,
+        });
+      }
       maybeStartPolling(get, set, () => get().refresh());
     } catch (err) {
       if (controller.signal.aborted) {
@@ -312,6 +340,19 @@ export const useGithubCiStore = create<CiState>((set, get) => ({
         analyzing: false,
         abortController: null,
       });
+      const fixStore = useCIFixSessionStore.getState();
+      if (
+        fixStore.session &&
+        fixStore.session.sourceCheck.id === bound.checkId &&
+        (fixStore.session.status === 'ANALYZING' || fixStore.viewOpen)
+      ) {
+        fixStore.attachAnalysis(
+          result.analysis,
+          result.evidence,
+          bound.headSha,
+          (destination.changedFiles ?? []).map((f) => f.path),
+        );
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         return;
@@ -320,6 +361,10 @@ export const useGithubCiStore = create<CiState>((set, get) => ({
         err instanceof GithubApiError ? err.message : 'Unable to analyze this CI failure.';
       const code = err instanceof GithubApiError ? err.code : null;
       set({ analyzing: false, error: message, errorCode: code, abortController: null });
+      const fixStore = useCIFixSessionStore.getState();
+      if (fixStore.session?.status === 'ANALYZING') {
+        fixStore.setError(message, code);
+      }
     }
   },
 
@@ -365,9 +410,11 @@ export const useGithubCiStore = create<CiState>((set, get) => ({
 
   clearForNavigation: () => {
     if (get().view === 'closed') {
+      useCIFixSessionStore.getState().clear();
       return;
     }
     get().close();
+    useCIFixSessionStore.getState().clear();
   },
 }));
 

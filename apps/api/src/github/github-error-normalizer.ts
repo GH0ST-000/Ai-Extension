@@ -38,6 +38,14 @@ export class GithubErrorNormalizer {
       case 'CI_EVIDENCE_TOO_LARGE':
       case 'STALE_CI_CONTEXT':
       case 'AI_ANALYSIS_FAILED':
+      case 'FIX_SESSION_STALE':
+      case 'FIX_TARGET_NOT_FOUND':
+      case 'FIX_TARGET_AMBIGUOUS':
+      case 'FIX_TARGET_INVALID':
+      case 'FIX_CONTEXT_INSUFFICIENT':
+      case 'NEW_CI_NOT_AVAILABLE':
+      case 'VERIFICATION_CHECK_NOT_FOUND':
+      case 'VERIFICATION_CONTEXT_STALE':
         return HttpStatus.BAD_REQUEST;
       case 'IDEMPOTENCY_CONFLICT':
         return HttpStatus.CONFLICT;

@@ -61,6 +61,13 @@ export class GithubWriteService {
       );
     }
 
+    await this.assertPullRequestOpen({
+      token,
+      owner,
+      repository,
+      pullRequestNumber: input.pullRequestNumber,
+    });
+
     const result = await this.createIssueComment({
       token,
       owner,
@@ -71,6 +78,63 @@ export class GithubWriteService {
 
     await this.storeIdempotentResult(cacheKey, result);
     return { ...result, deduplicated: false };
+  }
+
+  private async assertPullRequestOpen(input: {
+    token: string;
+    owner: string;
+    repository: string;
+    pullRequestNumber: number;
+  }): Promise<void> {
+    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/pulls/${input.pullRequestNumber}`;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${input.token}`,
+          'User-Agent': 'Project-X',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+    } catch {
+      throw new ServiceUnavailableException('Unable to reach GitHub to validate the pull request.');
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      state?: string;
+      merged?: boolean;
+      message?: string;
+    };
+
+    if (response.status === 401) {
+      throw new UnauthorizedException(
+        'GitHub rejected your stored token. Update it in dashboard Settings.',
+      );
+    }
+    if (response.status === 403) {
+      throw new ForbiddenException(
+        payload.message?.trim() ||
+          'GitHub forbade access to this pull request. Check PAT permissions and org SSO.',
+      );
+    }
+    if (response.status === 404) {
+      throw new BadRequestException(
+        'GitHub could not find that repository or pull request (or the token cannot access it).',
+      );
+    }
+    if (!response.ok) {
+      throw new BadRequestException(
+        payload.message?.trim() || `GitHub PR lookup failed (HTTP ${response.status}).`,
+      );
+    }
+    if (payload.state !== 'open' || payload.merged) {
+      throw new BadRequestException(
+        'This pull request is closed or merged. Refresh the PR page before posting.',
+      );
+    }
   }
 
   private async createIssueComment(input: {

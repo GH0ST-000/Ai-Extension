@@ -29,14 +29,25 @@ describe('GithubWriteService', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 201,
-        json: async () => ({
-          id: 42,
-          html_url: 'https://github.com/acme/app/pull/1#issuecomment-42',
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            number: 1,
+            state: 'open',
+            merged: false,
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 42,
+            html_url: 'https://github.com/acme/app/pull/1#issuecomment-42',
+          }),
         }),
-      }),
     );
 
     const service = new GithubWriteService(githubConnections as never, redis as never);

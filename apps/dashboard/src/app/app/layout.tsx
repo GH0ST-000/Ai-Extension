@@ -43,7 +43,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
             <div className="rounded-2xl bg-ink px-4 py-4 text-inverse">
               <p className="font-display text-sm font-semibold tracking-tight">Browser AI</p>
               <p className="mt-1 text-[12px] leading-relaxed text-inverse/70">
-                Smart actions, Replace, Review Entire PR, and Suggest Fix — from the selection.
+                Smart actions, PR reports, and confirmed GitHub reviews — from the selection.
               </p>
             </div>
             <p className="truncate px-1 text-[11px] text-muted-foreground">

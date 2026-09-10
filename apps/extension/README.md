@@ -69,6 +69,15 @@ With a connected GitHub PAT, the PR report offers **Post to GitHub**:
 
 Token never leaves the API. **Copy Comment** still works for manual paste.
 
+### Day 13 — Submit PR review
+
+Curate findings into a session-only **Review Draft**, edit comments / overall body, choose **COMMENT** (default) / **APPROVE** / **REQUEST_CHANGES**, preview an immutable snapshot, then confirm. The API submits a grouped GitHub Pull Request Review (`POST /api/github/pull-requests/:owner/:repo/:number/reviews`).
+
+- Inline comments only when trusted diff coordinates exist (Day 10 findings currently fall back to PR-level notes aggregated into the body)
+- Redis idempotency + lock; uncertain writes are not auto-retried
+- Draft stays bound to the original PR — never retargets on SPA navigation
+- Day 12 **Post to GitHub** comment flow still works alongside reviews
+
 ## Day 11 — Error Intelligence
 
 When a software error is confidently detected (local multi-signal scoring — not an AI classify call), Smart Actions promote:

@@ -20,6 +20,8 @@ describe('shortcut → AIAction mapping', () => {
       r: AIAction.REVIEW_CODE,
       f: AIAction.SUGGEST_FIX,
       a: AIAction.REVIEW_ENTIRE_PR,
+      u: AIAction.UNDERSTAND_ERROR,
+      o: AIAction.FIND_ROOT_CAUSE,
       p: AIAction.CUSTOM,
     });
   });

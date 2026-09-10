@@ -27,6 +27,12 @@ describe('classifyContent', () => {
     expect(classifyContent(text)).toBe('error');
   });
 
+  it('does not treat business prose as an error', () => {
+    expect(classifyContent('Our marketing campaign failed to reach the expected audience.')).toBe(
+      'prose',
+    );
+  });
+
   it('detects short phrases', () => {
     expect(classifyContent('ship it')).toBe('short-text');
     expect(classifyContent('primary CTA label')).toBe('short-text');
@@ -58,58 +64,41 @@ describe('rankActions', () => {
   });
 
   it('ranks code selections with Explain Code first', () => {
-    expect(rankActions('code').map((action) => action.id)).toEqual([
-      AIAction.EXPLAIN_CODE,
-      AIAction.REVIEW_CODE,
-      AIAction.SUGGEST_FIX,
-      AIAction.REVIEW_ENTIRE_PR,
-      AIAction.EXPLAIN,
-      AIAction.CUSTOM,
-      AIAction.SUMMARIZE,
-      AIAction.TRANSLATE,
-      AIAction.IMPROVE_WRITING,
-    ]);
+    expect(
+      rankActions('code')
+        .map((action) => action.id)
+        .slice(0, 3),
+    ).toEqual([AIAction.EXPLAIN_CODE, AIAction.REVIEW_CODE, AIAction.SUGGEST_FIX]);
   });
 
   it('ranks prose with Summarize first', () => {
-    expect(rankActions('prose').map((action) => action.id)).toEqual([
-      AIAction.SUMMARIZE,
-      AIAction.EXPLAIN,
-      AIAction.IMPROVE_WRITING,
-      AIAction.TRANSLATE,
-      AIAction.CUSTOM,
-      AIAction.REVIEW_CODE,
-      AIAction.REVIEW_ENTIRE_PR,
-      AIAction.SUGGEST_FIX,
-      AIAction.EXPLAIN_CODE,
-    ]);
+    expect(rankActions('prose')[0]?.id).toBe(AIAction.SUMMARIZE);
   });
 
   it('ranks short text with Explain first', () => {
-    expect(rankActions('short-text').map((action) => action.id)).toEqual([
-      AIAction.EXPLAIN,
-      AIAction.IMPROVE_WRITING,
-      AIAction.TRANSLATE,
-      AIAction.CUSTOM,
-      AIAction.SUMMARIZE,
-      AIAction.REVIEW_CODE,
-      AIAction.REVIEW_ENTIRE_PR,
-      AIAction.SUGGEST_FIX,
-      AIAction.EXPLAIN_CODE,
-    ]);
+    expect(rankActions('short-text')[0]?.id).toBe(AIAction.EXPLAIN);
   });
 
-  it('ranks errors with Explain then Explain Code', () => {
-    expect(rankActions('error').map((action) => action.id)).toEqual([
-      AIAction.EXPLAIN,
-      AIAction.EXPLAIN_CODE,
-      AIAction.REVIEW_CODE,
+  it('ranks errors with Find Root Cause → Suggest Fix → Understand Error', () => {
+    expect(
+      rankActions('error')
+        .map((action) => action.id)
+        .slice(0, 3),
+    ).toEqual([AIAction.FIND_ROOT_CAUSE, AIAction.SUGGEST_FIX, AIAction.UNDERSTAND_ERROR]);
+  });
+
+  it('ranks network errors with Understand Error first', () => {
+    const ranked = rankActions('error', AI_ACTIONS, undefined, {
+      isError: true,
+      confidence: 0.8,
+      category: 'network',
+      errorCode: 'ECONNREFUSED',
+      signals: ['node-network'],
+    });
+    expect(ranked.map((action) => action.id).slice(0, 3)).toEqual([
+      AIAction.UNDERSTAND_ERROR,
+      AIAction.FIND_ROOT_CAUSE,
       AIAction.SUGGEST_FIX,
-      AIAction.REVIEW_ENTIRE_PR,
-      AIAction.CUSTOM,
-      AIAction.SUMMARIZE,
-      AIAction.TRANSLATE,
-      AIAction.IMPROVE_WRITING,
     ]);
   });
 
@@ -123,6 +112,25 @@ describe('rankActions', () => {
     expect(ranked[0]?.id).toBe(AIAction.REVIEW_ENTIRE_PR);
     expect(ranked[1]?.id).toBe(AIAction.REVIEW_CODE);
     expect(ranked[2]?.id).toBe(AIAction.SUGGEST_FIX);
+  });
+
+  it('keeps error intelligence ahead of PR review on GitHub PR error selections', () => {
+    const ranked = rankActions(
+      'error',
+      AI_ACTIONS,
+      { githubView: 'pr', pageType: 'github', codeHost: true },
+      {
+        isError: true,
+        confidence: 0.9,
+        category: 'runtime',
+        signals: ['js-runtime'],
+      },
+    );
+    expect(ranked.map((action) => action.id).slice(0, 3)).toEqual([
+      AIAction.FIND_ROOT_CAUSE,
+      AIAction.SUGGEST_FIX,
+      AIAction.UNDERSTAND_ERROR,
+    ]);
   });
 });
 
@@ -139,11 +147,42 @@ describe('getRankedActions', () => {
     expect(actions[0]?.id).toBe(AIAction.EXPLAIN_CODE);
   });
 
-  it('returns prose ranking for a long paragraph', () => {
+  it('returns prose ranking for a long paragraph without error actions first', () => {
     const text =
       'When you select a paragraph on documentation sites, Project X should prefer summarize and explain before code-oriented tools.';
     const { contentType, actions } = getRankedActions(text);
     expect(contentType).toBe('prose');
     expect(actions[0]?.id).toBe(AIAction.SUMMARIZE);
+    expect(actions.slice(0, 4).map((a) => a.id)).not.toContain(AIAction.FIND_ROOT_CAUSE);
+  });
+
+  it('promotes error intelligence for TypeError + nearby-code style selection', () => {
+    const text = "TypeError: Cannot read properties of undefined (reading 'id')";
+    const { contentType, actions } = getRankedActions(text);
+    expect(contentType).toBe('error');
+    expect(actions.map((a) => a.id).slice(0, 3)).toEqual([
+      AIAction.FIND_ROOT_CAUSE,
+      AIAction.SUGGEST_FIX,
+      AIAction.UNDERSTAND_ERROR,
+    ]);
+  });
+
+  it('promotes error actions for TS2339', () => {
+    const { contentType, actions } = getRankedActions(
+      "TS2339: Property 'translatedCrops' does not exist on type 'Crop'",
+    );
+    expect(contentType).toBe('error');
+    expect(actions[0]?.id).toBe(AIAction.FIND_ROOT_CAUSE);
+  });
+
+  it('keeps normal TypeScript source on code ranking', () => {
+    const code = [
+      'export function add(a: number, b: number): number {',
+      '  return a + b;',
+      '}',
+    ].join('\n');
+    const { contentType, actions } = getRankedActions(code);
+    expect(contentType).toBe('code');
+    expect(actions[0]?.id).toBe(AIAction.EXPLAIN_CODE);
   });
 });

@@ -3,12 +3,14 @@ import { AIAction } from '@project-x/types';
 import type { AiPromptDefinition } from '../interfaces/ai-prompt-definition.interface';
 import {
   BASE_RULES,
+  ERROR_BASE_RULES,
+  buildErrorUserContent,
   formatPageContext,
   wrapCustomInstruction,
   wrapSelectedText,
 } from './prompt.utils';
 
-const INSTRUCTIONS = [
+const CODE_INSTRUCTIONS = [
   'Propose a minimal corrected version of the selected code or diff hunk.',
   'Fix the concrete issue only — do not refactor unrelated code or invent APIs/files.',
   'If CMD contains prior review findings, address those findings; otherwise infer the issue from SEL/CTX.',
@@ -21,9 +23,34 @@ const INSTRUCTIONS = [
   BASE_RULES,
 ].join(' ');
 
+const ERROR_INSTRUCTIONS = [
+  'Suggest practical fixes for the selected software error based on available evidence.',
+  'Show only the most useful 1–3 options (e.g. Option 1 — Guard clause).',
+  'Briefly explain why each fix helps. Prefer concrete code snippets over vague advice.',
+  'Do not apply changes automatically — advisory only. Do not invent APIs/files.',
+  'If context is insufficient, say what is missing instead of fabricating a patch.',
+  ERROR_BASE_RULES,
+].join(' ');
+
 export const suggestFixPrompt: AiPromptDefinition = {
   action: AIAction.SUGGEST_FIX,
   build: (input) => {
+    const errorMode = Boolean(input.errorIntelligence?.classification.isError);
+    if (errorMode) {
+      return {
+        instructions: ERROR_INSTRUCTIONS,
+        messages: [
+          {
+            role: 'user',
+            content: buildErrorUserContent(
+              input,
+              'Suggest practical fix options for this error (max 3).',
+            ),
+          },
+        ],
+      };
+    }
+
     const finding = input.customPrompt?.trim() ?? '';
     const contextBlock = formatPageContext(input.context, input.text);
     const parts = [
@@ -34,7 +61,7 @@ export const suggestFixPrompt: AiPromptDefinition = {
     ].filter(Boolean);
 
     return {
-      instructions: INSTRUCTIONS,
+      instructions: CODE_INSTRUCTIONS,
       messages: [
         {
           role: 'user',

@@ -49,6 +49,16 @@ After Review Entire PR finishes, the result panel becomes a **compact review rep
 
 No GitHub write access — export is clipboard-only. Types live in `@project-x/types` (`PRReviewReport` / `PRReviewFinding`); the report is assembled client-side from Day 9 markdown + page context.
 
+## Day 11 — Error Intelligence
+
+When a software error is confidently detected (local multi-signal scoring — not an AI classify call), Smart Actions promote:
+
+1. **Find Root Cause** (`FIND_ROOT_CAUSE`, shortcut `O`)
+2. **Suggest Fix** (`SUGGEST_FIX`, shortcut `F`)
+3. **Understand Error** (`UNDERSTAND_ERROR`, shortcut `U`)
+
+The extension builds an `ErrorIntelligenceContext` (classification, stack frames, nearby code, GitHub metadata when available), redacts obvious secrets, and streams through the existing NestJS endpoint. Replace is hidden for these diagnostic actions. Prose like “the campaign failed” must not trigger error actions.
+
 ## Day 6 — In-place Replace
 
 When the selection is inside an editable field (`textarea`, supported text-like `input`s, or `contenteditable`), the result panel shows **Replace**.

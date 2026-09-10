@@ -174,7 +174,9 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     [content, isEntirePr, reviewContext],
   );
   const resolvedIdSet = useMemo(() => new Set(resolvedFindingIds), [resolvedFindingIds]);
-  const showSuggestFix = Boolean(isSuggestFix && parsedFix);
+  const showSuggestFix = Boolean(
+    isSuggestFix && parsedFix && (parsedFix.fixCode || parsedFix.issue || parsedFix.why),
+  );
   const showPrReport = Boolean(isEntirePr && prReport);
   const panelWidthPx = useMemo(() => {
     if (isSuggestFix) {

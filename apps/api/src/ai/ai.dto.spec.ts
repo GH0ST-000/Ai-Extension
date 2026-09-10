@@ -95,12 +95,32 @@ describe('ExecuteAiActionDto', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('accepts jira page context', async () => {
+    const errors = await validateDto({
+      action: AIAction.SUMMARIZE_JIRA_ISSUE,
+      text: 'Issue PAY-321 summary context',
+      context: {
+        type: 'jira',
+        url: 'https://company.atlassian.net/browse/PAY-321',
+        title: 'PAY-321',
+        jira: {
+          siteHost: 'company.atlassian.net',
+          pageType: 'issue',
+          issueKey: 'PAY-321',
+          projectKey: 'PAY',
+          summary: 'Prevent duplicate charges',
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
   it('rejects an invalid context type', async () => {
     const errors = await validateDto({
       action: AIAction.EXPLAIN,
       text: 'Hello',
       context: {
-        type: 'jira',
+        type: 'gitlab',
         url: 'https://example.com',
         title: 'Example',
       },

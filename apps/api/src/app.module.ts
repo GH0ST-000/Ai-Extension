@@ -13,6 +13,7 @@ import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { SettingsModule } from './settings/settings.module';
 import { GithubModule } from './github/github.module';
+import { JiraModule } from './jira/jira.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { GithubModule } from './github/github.module';
     AuthModule,
     SettingsModule,
     GithubModule,
+    JiraModule,
     AiModule,
   ],
 })

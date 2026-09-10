@@ -9,21 +9,21 @@ const CAPABILITIES = [
     copy: 'Code, errors, prose, and short text reorder Explain, Summarize, Code Review, and the rest — instantly, on-device.',
   },
   {
-    label: 'Replace',
-    value: 'Write back in place',
-    copy: 'On textareas, text inputs, and contenteditable, stream a rewrite then Replace without leaving the page.',
-  },
-  {
     label: 'GitHub',
     value: 'Review with confirmation',
     copy: 'PR report → curated Review Draft → COMMENT / APPROVE / REQUEST_CHANGES. Your PAT stays encrypted on the API.',
   },
+  {
+    label: 'Jira',
+    value: 'Issue intelligence',
+    copy: 'Summarize, acceptance criteria, technical plan, risks — then compare with a PR. Read-only; token stays on the API.',
+  },
 ] as const;
 
 const FLOW_STEPS = [
-  'Highlight text, code, an error, or a PR diff',
-  'Pick a smart-ranked action (or press A / R / F…)',
-  'Stream the answer — Copy, Replace, or confirm a GitHub write',
+  'Highlight text, code, an error, a PR diff, or open a Jira issue',
+  'Pick a smart-ranked action (or use the Jira / CI panels)',
+  'Stream the answer — Copy, Replace, Compare with PR, or confirm a GitHub write',
 ] as const;
 
 export default function DashboardHomePage() {
@@ -43,11 +43,11 @@ export default function DashboardHomePage() {
           Extension studio
         </p>
         <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold tracking-tight text-ink text-balance md:text-5xl">
-          Smart actions, PR reports, and confirmed GitHub reviews.
+          Smart actions, PR reports, Jira context, and confirmed GitHub reviews.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-          Sign in here to tune response length, page context, and your GitHub token. The extension
-          uses the same account for Ask AI, ranking, and safe writes.
+          Sign in here to tune response length, page context, GitHub, and read-only Jira. The
+          extension uses the same account for Ask AI, ranking, and safe writes.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -86,8 +86,8 @@ export default function DashboardHomePage() {
               Select → ranked menu → stream → Replace when you can.
             </h2>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-inverse/65">
-              Works on docs, forms, and GitHub pull requests. Context stays in the extension; OpenAI
-              keys never leave the API.
+              Works on docs, forms, GitHub pull requests, and Jira Cloud issues. Context stays in
+              the extension; secrets never leave the API.
             </p>
           </div>
           <div className="relative border-t border-inverse/10 p-7 md:border-l md:border-t-0 md:p-9">
@@ -111,11 +111,12 @@ export default function DashboardHomePage() {
         </p>
         <p className="mt-2 font-display text-xl font-semibold tracking-tight text-ink">
           Explain · Improve Writing · Summarize · Translate · Explain Code · Code Review · Suggest
-          Fix · Review Entire PR · Understand Error · Find Root Cause · Custom
+          Fix · Review Entire PR · Understand Error · Find Root Cause · Summarize Issue · Acceptance
+          Criteria · Technical Plan · Risks & Questions · Compare Jira ↔ PR · Custom
         </p>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Shortcuts stay bound to each action even when Smart Actions reorders the menu. GitHub
-          comment and review submit are confirmed writes — not AI actions.
+          comment and review submit are confirmed writes — not AI actions. Jira stays read-only.
         </p>
       </section>
     </div>

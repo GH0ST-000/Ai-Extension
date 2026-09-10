@@ -12,6 +12,7 @@ export {
   verificationToSessionStatus,
 } from './ci-fix/verify-fix';
 export type { VerifyCIFixInput } from './ci-fix/verify-fix';
+export { findJiraIssueKeysInText, detectJiraKeysInPrSignals } from './jira/jira-key-match';
 
 export const APP_NAME = 'Project X' as const;
 

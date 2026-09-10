@@ -36,6 +36,13 @@ const PR_FLOW = [
   ['Submit', 'Encrypted PAT on the API · idempotent · View on GitHub'],
 ] as const;
 
+const JIRA_FLOW = [
+  ['Connect', 'Email + API token + *.atlassian.net — encrypted on the API, never in the extension'],
+  ['Open issue', 'Extension detects the Jira Cloud issue and loads normalized context'],
+  ['Understand', 'Summarize · Acceptance Criteria · Technical Plan · Risks & Questions'],
+  ['Compare', 'Link a PR by issue key, then compare requirement vs diff — read-only on Jira'],
+] as const;
+
 export default function HomePage() {
   return (
     <main className="atmosphere relative min-h-screen overflow-hidden">
@@ -62,8 +69,8 @@ export default function HomePage() {
               AI that reads the page with you.
             </h1>
             <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-              Highlight anything in Chrome. Smart actions, error intelligence, PR reports, and
-              confirmed GitHub reviews — without leaving the tab.
+              Highlight anything in Chrome. Smart actions, PR reviews, Jira issue intelligence, and
+              confirmed GitHub writes — without leaving the tab.
             </p>
             <LandingHeroCtas />
           </div>
@@ -80,8 +87,8 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
-              Ranking and error detection run on-device. OpenAI keys and GitHub PATs stay on the
-              API.
+              Ranking and error detection run on-device. OpenAI keys, GitHub PATs, and Jira tokens
+              stay on the API.
             </p>
           </div>
 
@@ -135,14 +142,60 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in-delay-2 border-t border-line/70 py-10 md:py-12">
+        <section className="rise-in-delay-2 border-t border-line/70 py-12 md:py-14">
+          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:items-start">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                Jira workflow
+              </p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+                From ticket to engineering context — then compare with a PR.
+              </h2>
+              <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground md:text-base">
+                Connect Jira Cloud once in Settings. On an issue page, Project X summarizes
+                requirements, extracts explicit vs inferred acceptance criteria, and can compare
+                against a linked GitHub PR. Jira stays read-only.
+              </p>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Setup steps live in{' '}
+                <Link
+                  href="/app/settings"
+                  className="font-semibold text-ink underline-offset-2 hover:underline"
+                >
+                  Settings → Jira
+                </Link>
+                .
+              </p>
+            </div>
+
+            <ol className="space-y-0">
+              {JIRA_FLOW.map(([label, detail], index) => (
+                <li
+                  key={label}
+                  className="flex gap-3 border-t border-line/70 py-3 first:border-t-0 first:pt-0 last:pb-0"
+                >
+                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink font-display text-[11px] font-bold text-inverse">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">{label}</p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        <section className="rise-in-delay-3 border-t border-line/70 py-10 md:py-12">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="max-w-xl">
               <p className="font-display text-xl font-semibold tracking-tight text-ink md:text-2xl">
-                Same account for extension, studio, and GitHub.
+                Same account for extension, studio, GitHub, and Jira.
               </p>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                Connect a PAT in Settings when you are ready to post comments or submit reviews.
+                Connect a GitHub PAT and/or Jira API token in Settings when you need those
+                integrations.
               </p>
             </div>
             <Link

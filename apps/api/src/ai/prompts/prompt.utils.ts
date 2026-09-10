@@ -121,6 +121,18 @@ export function formatPageContext(
     }
   }
 
+  if (context.jira) {
+    const j = context.jira;
+    pushLine(lines, 'jiraHost', j.siteHost);
+    pushLine(lines, 'jiraPage', j.pageType);
+    pushLine(lines, 'jiraKey', j.issueKey);
+    pushLine(lines, 'jiraProject', j.projectKey);
+    pushLine(lines, 'jiraSummary', j.summary);
+    pushLine(lines, 'jiraType', j.issueType);
+    pushLine(lines, 'jiraStatus', j.status);
+    pushLine(lines, 'jiraPriority', j.priority);
+  }
+
   if (lines.length === 0) {
     return null;
   }

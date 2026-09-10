@@ -19,6 +19,7 @@ export const SHORTCUT_TO_ACTION: Readonly<Record<string, AIAction>> = {
   a: AIAction.REVIEW_ENTIRE_PR,
   u: AIAction.UNDERSTAND_ERROR,
   o: AIAction.FIND_ROOT_CAUSE,
+  j: AIAction.SUMMARIZE_JIRA_ISSUE,
   p: AIAction.CUSTOM,
 };
 
@@ -84,6 +85,32 @@ export const AI_ACTIONS: readonly AiActionDefinition[] = [
     shortcut: 'O',
   },
   {
+    id: AIAction.SUMMARIZE_JIRA_ISSUE,
+    label: 'Summarize Issue',
+    description: 'Jira engineering summary',
+    shortcut: 'J',
+  },
+  {
+    id: AIAction.EXTRACT_ACCEPTANCE_CRITERIA,
+    label: 'Acceptance Criteria',
+    description: 'Explicit vs inferred',
+  },
+  {
+    id: AIAction.CREATE_TECHNICAL_PLAN,
+    label: 'Technical Plan',
+    description: 'Implementation outline',
+  },
+  {
+    id: AIAction.ANALYZE_JIRA_RISKS,
+    label: 'Risks & Questions',
+    description: 'Requirement risks',
+  },
+  {
+    id: AIAction.COMPARE_JIRA_WITH_PR,
+    label: 'Compare Jira ↔ PR',
+    description: 'Requirement coverage',
+  },
+  {
     id: AIAction.CUSTOM,
     label: 'Custom Prompt',
     description: 'Ask anything',
@@ -96,6 +123,12 @@ export const DIAGNOSTIC_AI_ACTIONS: ReadonlySet<AIAction> = new Set([
   AIAction.UNDERSTAND_ERROR,
   AIAction.FIND_ROOT_CAUSE,
   AIAction.SUGGEST_FIX,
+  AIAction.SUMMARIZE_JIRA_ISSUE,
+  AIAction.EXTRACT_ACCEPTANCE_CRITERIA,
+  AIAction.CREATE_TECHNICAL_PLAN,
+  AIAction.ANALYZE_JIRA_RISKS,
+  AIAction.COMPARE_JIRA_WITH_PR,
+  AIAction.ANALYZE_CI_FAILURE,
 ]);
 
 export const ERROR_INTELLIGENCE_ACTIONS: ReadonlySet<AIAction> = new Set([

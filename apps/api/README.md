@@ -41,6 +41,10 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | GET | `/api/settings/github` | JWT | GitHub connection status (never returns PAT) |
 | PUT | `/api/settings/github` | JWT | Validate + store encrypted GitHub PAT |
 | DELETE | `/api/settings/github` | JWT | Disconnect GitHub |
+| GET | `/api/settings/jira` | JWT | Jira Cloud connection status (never returns API token) |
+| PUT | `/api/settings/jira` | JWT | Validate + store encrypted Jira email/API token + site host (read-only) |
+| DELETE | `/api/settings/jira` | JWT | Disconnect Jira |
+| GET | `/api/jira/issues/:issueKey` | JWT | Fetch + normalize issue (`?host=` must match connected `*.atlassian.net` site) |
 | POST | `/api/github/pull-requests/comments` | JWT | Post a PR comment (idempotent; uses stored PAT) |
 | POST | `/api/github/pull-requests/:owner/:repo/:number/patches/prepare` | JWT | Prepare a PR head file fix (no write; Redis-stored preview) |
 | POST | `/api/github/pull-requests/:owner/:repo/:number/patches/apply` | JWT | Apply prepared fix as one Contents API commit (idempotent) |
@@ -51,6 +55,8 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | POST | `/api/ai/actions` | JWT | Non-streaming AI action (debug/tests) |
 
 Day 16 CI Fix Loop is session-scoped in the extension (not a new mutation API). It orchestrates Day 15 analysis → target selection → Day 8 `SUGGEST_FIX` (optional `CI_FIX_CONTEXT` in `customPrompt`) → Day 14 prepare/apply → CI refresh/verification. No automatic commits, CI reruns, or recursive fixes.
+
+Day 17 Jira Intelligence is **read-only**. Connect via dashboard Settings (Atlassian account email + API token + `*.atlassian.net` site host). The API never posts comments, transitions issues, creates/edits issues, or downloads attachment binaries. Cross-tool compare reuses existing GitHub PR context; GitHub mutations still require Days 13/14 flows.
 
 ### Auth
 

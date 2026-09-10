@@ -26,5 +26,10 @@ export const ACTION_ICONS: Record<AIAction, ComponentType<SVGProps<SVGSVGElement
   [AIAction.UNDERSTAND_ERROR]: ExplainIcon,
   [AIAction.FIND_ROOT_CAUSE]: ReviewIcon,
   [AIAction.ANALYZE_CI_FAILURE]: ReviewIcon,
+  [AIAction.SUMMARIZE_JIRA_ISSUE]: SummarizeIcon,
+  [AIAction.EXTRACT_ACCEPTANCE_CRITERIA]: ReviewIcon,
+  [AIAction.CREATE_TECHNICAL_PLAN]: CodeIcon,
+  [AIAction.ANALYZE_JIRA_RISKS]: ExplainIcon,
+  [AIAction.COMPARE_JIRA_WITH_PR]: PrReviewIcon,
   [AIAction.CUSTOM]: PromptIcon,
 };

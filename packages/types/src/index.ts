@@ -43,6 +43,12 @@ export enum AIAction {
   FIND_ROOT_CAUSE = 'FIND_ROOT_CAUSE',
   /** Day 15 — CI failure analysis (typically invoked server-side with trusted evidence). */
   ANALYZE_CI_FAILURE = 'ANALYZE_CI_FAILURE',
+  /** Day 17 — Jira issue intelligence. */
+  SUMMARIZE_JIRA_ISSUE = 'SUMMARIZE_JIRA_ISSUE',
+  EXTRACT_ACCEPTANCE_CRITERIA = 'EXTRACT_ACCEPTANCE_CRITERIA',
+  CREATE_TECHNICAL_PLAN = 'CREATE_TECHNICAL_PLAN',
+  ANALYZE_JIRA_RISKS = 'ANALYZE_JIRA_RISKS',
+  COMPARE_JIRA_WITH_PR = 'COMPARE_JIRA_WITH_PR',
   CUSTOM = 'CUSTOM',
 }
 
@@ -68,9 +74,9 @@ export const CONTENT_TYPES = [
  * Website-specific DOM extraction stays in the extension; the API only
  * receives this normalized shape.
  */
-export type PageContextType = 'generic' | 'github';
+export type PageContextType = 'generic' | 'github' | 'jira';
 
-export const PAGE_CONTEXT_TYPES = ['generic', 'github'] as const;
+export const PAGE_CONTEXT_TYPES = ['generic', 'github', 'jira'] as const;
 
 export interface PageContextPageMeta {
   description?: string;
@@ -111,6 +117,19 @@ export interface PageContextGitHub {
   filesTab?: boolean;
 }
 
+export type JiraPageType = 'issue' | 'board' | 'backlog' | 'search' | 'project' | 'unknown';
+
+export interface PageContextJira {
+  siteHost?: string;
+  pageType?: JiraPageType;
+  issueKey?: string;
+  projectKey?: string;
+  summary?: string;
+  issueType?: string;
+  status?: string;
+  priority?: string;
+}
+
 export interface PageContext {
   type: PageContextType;
   url: string;
@@ -119,6 +138,7 @@ export interface PageContext {
   page?: PageContextPageMeta;
   code?: PageContextCode;
   github?: PageContextGitHub;
+  jira?: PageContextJira;
 }
 
 export type ResponseStyle = 'CONCISE' | 'BALANCED' | 'DETAILED';
@@ -793,4 +813,194 @@ export interface CIFixSession {
   errorCode?: GitHubWriteErrorCode;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Day 17 — Jira Cloud connection status (never includes API token). */
+export interface JiraConnectionStatus {
+  connected: boolean;
+  siteHost?: string | null;
+  siteDisplayName?: string | null;
+  accountId?: string | null;
+  displayName?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpsertJiraConnectionRequest {
+  /** Atlassian account email used with the API token. */
+  email: string;
+  /** Atlassian API token (not password). */
+  apiToken: string;
+  /**
+   * Jira Cloud site host only, e.g. `company.atlassian.net`.
+   * Must be HTTPS *.atlassian.net — never an arbitrary URL.
+   */
+  siteHost: string;
+}
+
+export type JiraErrorCode =
+  | 'JIRA_NOT_CONNECTED'
+  | 'JIRA_SITE_NOT_CONNECTED'
+  | 'JIRA_SITE_NOT_ACCESSIBLE'
+  | 'JIRA_ISSUE_NOT_FOUND'
+  | 'JIRA_ISSUE_NOT_ACCESSIBLE'
+  | 'JIRA_PERMISSION_REQUIRED'
+  | 'JIRA_RATE_LIMITED'
+  | 'JIRA_UNAVAILABLE'
+  | 'JIRA_CONTEXT_STALE'
+  | 'JIRA_CONTENT_UNSUPPORTED'
+  | 'JIRA_PR_LINK_NOT_FOUND'
+  | 'JIRA_PR_LINK_AMBIGUOUS'
+  | 'JIRA_PR_COMPARISON_STALE'
+  | 'UNKNOWN';
+
+export interface JiraErrorBody {
+  code: JiraErrorCode;
+  message: string;
+}
+
+/** Centralized Jira context budgets. */
+export const JIRA_MAX_DESCRIPTION_CHARS = 12_000;
+export const JIRA_MAX_COMMENTS = 8;
+export const JIRA_MAX_COMMENT_CHARS = 2_000;
+export const JIRA_MAX_TOTAL_CONTEXT_CHARS = 20_000;
+
+export interface JiraRichTextNormalized {
+  plainText: string;
+  truncated: boolean;
+}
+
+export interface JiraIssueLink {
+  type?: string;
+  direction?: 'inward' | 'outward';
+  issueKey?: string;
+  issueSummary?: string;
+}
+
+export interface JiraCommentSummary {
+  id: string;
+  authorDisplayName?: string;
+  createdAt?: string;
+  body: JiraRichTextNormalized;
+}
+
+export interface JiraIssue {
+  id: string;
+  key: string;
+  project: {
+    id?: string;
+    key: string;
+    name?: string;
+  };
+  issueType?: string;
+  summary: string;
+  description?: JiraRichTextNormalized;
+  status?: {
+    id?: string;
+    name: string;
+    category?: string;
+  };
+  priority?: string;
+  assignee?: {
+    accountId?: string;
+    displayName?: string;
+  };
+  reporter?: {
+    accountId?: string;
+    displayName?: string;
+  };
+  labels?: string[];
+  components?: string[];
+  fixVersions?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  links?: JiraIssueLink[];
+  comments?: JiraCommentSummary[];
+  attachmentCount?: number;
+  attachmentNames?: string[];
+  url?: string;
+  siteHost: string;
+  /** True when description/comments were truncated for budgets. */
+  truncated?: boolean;
+  fetchedAt: string;
+}
+
+export type AcceptanceCriterionSource = 'description' | 'comment' | 'inferred';
+export type AcceptanceCriterionTestability = 'clear' | 'partial' | 'unclear';
+
+export interface AcceptanceCriterion {
+  id: string;
+  text: string;
+  source?: AcceptanceCriterionSource;
+  testability?: AcceptanceCriterionTestability;
+}
+
+export interface JiraAcceptanceCriteriaAnalysis {
+  explicit: AcceptanceCriterion[];
+  inferred: AcceptanceCriterion[];
+  openQuestions: string[];
+  completeness: 'high' | 'medium' | 'low';
+}
+
+export type JiraGitHubLinkSource = 'pr-title' | 'pr-body' | 'branch-name' | 'explicit';
+
+export interface JiraGitHubLinkCandidate {
+  issueKey: string;
+  repository: {
+    owner: string;
+    name: string;
+  };
+  pullRequestNumber: number;
+  pullRequestTitle?: string;
+  source: JiraGitHubLinkSource;
+  confidence: 'high' | 'medium';
+}
+
+export type RequirementCoverageStatus = 'covered' | 'partial' | 'not-evident' | 'uncertain';
+
+export interface RequirementCoverage {
+  requirement: string;
+  status: RequirementCoverageStatus;
+  evidence?: Array<{
+    kind: 'file' | 'diff' | 'finding' | 'pr-description' | 'other';
+    path?: string;
+    note?: string;
+  }>;
+  notes?: string;
+}
+
+export interface ScopeObservation {
+  observation: string;
+  evidence?: string;
+}
+
+export interface AcceptanceCriteriaCoverage {
+  criterion: string;
+  source: AcceptanceCriterionSource | 'unknown';
+  status: RequirementCoverageStatus;
+  notes?: string;
+}
+
+export interface JiraPRRisk {
+  severity: 'high' | 'medium' | 'low';
+  text: string;
+  kind: 'known' | 'potential' | 'question';
+}
+
+export type JiraPRAlignment = 'strong' | 'partial' | 'weak' | 'uncertain';
+
+export interface JiraPRComparison {
+  issueKey: string;
+  repository: string;
+  pullRequestNumber: number;
+  headSha: string;
+  alignment: JiraPRAlignment;
+  overview: string;
+  coveredRequirements: RequirementCoverage[];
+  missingOrUnclearRequirements: RequirementCoverage[];
+  implementationBeyondScope: ScopeObservation[];
+  acceptanceCriteriaCoverage: AcceptanceCriteriaCoverage[];
+  risks: JiraPRRisk[];
+  openQuestions: string[];
+  reviewScopeTruncated?: boolean;
+  analyzedAt: string;
 }

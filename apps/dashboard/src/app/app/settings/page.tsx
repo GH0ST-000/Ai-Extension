@@ -1,18 +1,27 @@
 'use client';
 
 import { type FormEvent, useEffect, useState } from 'react';
-import type { GitHubConnectionStatus, ResponseStyle, UserSettings } from '@project-x/types';
+import type {
+  GitHubConnectionStatus,
+  JiraConnectionStatus,
+  ResponseStyle,
+  UserSettings,
+} from '@project-x/types';
 import { RESPONSE_STYLES } from '@project-x/types';
 import { useRouter } from 'next/navigation';
 
 import { GithubPatGuide } from '../../../components/github-pat-guide';
+import { JiraConnectGuide } from '../../../components/jira-connect-guide';
 import {
   ApiError,
   deleteGithubConnection,
+  deleteJiraConnection,
   getGithubConnection,
+  getJiraConnection,
   getSettings,
   updateSettings,
   upsertGithubConnection,
+  upsertJiraConnection,
 } from '../../../lib/api';
 import { clearSession, getStoredUser } from '../../../lib/auth-storage';
 
@@ -29,22 +38,30 @@ export default function SettingsPage() {
   const [draft, setDraft] = useState<UserSettings | null>(null);
   const [github, setGithub] = useState<GitHubConnectionStatus | null>(null);
   const [githubToken, setGithubToken] = useState('');
+  const [jira, setJira] = useState<JiraConnectionStatus | null>(null);
+  const [jiraEmail, setJiraEmail] = useState('');
+  const [jiraToken, setJiraToken] = useState('');
+  const [jiraSiteHost, setJiraSiteHost] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
+  const [jiraSaving, setJiraSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [githubMessage, setGithubMessage] = useState<string | null>(null);
+  const [jiraMessage, setJiraMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [jiraError, setJiraError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [nextSettings, nextGithub] = await Promise.all([
+        const [nextSettings, nextGithub, nextJira] = await Promise.all([
           getSettings(),
           getGithubConnection(),
+          getJiraConnection(),
         ]);
         if (cancelled) {
           return;
@@ -52,6 +69,10 @@ export default function SettingsPage() {
         setSettings(nextSettings);
         setDraft(nextSettings);
         setGithub(nextGithub);
+        setJira(nextJira);
+        if (nextJira.siteHost) {
+          setJiraSiteHost(nextJira.siteHost);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : 'Unable to load settings.');
@@ -134,6 +155,51 @@ export default function SettingsPage() {
     }
   }
 
+  async function onConnectJira(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setJiraSaving(true);
+    setJiraMessage(null);
+    setJiraError(null);
+
+    try {
+      const status = await upsertJiraConnection({
+        email: jiraEmail,
+        apiToken: jiraToken,
+        siteHost: jiraSiteHost,
+      });
+      setJira(status);
+      setJiraToken('');
+      setJiraMessage(
+        status.siteHost
+          ? `Connected to ${status.siteHost}${
+              status.displayName ? ` as ${status.displayName}` : ''
+            }. Token is stored encrypted on the API.`
+          : 'Jira connected. Token is stored encrypted on the API.',
+      );
+    } catch (err) {
+      setJiraError(err instanceof ApiError ? err.message : 'Unable to save Jira connection.');
+    } finally {
+      setJiraSaving(false);
+    }
+  }
+
+  async function onDisconnectJira() {
+    setJiraSaving(true);
+    setJiraMessage(null);
+    setJiraError(null);
+
+    try {
+      await deleteJiraConnection();
+      setJira({ connected: false });
+      setJiraToken('');
+      setJiraMessage('Jira disconnected.');
+    } catch (err) {
+      setJiraError(err instanceof ApiError ? err.message : 'Unable to disconnect Jira.');
+    } finally {
+      setJiraSaving(false);
+    }
+  }
+
   function signOut() {
     clearSession();
     router.replace('/login');
@@ -156,8 +222,7 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="mt-3 max-w-xl text-base text-muted-foreground">
-          Control response length, tone, page context, and your GitHub token for future write
-          actions.
+          Control response length, tone, page context, GitHub, and read-only Jira Cloud access.
         </p>
       </header>
 
@@ -356,6 +421,135 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <section className="rise-in-delay-1 space-y-3">
+        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Jira</h2>
+        <p className="max-w-2xl px-1 text-sm text-muted-foreground">
+          Connect one Jira Cloud site with an Atlassian API token (email + token). Read-only —
+          Project X never creates, edits, comments on, or transitions issues. Credentials stay
+          encrypted on the API and are never returned to the browser or extension.
+        </p>
+
+        {loading ? (
+          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
+            Loading Jira connection…
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">
+            <div className="flex flex-col gap-2 border-b border-line/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-ink">Connection</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {jira?.connected
+                    ? `Connected to ${jira.siteHost ?? 'Jira Cloud'}${
+                        jira.displayName ? ` as ${jira.displayName}` : ''
+                      }`
+                    : 'Not connected'}
+                </p>
+              </div>
+              <span
+                className={[
+                  'self-start rounded-xl border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide sm:self-auto',
+                  jira?.connected
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : 'border-line bg-mist text-muted-foreground',
+                ].join(' ')}
+              >
+                {jira?.connected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
+
+            <form onSubmit={onConnectJira} className="space-y-4 px-5 py-4">
+              <div>
+                <label htmlFor="jira-email" className="text-sm font-semibold text-ink">
+                  Atlassian account email
+                </label>
+                <input
+                  id="jira-email"
+                  type="email"
+                  autoComplete="username"
+                  placeholder="you@company.com"
+                  value={jiraEmail}
+                  onChange={(event) => setJiraEmail(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 text-sm text-ink outline-none ring-accent/30 focus:ring-2"
+                />
+              </div>
+              <div>
+                <label htmlFor="jira-site" className="text-sm font-semibold text-ink">
+                  Site host
+                </label>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Must be <span className="font-medium text-ink">*.atlassian.net</span> (e.g.
+                  company.atlassian.net).
+                </p>
+                <input
+                  id="jira-site"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="company.atlassian.net"
+                  value={jiraSiteHost}
+                  onChange={(event) => setJiraSiteHost(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
+                />
+              </div>
+              <div>
+                <label htmlFor="jira-token" className="text-sm font-semibold text-ink">
+                  API token
+                </label>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Create at id.atlassian.com → Security → API tokens. Not your password. Day 17 uses
+                  read access only.
+                </p>
+                <JiraConnectGuide />
+                <input
+                  id="jira-token"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={
+                    jira?.connected ? '••••••••  (paste to replace)' : 'Atlassian API token'
+                  }
+                  value={jiraToken}
+                  onChange={(event) => setJiraToken(event.target.value)}
+                  className="mt-3 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={
+                    jiraSaving ||
+                    jiraEmail.trim().length < 3 ||
+                    jiraSiteHost.trim().length < 3 ||
+                    jiraToken.trim().length < 8
+                  }
+                  className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
+                >
+                  {jiraSaving ? 'Saving…' : jira?.connected ? 'Update connection' : 'Connect Jira'}
+                </button>
+                {jira?.connected ? (
+                  <button
+                    type="button"
+                    disabled={jiraSaving}
+                    onClick={() => {
+                      void onDisconnectJira();
+                    }}
+                    className="rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                  >
+                    Disconnect
+                  </button>
+                ) : null}
+                {jiraMessage ? <p className="text-sm text-accent">{jiraMessage}</p> : null}
+                {jiraError ? (
+                  <p className="text-sm text-red-600 dark:text-red-400">{jiraError}</p>
+                ) : null}
+              </div>
+            </form>
+          </div>
+        )}
+      </section>
+
       <section className="rise-in-delay-2 space-y-3">
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Account</h2>
         <div className="rounded-3xl border border-line bg-panel/75 p-6 shadow-panel">
@@ -391,8 +585,8 @@ export default function SettingsPage() {
             Secrets stay on the API.
           </p>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            OpenAI keys and GitHub PATs never ship in the extension. Tokens are encrypted at rest
-            and never echoed back in API responses.
+            OpenAI keys, GitHub PATs, and Jira API tokens never ship in the extension. Tokens are
+            encrypted at rest and never echoed back in API responses.
           </p>
         </div>
         <div className="rounded-3xl border border-line bg-panel/70 p-6 shadow-panel">

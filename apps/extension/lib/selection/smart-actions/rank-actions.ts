@@ -8,6 +8,15 @@ import { classifyError } from '../error-intelligence';
 /**
  * Preferred action order per content type. Every AIAction must appear exactly once.
  */
+/** Day 17 Jira actions — appended unless a Jira-specific prefix elevates them. */
+const JIRA_ACTIONS_TAIL: readonly AIAction[] = [
+  AIAction.SUMMARIZE_JIRA_ISSUE,
+  AIAction.EXTRACT_ACCEPTANCE_CRITERIA,
+  AIAction.CREATE_TECHNICAL_PLAN,
+  AIAction.ANALYZE_JIRA_RISKS,
+  AIAction.COMPARE_JIRA_WITH_PR,
+];
+
 const RANKINGS: Record<ContentType, readonly AIAction[]> = {
   code: [
     AIAction.EXPLAIN_CODE,
@@ -21,6 +30,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.SUMMARIZE,
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
+    ...JIRA_ACTIONS_TAIL,
   ],
   error: [
     AIAction.FIND_ROOT_CAUSE,
@@ -34,6 +44,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.SUMMARIZE,
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
+    ...JIRA_ACTIONS_TAIL,
   ],
   prose: [
     AIAction.SUMMARIZE,
@@ -47,6 +58,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.EXPLAIN_CODE,
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
+    ...JIRA_ACTIONS_TAIL,
   ],
   'short-text': [
     AIAction.EXPLAIN,
@@ -60,6 +72,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.EXPLAIN_CODE,
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
+    ...JIRA_ACTIONS_TAIL,
   ],
   'structured-data': [
     AIAction.EXPLAIN,
@@ -73,6 +86,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.IMPROVE_WRITING,
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
+    ...JIRA_ACTIONS_TAIL,
   ],
   unknown: [
     AIAction.EXPLAIN,
@@ -86,6 +100,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.CUSTOM,
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
+    ...JIRA_ACTIONS_TAIL,
   ],
 };
 

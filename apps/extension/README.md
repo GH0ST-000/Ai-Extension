@@ -139,12 +139,14 @@ All actions call `POST {PLASMO_PUBLIC_API_URL}/api/ai/actions/stream`. The API k
 ```text
 contents/selection-toolbar.tsx   Plasmo CSUI entry (shadow DOM + Tailwind)
 lib/services/ai-client.ts        Typed streaming fetch client
-lib/context/                     Page context extractors (generic + GitHub)
+lib/context/                     Page context extractors (generic + GitHub + Jira Cloud)
 lib/editing/                     Editable detect + safe in-place replace (Day 6)
 lib/selection/
   smart-actions/                 Content classifier + action ranking (Day 5)
+  ci/                            CI status + CI Fix Session (Days 15–16)
+  jira/                          Jira issue session + panel (Day 17, read-only)
   store.ts                       Zustand assistant view state
-  hooks/                         Selection + dismiss behaviors
+  hooks/                         Selection + dismiss + document href SPA watch
   components/                    FAB, menu, loading, result, error, custom prompt
   utils/                         DOM selection helpers
 ```

@@ -3,6 +3,8 @@ import { Body, Controller, Delete, Get, HttpCode, Patch, Put, UseGuards } from '
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { UpsertJiraConnectionDto } from '../jira/dto/upsert-jira-connection.dto';
+import { JiraConnectionService } from '../jira/jira-connection.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UpsertGithubConnectionDto } from './dto/upsert-github-connection.dto';
 import { GithubConnectionService } from './github-connection.service';
@@ -14,6 +16,7 @@ export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,
     private readonly githubConnectionService: GithubConnectionService,
+    private readonly jiraConnectionService: JiraConnectionService,
   ) {}
 
   @Get()
@@ -40,5 +43,21 @@ export class SettingsController {
   @HttpCode(204)
   async deleteGithub(@CurrentUser() user: AuthRequestUser) {
     await this.githubConnectionService.disconnect(user.id);
+  }
+
+  @Get('jira')
+  getJira(@CurrentUser() user: AuthRequestUser) {
+    return this.jiraConnectionService.getStatus(user.id);
+  }
+
+  @Put('jira')
+  putJira(@CurrentUser() user: AuthRequestUser, @Body() body: UpsertJiraConnectionDto) {
+    return this.jiraConnectionService.upsertConnection(user.id, body);
+  }
+
+  @Delete('jira')
+  @HttpCode(204)
+  async deleteJira(@CurrentUser() user: AuthRequestUser) {
+    await this.jiraConnectionService.disconnect(user.id);
   }
 }

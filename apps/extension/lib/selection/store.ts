@@ -23,6 +23,7 @@ import type { SuggestFixApplyTarget } from './patch-apply/patch-apply.store';
 import { usePatchApplyStore } from './patch-apply/patch-apply.store';
 import { useGithubCiStore } from './ci';
 import { useCIFixSessionStore } from './ci/fix/ci-fix.store';
+import { useJiraSessionStore } from './jira';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -187,6 +188,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     usePatchApplyStore.getState().reset();
     useGithubCiStore.getState().close();
     useCIFixSessionStore.getState().clear();
+    useJiraSessionStore.getState().clear();
     set({ ...INITIAL_STATE });
   },
 

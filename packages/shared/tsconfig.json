@@ -4,8 +4,9 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "module": "CommonJS",
-    "moduleResolution": "Node"
+    "moduleResolution": "Node",
+    "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }

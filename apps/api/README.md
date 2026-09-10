@@ -50,6 +50,8 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | POST | `/api/ai/actions/stream` | JWT | Stream an AI action as plain text |
 | POST | `/api/ai/actions` | JWT | Non-streaming AI action (debug/tests) |
 
+Day 16 CI Fix Loop is session-scoped in the extension (not a new mutation API). It orchestrates Day 15 analysis → target selection → Day 8 `SUGGEST_FIX` (optional `CI_FIX_CONTEXT` in `customPrompt`) → Day 14 prepare/apply → CI refresh/verification. No automatic commits, CI reruns, or recursive fixes.
+
 ### Auth
 
 ```json

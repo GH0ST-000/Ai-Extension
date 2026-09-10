@@ -185,6 +185,7 @@ describe('PromptRegistry', () => {
     expect(registry.has(AIAction.UNDERSTAND_ERROR)).toBe(true);
     expect(registry.has(AIAction.FIND_ROOT_CAUSE)).toBe(true);
     expect(registry.has(AIAction.SUGGEST_FIX)).toBe(true);
+    expect(registry.has(AIAction.ANALYZE_CI_FAILURE)).toBe(true);
 
     const root = registry.build({
       action: AIAction.FIND_ROOT_CAUSE,

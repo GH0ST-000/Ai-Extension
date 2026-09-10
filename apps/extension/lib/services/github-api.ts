@@ -1,9 +1,17 @@
 import type {
+  AnalyzeCIFailureRequest,
+  AnalyzeCIFailureResponse,
+  ApplyPullRequestPatchRequest,
+  ApplyPullRequestPatchResponse,
+  CICheckFailureEvidence,
   GitHubConnectionStatus,
   GitHubWriteErrorBody,
   GitHubWriteErrorCode,
   PostPullRequestCommentRequest,
   PostPullRequestCommentResponse,
+  PreparePullRequestPatchRequest,
+  PreparePullRequestPatchResponse,
+  PullRequestCISummary,
   SubmitPullRequestReviewRequest,
   SubmitPullRequestReviewResponse,
 } from '@project-x/types';
@@ -43,7 +51,6 @@ async function parseError(
       statusCode?: number;
     };
 
-    // Flat body from GithubErrorNormalizer: { code, message, statusCode }
     if (typeof body.code === 'string' && typeof body.message === 'string') {
       return { message: body.message, code: body.code };
     }
@@ -83,6 +90,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
     ...init,
     headers,
+    signal: init?.signal,
   });
 
   if (response.status === 401) {
@@ -126,6 +134,83 @@ export function submitPullRequestReview(
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function preparePullRequestPatch(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  input: PreparePullRequestPatchRequest,
+): Promise<PreparePullRequestPatchResponse> {
+  return apiFetch<PreparePullRequestPatchResponse>(
+    `/github/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${pullRequestNumber}/patches/prepare`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function applyPullRequestPatch(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  input: ApplyPullRequestPatchRequest,
+): Promise<ApplyPullRequestPatchResponse> {
+  return apiFetch<ApplyPullRequestPatchResponse>(
+    `/github/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${pullRequestNumber}/patches/apply`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+function checksBase(owner: string, repository: string, pullRequestNumber: number): string {
+  return `/github/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${pullRequestNumber}/checks`;
+}
+
+export function fetchPullRequestChecks(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  signal?: AbortSignal,
+): Promise<PullRequestCISummary> {
+  return apiFetch<PullRequestCISummary>(checksBase(owner, repository, pullRequestNumber), {
+    method: 'GET',
+    signal,
+  });
+}
+
+export function fetchCheckFailureEvidence(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  checkId: string,
+  signal?: AbortSignal,
+): Promise<CICheckFailureEvidence> {
+  return apiFetch<CICheckFailureEvidence>(
+    `${checksBase(owner, repository, pullRequestNumber)}/${encodeURIComponent(checkId)}`,
+    { method: 'GET', signal },
+  );
+}
+
+export function analyzeCheckFailure(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  checkId: string,
+  input: AnalyzeCIFailureRequest,
+  signal?: AbortSignal,
+): Promise<AnalyzeCIFailureResponse> {
+  return apiFetch<AnalyzeCIFailureResponse>(
+    `${checksBase(owner, repository, pullRequestNumber)}/${encodeURIComponent(checkId)}/analyze`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      signal,
     },
   );
 }

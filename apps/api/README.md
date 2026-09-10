@@ -42,7 +42,11 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | PUT | `/api/settings/github` | JWT | Validate + store encrypted GitHub PAT |
 | DELETE | `/api/settings/github` | JWT | Disconnect GitHub |
 | POST | `/api/github/pull-requests/comments` | JWT | Post a PR comment (idempotent; uses stored PAT) |
-| POST | `/api/github/pull-requests/:owner/:repo/:number/reviews` | JWT | Submit a PR review (COMMENT / APPROVE / REQUEST_CHANGES; idempotent) |
+| POST | `/api/github/pull-requests/:owner/:repo/:number/patches/prepare` | JWT | Prepare a PR head file fix (no write; Redis-stored preview) |
+| POST | `/api/github/pull-requests/:owner/:repo/:number/patches/apply` | JWT | Apply prepared fix as one Contents API commit (idempotent) |
+| GET | `/api/github/pull-requests/:owner/:repo/:number/checks` | JWT | Normalized CI/check summary for trusted current PR head |
+| GET | `/api/github/pull-requests/:owner/:repo/:number/checks/:checkId` | JWT | Bounded failure evidence (annotations / summary / Actions logs) |
+| POST | `/api/github/pull-requests/:owner/:repo/:number/checks/:checkId/analyze` | JWT | User-triggered AI CI failure analysis (`ANALYZE_CI_FAILURE`) |
 | POST | `/api/ai/actions/stream` | JWT | Stream an AI action as plain text |
 | POST | `/api/ai/actions` | JWT | Non-streaming AI action (debug/tests) |
 
@@ -103,9 +107,13 @@ Send `Authorization: Bearer <accessToken>` on protected routes.
 
 The API never scrapes websites. It only consumes the normalized context object from the extension and injects it into prompts inside `<<CTX>>` delimiters.
 
-Supported `action` values: `EXPLAIN`, `IMPROVE_WRITING`, `SUMMARIZE`, `TRANSLATE`, `EXPLAIN_CODE`, `REVIEW_CODE`, `SUGGEST_FIX`, `REVIEW_ENTIRE_PR`, `UNDERSTAND_ERROR`, `FIND_ROOT_CAUSE`, `CUSTOM`.
+Supported `action` values: `EXPLAIN`, `IMPROVE_WRITING`, `SUMMARIZE`, `TRANSLATE`, `EXPLAIN_CODE`, `REVIEW_CODE`, `SUGGEST_FIX`, `REVIEW_ENTIRE_PR`, `UNDERSTAND_ERROR`, `FIND_ROOT_CAUSE`, `ANALYZE_CI_FAILURE`, `CUSTOM`.
 
-`CUSTOM` requires a non-empty `customPrompt`. `SUGGEST_FIX` may include optional `customPrompt` with prior review findings. `REVIEW_ENTIRE_PR` uses `context.github.changedFiles` when present. Day 11 error actions may include optional `errorIntelligence` (classification, stack frames, nearby code) — already redacted client-side.
+`CUSTOM` requires a non-empty `customPrompt`. `SUGGEST_FIX` may include optional `customPrompt` with prior review findings. `REVIEW_ENTIRE_PR` uses `context.github.changedFiles` when present. Day 11 error actions may include optional `errorIntelligence` (classification, stack frames, nearby code) — already redacted client-side. Day 15 `ANALYZE_CI_FAILURE` is normally invoked via the GitHub CI analyze endpoint with server-built evidence (not from the extension menu).
+
+### GitHub PAT permissions (Days 11–15)
+
+Fine-grained or classic PAT must allow reading the target repositories. Day 15 CI intelligence additionally needs **Checks: Read**. Optional **Actions: Read** enables bounded Actions job log excerpts when annotations are insufficient. Without Actions read, status/annotations still work; third-party checks show metadata + Open Check only (no arbitrary URL fetching).
 
 Response: `Content-Type: text/plain; charset=utf-8` progressive text stream.
 

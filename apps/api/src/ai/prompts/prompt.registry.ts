@@ -7,6 +7,7 @@ import type {
   AiPromptDefinition,
 } from '../interfaces/ai-prompt-definition.interface';
 import { customPrompt } from './custom.prompt';
+import { analyzeCiFailurePrompt } from './analyze-ci-failure.prompt';
 import { explainCodePrompt } from './explain-code.prompt';
 import { explainPrompt } from './explain.prompt';
 import { findRootCausePrompt } from './find-root-cause.prompt';
@@ -34,6 +35,7 @@ export class PromptRegistry {
       reviewEntirePrPrompt,
       understandErrorPrompt,
       findRootCausePrompt,
+      analyzeCiFailurePrompt,
       customPrompt,
     ];
 

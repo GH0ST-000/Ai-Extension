@@ -106,16 +106,32 @@ export function buildPrReviewReport(input: BuildPrReviewReportInput): PRReviewRe
   };
 }
 
-export type PrFindingFilter = 'all' | 'high' | 'medium' | 'low' | 'open';
+export type PrFindingFilter = 'all' | 'high' | 'medium' | 'low' | 'open' | 'reviewed' | 'ignored';
+
+export type PrFindingDisposition = 'reviewed' | 'ignored';
+
+export type PrFindingDispositionMap = Readonly<Record<string, PrFindingDisposition>>;
 
 export function filterPrFindings(
   findings: PRReviewFinding[],
   filter: PrFindingFilter,
-  resolvedIds: ReadonlySet<string>,
+  dispositions: PrFindingDispositionMap | ReadonlySet<string> = {},
 ): PRReviewFinding[] {
+  const map: PrFindingDispositionMap =
+    dispositions instanceof Set
+      ? Object.fromEntries([...dispositions].map((id) => [id, 'reviewed' as const]))
+      : dispositions;
+
   return findings.filter((finding) => {
+    const status = map[finding.id];
     if (filter === 'open') {
-      return !resolvedIds.has(finding.id);
+      return !status;
+    }
+    if (filter === 'reviewed') {
+      return status === 'reviewed';
+    }
+    if (filter === 'ignored') {
+      return status === 'ignored';
     }
     if (filter === 'all') {
       return true;

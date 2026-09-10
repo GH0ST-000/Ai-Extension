@@ -29,6 +29,7 @@ model User {
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
   settings     UserSettings?
+  githubConnection GitHubConnection?
 
   @@map("users")
 }
@@ -43,4 +44,18 @@ model UserSettings {
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   @@map("user_settings")
+}
+
+/** Per-user GitHub PAT — ciphertext only; never expose raw token via API. */
+model GitHubConnection {
+  id              String   @id @default(cuid())
+  userId          String   @unique @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenCiphertext String   @map("token_ciphertext") @db.Text
+  githubUserId    String?  @map("github_user_id")
+  githubLogin     String?  @map("github_login")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("github_connections")
 }

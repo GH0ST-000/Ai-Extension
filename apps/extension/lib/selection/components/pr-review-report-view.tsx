@@ -3,8 +3,16 @@ import type { PRReviewFinding, PRReviewReport } from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
 
-import { filterPrFindings, type PrFindingFilter } from '../utils/build-pr-review-report';
-import { buildPrReviewHandoffSummary } from '../utils/format-pr-review-markdown';
+import {
+  filterPrFindings,
+  type PrFindingDisposition,
+  type PrFindingDispositionMap,
+  type PrFindingFilter,
+} from '../utils/build-pr-review-report';
+import {
+  buildPrReviewCommentDraft,
+  buildPrReviewHandoffSummary,
+} from '../utils/format-pr-review-markdown';
 
 const FILTERS: { id: PrFindingFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -12,37 +20,72 @@ const FILTERS: { id: PrFindingFilter; label: string }[] = [
   { id: 'medium', label: 'Med' },
   { id: 'low', label: 'Low' },
   { id: 'open', label: 'Open' },
+  { id: 'reviewed', label: 'Reviewed' },
+  { id: 'ignored', label: 'Ignored' },
 ];
+
+export type PostPrCommentResult = {
+  ok: boolean;
+  message?: string;
+  commentUrl?: string;
+};
 
 type PrReviewReportViewProps = {
   report: PRReviewReport;
   streaming?: boolean;
   filter: PrFindingFilter;
-  resolvedIds: ReadonlySet<string>;
+  dispositions: PrFindingDispositionMap;
   onFilterChange: (filter: PrFindingFilter) => void;
-  onToggleResolved: (findingId: string) => void;
+  onSetDisposition: (findingId: string, disposition: PrFindingDisposition | null) => void;
   onSuggestFixForFinding?: (finding: PRReviewFinding) => void;
+  onCopySummary?: () => Promise<boolean>;
+  onCopyCommentDraft?: () => Promise<boolean>;
+  onPostComment?: (body: string) => Promise<PostPrCommentResult>;
+  githubConnected?: boolean | null;
 };
 
 export function PrReviewReportView({
   report,
   streaming = false,
   filter,
-  resolvedIds,
+  dispositions,
   onFilterChange,
-  onToggleResolved,
+  onSetDisposition,
   onSuggestFixForFinding,
+  onCopySummary,
+  onCopyCommentDraft,
+  onPostComment,
+  githubConnected = null,
 }: PrReviewReportViewProps) {
   const [showHandoff, setShowHandoff] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const [copiedComment, setCopiedComment] = useState(false);
+  const [confirmPost, setConfirmPost] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postMessage, setPostMessage] = useState<string | null>(null);
+  const [postError, setPostError] = useState<string | null>(null);
+  const [postedUrl, setPostedUrl] = useState<string | null>(null);
+
   const visible = useMemo(
-    () => filterPrFindings(report.findings, filter, resolvedIds),
-    [report.findings, filter, resolvedIds],
+    () => filterPrFindings(report.findings, filter, dispositions),
+    [report.findings, filter, dispositions],
   );
-  const openCount = report.findings.filter((finding) => !resolvedIds.has(finding.id)).length;
+  const openCount = report.findings.filter((finding) => !dispositions[finding.id]).length;
   const handoff = useMemo(
-    () => buildPrReviewHandoffSummary(report, resolvedIds),
-    [report, resolvedIds],
+    () => buildPrReviewHandoffSummary(report, dispositions),
+    [report, dispositions],
   );
+  const commentDraft = useMemo(
+    () => buildPrReviewCommentDraft(report, dispositions),
+    [report, dispositions],
+  );
+
+  const canPost =
+    Boolean(onPostComment) &&
+    !streaming &&
+    report.pullRequest.number > 0 &&
+    report.repository.owner !== 'unknown' &&
+    report.repository.name !== 'unknown';
 
   return (
     <div className="space-y-3">
@@ -101,6 +144,22 @@ export function PrReviewReportView({
           <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-[11px] leading-4 text-secondary">
             {handoff}
           </pre>
+          {!streaming && onCopySummary ? (
+            <button
+              type="button"
+              onClick={async () => {
+                const ok = await onCopySummary();
+                if (!ok) {
+                  return;
+                }
+                setCopiedSummary(true);
+                window.setTimeout(() => setCopiedSummary(false), 1200);
+              }}
+              className="mt-2 rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft"
+            >
+              {copiedSummary ? 'Copied Summary' : 'Copy Summary'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -127,7 +186,113 @@ export function PrReviewReportView({
         >
           {showHandoff ? 'Hide summary' : 'Summary'}
         </button>
+        {!streaming && onCopyCommentDraft ? (
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await onCopyCommentDraft();
+              if (!ok) {
+                return;
+              }
+              setCopiedComment(true);
+              window.setTimeout(() => setCopiedComment(false), 1200);
+            }}
+            className="rounded-md px-2 py-1 text-[10px] font-semibold text-accent hover:bg-accent-soft"
+          >
+            {copiedComment ? 'Copied Comment' : 'Copy Comment'}
+          </button>
+        ) : null}
+        {canPost ? (
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmPost(true);
+              setPostError(null);
+              setPostMessage(null);
+            }}
+            className="rounded-md px-2 py-1 text-[10px] font-semibold text-accent hover:bg-accent-soft"
+          >
+            Post to GitHub
+          </button>
+        ) : null}
       </div>
+
+      {confirmPost && onPostComment ? (
+        <div className="rounded-lg border border-border bg-surface px-2.5 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Confirm PR comment
+          </p>
+          <p className="mt-1 text-[11px] leading-4 text-secondary">
+            This will post the draft below as a comment on{' '}
+            <span className="font-semibold text-primary">
+              {report.repository.owner}/{report.repository.name}#{report.pullRequest.number}
+            </span>
+            . Your GitHub token stays on the API.
+          </p>
+          {githubConnected === false ? (
+            <p className="mt-2 text-[11px] leading-4 text-[#e11d48]">
+              No GitHub token connected. Open dashboard Settings → GitHub first.
+            </p>
+          ) : null}
+          <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-elevated px-2 py-1.5 font-sans text-[11px] leading-4 text-secondary">
+            {commentDraft}
+          </pre>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <button
+              type="button"
+              disabled={posting || githubConnected === false}
+              onClick={async () => {
+                setPosting(true);
+                setPostError(null);
+                setPostMessage(null);
+                try {
+                  const result = await onPostComment(commentDraft);
+                  if (!result.ok) {
+                    setPostError(result.message ?? 'Unable to post comment.');
+                    return;
+                  }
+                  setPostedUrl(result.commentUrl ?? null);
+                  setPostMessage(result.message ?? 'Comment posted.');
+                  setConfirmPost(false);
+                } finally {
+                  setPosting(false);
+                }
+              }}
+              className="rounded-md bg-accent-soft px-2 py-1 text-[11px] font-semibold text-accent disabled:opacity-40"
+            >
+              {posting ? 'Posting…' : 'Confirm post'}
+            </button>
+            <button
+              type="button"
+              disabled={posting}
+              onClick={() => setConfirmPost(false)}
+              className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary disabled:opacity-40"
+            >
+              Cancel
+            </button>
+          </div>
+          {postError ? <p className="mt-2 text-[11px] text-[#e11d48]">{postError}</p> : null}
+        </div>
+      ) : null}
+
+      {postMessage ? (
+        <p className="text-[11px] text-accent">
+          {postMessage}
+          {postedUrl ? (
+            <>
+              {' '}
+              <a
+                href={postedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline-offset-2 hover:underline"
+              >
+                Open comment
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
 
       <div className="space-y-2">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
@@ -137,13 +302,13 @@ export function PrReviewReportView({
           <p className="text-[12px] text-secondary">No findings in this filter.</p>
         ) : (
           visible.map((finding) => {
-            const resolved = resolvedIds.has(finding.id);
+            const disposition = dispositions[finding.id];
             return (
               <div
                 key={finding.id}
                 className={cn(
                   'rounded-lg border border-border bg-surface px-2.5 py-2',
-                  resolved && 'opacity-60',
+                  disposition && 'opacity-60',
                 )}
               >
                 <p className="text-[11px] font-semibold text-primary">
@@ -154,8 +319,8 @@ export function PrReviewReportView({
                       · {finding.filePath}
                     </span>
                   ) : null}
-                  {resolved ? (
-                    <span className="ml-1 text-[10px] font-medium text-accent">resolved</span>
+                  {disposition ? (
+                    <span className="ml-1 text-[10px] font-medium text-accent">{disposition}</span>
                   ) : null}
                 </p>
                 <p className="mt-0.5 text-[12px] leading-4 text-primary">{finding.title}</p>
@@ -164,13 +329,32 @@ export function PrReviewReportView({
                 ) : null}
                 {!streaming ? (
                   <div className="mt-2 flex flex-wrap gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onToggleResolved(finding.id)}
-                      className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
-                    >
-                      {resolved ? 'Reopen' : 'Resolve'}
-                    </button>
+                    {disposition ? (
+                      <button
+                        type="button"
+                        onClick={() => onSetDisposition(finding.id, null)}
+                        className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+                      >
+                        Reopen
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onSetDisposition(finding.id, 'reviewed')}
+                          className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+                        >
+                          Mark Reviewed
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSetDisposition(finding.id, 'ignored')}
+                          className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+                        >
+                          Ignore
+                        </button>
+                      </>
+                    )}
                     {onSuggestFixForFinding ? (
                       <button
                         type="button"

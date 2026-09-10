@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AnimatePresence } from 'framer-motion';
 import { AIAction, type PRReviewFinding } from '@project-x/types';
@@ -16,11 +16,20 @@ import { useEscapeToDismiss } from '../hooks/use-escape-to-dismiss';
 import { useOutsideClickToDismiss } from '../hooks/use-outside-click-to-dismiss';
 import { useTextSelection } from '../hooks/use-text-selection';
 import { getRankedActions, sniffRankingHints } from '../smart-actions';
+import {
+  getGithubConnection,
+  GithubApiError,
+  postPullRequestComment,
+} from '../../services/github-api';
 import { useSelectionToolbarStore } from '../store';
 import type { AiActionDefinition } from '../types';
 import { buildPrReviewReport } from '../utils/build-pr-review-report';
 import { createVirtualElement } from '../utils/dom-selection';
-import { formatPrReviewMarkdown } from '../utils/format-pr-review-markdown';
+import {
+  buildPrReviewCommentDraft,
+  buildPrReviewHandoffSummary,
+  formatPrReviewMarkdown,
+} from '../utils/format-pr-review-markdown';
 import { extractFixClipboardText } from '../utils/parse-suggest-fix';
 import { ActionMenu } from './action-menu';
 import { CustomPromptPanel } from './custom-prompt-panel';
@@ -40,7 +49,7 @@ export function SelectionToolbar() {
   const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
   const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
   const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
-  const resolvedFindingIds = useSelectionToolbarStore((s) => s.resolvedFindingIds);
+  const findingDispositions = useSelectionToolbarStore((s) => s.findingDispositions);
   const openMenu = useSelectionToolbarStore((s) => s.openMenu);
   const dismiss = useSelectionToolbarStore((s) => s.dismiss);
   const openCustomPrompt = useSelectionToolbarStore((s) => s.openCustomPrompt);
@@ -50,9 +59,10 @@ export function SelectionToolbar() {
   const retry = useSelectionToolbarStore((s) => s.retry);
   const replaceSelection = useSelectionToolbarStore((s) => s.replaceSelection);
   const setFindingFilter = useSelectionToolbarStore((s) => s.setFindingFilter);
-  const toggleFindingResolved = useSelectionToolbarStore((s) => s.toggleFindingResolved);
+  const setFindingDisposition = useSelectionToolbarStore((s) => s.setFindingDisposition);
   const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
   const canReplace = Boolean(editableSnapshot);
+  const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
 
   const rankedActions = useMemo(() => {
     if (!selectedText.trim()) {
@@ -151,31 +161,131 @@ export function SelectionToolbar() {
     [assistant, startAction],
   );
 
-  const handleCopyFullReview = useCallback(async () => {
+  const getCurrentPrReport = useCallback(() => {
     if (
       (assistant.status !== 'success' && assistant.status !== 'streaming') ||
       assistant.action !== AIAction.REVIEW_ENTIRE_PR
     ) {
-      return false;
+      return null;
     }
-    const report = buildPrReviewReport({
+    return buildPrReviewReport({
       markdown: assistant.content,
       context: lastReviewContext,
     });
+  }, [assistant, lastReviewContext]);
+
+  const handleCopyFullReview = useCallback(async () => {
+    const report = getCurrentPrReport();
     if (!report) {
       return false;
     }
     try {
       await navigator.clipboard.writeText(
         formatPrReviewMarkdown(report, {
-          resolvedIds: new Set(resolvedFindingIds),
+          dispositions: findingDispositions,
         }),
       );
       return true;
     } catch {
       return false;
     }
-  }, [assistant, lastReviewContext, resolvedFindingIds]);
+  }, [getCurrentPrReport, findingDispositions]);
+
+  const handleCopySummary = useCallback(async () => {
+    const report = getCurrentPrReport();
+    if (!report) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(buildPrReviewHandoffSummary(report, findingDispositions));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [getCurrentPrReport, findingDispositions]);
+
+  const handleCopyCommentDraft = useCallback(async () => {
+    const report = getCurrentPrReport();
+    if (!report) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(buildPrReviewCommentDraft(report, findingDispositions));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [getCurrentPrReport, findingDispositions]);
+
+  useEffect(() => {
+    const isPrResult =
+      (assistant.status === 'success' || assistant.status === 'streaming') &&
+      assistant.action === AIAction.REVIEW_ENTIRE_PR;
+
+    if (!isPrResult) {
+      setGithubConnected(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getGithubConnection()
+      .then((status) => {
+        if (!cancelled) {
+          setGithubConnected(status.connected);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGithubConnected(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assistant]);
+
+  const handlePostComment = useCallback(
+    async (body: string) => {
+      const report = getCurrentPrReport();
+      if (!report) {
+        return { ok: false as const, message: 'Review report is unavailable.' };
+      }
+
+      // Same PR + same body → same key (safe double-click). Edited body → new post.
+      const bodyKey = Array.from(body)
+        .reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0)
+        .toString(36)
+        .replace(/^-/, 'n');
+      const idempotencyKey =
+        `pr-${report.repository.owner}-${report.repository.name}-${report.pullRequest.number}-${bodyKey}`.slice(
+          0,
+          128,
+        );
+
+      try {
+        const result = await postPullRequestComment({
+          owner: report.repository.owner,
+          repository: report.repository.name,
+          pullRequestNumber: report.pullRequest.number,
+          body,
+          idempotencyKey,
+        });
+        return {
+          ok: true as const,
+          message: result.deduplicated
+            ? 'Already posted (same request).'
+            : 'Comment posted to GitHub.',
+          commentUrl: result.commentUrl,
+        };
+      } catch (error) {
+        const message =
+          error instanceof GithubApiError ? error.message : 'Unable to post comment to GitHub.';
+        return { ok: false as const, message };
+      }
+    },
+    [getCurrentPrReport],
+  );
 
   useEffect(() => {
     if (!assistantOpen || assistant.status !== 'menu') {
@@ -255,11 +365,27 @@ export function SelectionToolbar() {
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
                 }
                 findingFilter={findingFilter}
-                resolvedFindingIds={resolvedFindingIds}
+                findingDispositions={findingDispositions}
                 onCopy={handleCopy}
                 onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
                 onCopyFullReview={
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopyFullReview : undefined
+                }
+                onCopySummary={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopySummary : undefined
+                }
+                onCopyCommentDraft={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR
+                    ? handleCopyCommentDraft
+                    : undefined
+                }
+                onPostComment={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
+                    ? handlePostComment
+                    : undefined
+                }
+                githubConnected={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? githubConnected : null
                 }
                 onSuggestFix={
                   assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
@@ -272,7 +398,7 @@ export function SelectionToolbar() {
                     : undefined
                 }
                 onFindingFilterChange={setFindingFilter}
-                onToggleFindingResolved={toggleFindingResolved}
+                onSetFindingDisposition={setFindingDisposition}
                 onReplace={() => {
                   const result = replaceSelection();
                   return {

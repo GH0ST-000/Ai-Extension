@@ -38,6 +38,10 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | GET | `/api/auth/me` | JWT | Current user |
 | GET | `/api/settings` | JWT | AI preferences |
 | PATCH | `/api/settings` | JWT | Update AI preferences |
+| GET | `/api/settings/github` | JWT | GitHub connection status (never returns PAT) |
+| PUT | `/api/settings/github` | JWT | Validate + store encrypted GitHub PAT |
+| DELETE | `/api/settings/github` | JWT | Disconnect GitHub |
+| POST | `/api/github/pull-requests/comments` | JWT | Post a PR comment (idempotent; uses stored PAT) |
 | POST | `/api/ai/actions/stream` | JWT | Stream an AI action as plain text |
 | POST | `/api/ai/actions` | JWT | Non-streaming AI action (debug/tests) |
 

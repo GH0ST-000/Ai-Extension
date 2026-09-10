@@ -12,6 +12,7 @@ import { QueuesModule } from './queues/queues.module';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { SettingsModule } from './settings/settings.module';
+import { GithubModule } from './github/github.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { SettingsModule } from './settings/settings.module';
     HealthModule,
     AuthModule,
     SettingsModule,
+    GithubModule,
     AiModule,
   ],
 })

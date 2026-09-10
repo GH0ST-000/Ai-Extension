@@ -50,11 +50,14 @@ describe('buildPrReviewReport', () => {
     );
   });
 
-  it('filters open findings', () => {
+  it('filters open / reviewed / ignored findings', () => {
     const report = buildPrReviewReport({ markdown: SAMPLE, context: CONTEXT })!;
-    const resolved = new Set([report.findings[0]!.id]);
-    const open = filterPrFindings(report.findings, 'open', resolved);
-    expect(open).toHaveLength(1);
-    expect(open[0]?.severity).toBe('low');
+    const dispositions = {
+      [report.findings[0]!.id]: 'reviewed' as const,
+      [report.findings[1]!.id]: 'ignored' as const,
+    };
+    expect(filterPrFindings(report.findings, 'open', dispositions)).toHaveLength(0);
+    expect(filterPrFindings(report.findings, 'reviewed', dispositions)).toHaveLength(1);
+    expect(filterPrFindings(report.findings, 'ignored', dispositions)[0]?.severity).toBe('low');
   });
 });

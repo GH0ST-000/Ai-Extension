@@ -1,9 +1,11 @@
 import type {
   AuthTokenResponse,
   AuthUser,
+  GitHubConnectionStatus,
   LoginRequest,
   RegisterRequest,
   UpdateUserSettingsRequest,
+  UpsertGitHubConnectionRequest,
   UserSettings,
 } from '@project-x/types';
 
@@ -131,5 +133,24 @@ export async function updateSettings(input: UpdateUserSettingsRequest): Promise<
   return apiFetch<UserSettings>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(input),
+  });
+}
+
+export async function getGithubConnection(): Promise<GitHubConnectionStatus> {
+  return apiFetch<GitHubConnectionStatus>('/settings/github');
+}
+
+export async function upsertGithubConnection(
+  input: UpsertGitHubConnectionRequest,
+): Promise<GitHubConnectionStatus> {
+  return apiFetch<GitHubConnectionStatus>('/settings/github', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteGithubConnection(): Promise<void> {
+  await apiFetch<void>('/settings/github', {
+    method: 'DELETE',
   });
 }

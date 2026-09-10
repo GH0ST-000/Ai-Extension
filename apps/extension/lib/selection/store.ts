@@ -16,7 +16,7 @@ import {
   redactSensitiveText,
 } from './error-intelligence';
 import type { AssistantView, SelectionRect, ToolbarPhase } from './types';
-import type { PrFindingFilter } from './utils/build-pr-review-report';
+import type { PrFindingDisposition, PrFindingFilter } from './utils/build-pr-review-report';
 import { extractFixClipboardText } from './utils/parse-suggest-fix';
 
 type SelectionToolbarState = {
@@ -30,8 +30,8 @@ type SelectionToolbarState = {
   abortController: AbortController | null;
   /** Page context captured for the latest REVIEW_ENTIRE_PR run. */
   lastReviewContext: PageContext | null;
-  /** Session-only finding resolution (cleared on dismiss / new PR review). */
-  resolvedFindingIds: string[];
+  /** Session-only finding dispositions (cleared on dismiss / new PR review). */
+  findingDispositions: Record<string, PrFindingDisposition>;
   findingFilter: PrFindingFilter;
   showTrigger: (text: string, rect: SelectionRect) => void;
   updateAnchor: (rect: SelectionRect) => void;
@@ -46,8 +46,8 @@ type SelectionToolbarState = {
   replaceSelection: () => ReplacementResult;
   cancelActiveRequest: () => void;
   setFindingFilter: (filter: PrFindingFilter) => void;
-  toggleFindingResolved: (findingId: string) => void;
-  clearFindingResolutions: () => void;
+  setFindingDisposition: (findingId: string, disposition: PrFindingDisposition | null) => void;
+  clearFindingDispositions: () => void;
 };
 
 const MENU_VIEW: AssistantView = { status: 'menu' };
@@ -62,7 +62,7 @@ const INITIAL_STATE = {
   requestId: 0,
   abortController: null as AbortController | null,
   lastReviewContext: null as PageContext | null,
-  resolvedFindingIds: [] as string[],
+  findingDispositions: {} as Record<string, PrFindingDisposition>,
   findingFilter: 'all' as PrFindingFilter,
 };
 
@@ -253,7 +253,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
       assistant: { status: 'loading', action },
       ...(resetReviewSession
         ? {
-            resolvedFindingIds: [],
+            findingDispositions: {},
             findingFilter: 'all' as const,
             lastReviewContext: null,
           }
@@ -393,18 +393,19 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     set({ findingFilter: filter });
   },
 
-  toggleFindingResolved: (findingId) => {
+  setFindingDisposition: (findingId, disposition) => {
     set((state) => {
-      const exists = state.resolvedFindingIds.includes(findingId);
-      return {
-        resolvedFindingIds: exists
-          ? state.resolvedFindingIds.filter((id) => id !== findingId)
-          : [...state.resolvedFindingIds, findingId],
-      };
+      const next = { ...state.findingDispositions };
+      if (disposition == null) {
+        delete next[findingId];
+      } else {
+        next[findingId] = disposition;
+      }
+      return { findingDispositions: next };
     });
   },
 
-  clearFindingResolutions: () => {
-    set({ resolvedFindingIds: [] });
+  clearFindingDispositions: () => {
+    set({ findingDispositions: {} });
   },
 }));

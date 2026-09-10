@@ -22,6 +22,11 @@ export const apiEnvSchema = z.object({
   AI_CORS_ORIGINS: z.string().optional().default(''),
   JWT_SECRET: z.string().min(16).default('project-x-dev-jwt-secret-change-me'),
   JWT_EXPIRES_IN: z.string().min(1).default('7d'),
+  /**
+   * AES key material for encrypting per-user secrets (e.g. GitHub PAT).
+   * Falls back to JWT_SECRET when omitted (dev only — set explicitly in production).
+   */
+  TOKEN_ENCRYPTION_KEY: z.string().min(16).optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

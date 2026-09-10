@@ -24,6 +24,10 @@ export interface ApiConfig {
     secret: string;
     expiresIn: string;
   };
+  secrets: {
+    /** Key material for AES-GCM encryption of per-user secrets. */
+    encryptionKey: string;
+  };
 }
 
 function parseCorsOrigins(raw: string | undefined): string[] {
@@ -63,6 +67,9 @@ export default (): ApiConfig => {
     jwt: {
       secret: env.JWT_SECRET,
       expiresIn: env.JWT_EXPIRES_IN,
+    },
+    secrets: {
+      encryptionKey: env.TOKEN_ENCRYPTION_KEY?.trim() || env.JWT_SECRET,
     },
   };
 };

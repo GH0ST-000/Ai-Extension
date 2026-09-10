@@ -43,11 +43,31 @@ Limits: only files currently loaded in the page, capped file count / excerpt siz
 After Review Entire PR finishes, the result panel becomes a **compact review report** (still ~400px — not a dashboard):
 
 - Repo / PR header, risk level, and compact stats
-- Filter findings: All · High · Med · Low · Open
-- Session-only **Resolve / Reopen** (cleared on dismiss or a new PR review)
-- Client-built **Review summary** + **Copy Full Review** (Markdown export for manual sharing)
+- Filter findings: All · High · Med · Low · Open · Reviewed · Ignored
+- Session-only **Mark Reviewed / Ignore / Reopen** (cleared on dismiss or a new PR review)
+- **Summary** toggle + **Copy Summary**
+- **Export Markdown** (full review artifact)
+- **Copy Comment** — clipboard draft for manual paste (not posted to GitHub)
+- **Suggest Fix** per finding
 
-No GitHub write access — export is clipboard-only. Types live in `@project-x/types` (`PRReviewReport` / `PRReviewFinding`); the report is assembled client-side from Day 9 markdown + page context.
+No GitHub write access yet. Types live in `@project-x/types` (`PRReviewReport` / `PRReviewFinding`); the report is assembled client-side from Day 9 markdown + page context.
+
+### GitHub connection (PAT)
+
+Users paste a Personal Access Token in dashboard **Settings → GitHub**. The API validates it with GitHub, stores AES-GCM ciphertext in `github_connections`, and never returns the raw token. This unblocks Day 12 write actions without putting secrets in the extension.
+
+Create a token: https://github.com/settings/personal-access-tokens/new (Pull requests: Read and write).
+
+### Day 12 — Post PR comment
+
+With a connected GitHub PAT, the PR report offers **Post to GitHub**:
+
+1. Preview the comment draft
+2. Confirm
+3. API posts via your stored token (`POST /api/github/pull-requests/comments`)
+4. Idempotency key prevents duplicate posts on double-click (Redis, 24h)
+
+Token never leaves the API. **Copy Comment** still works for manual paste.
 
 ## Day 11 — Error Intelligence
 

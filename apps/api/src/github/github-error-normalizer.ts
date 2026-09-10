@@ -18,11 +18,26 @@ export class GithubErrorNormalizer {
       case 'NOT_CONNECTED':
       case 'INSUFFICIENT_PERMISSION':
       case 'REVIEW_ACTION_NOT_ALLOWED':
+      case 'BRANCH_NOT_WRITABLE':
+      case 'BRANCH_PROTECTED':
+      case 'CHECKS_NOT_ACCESSIBLE':
         return HttpStatus.FORBIDDEN;
       case 'REPOSITORY_NOT_ACCESSIBLE':
       case 'PULL_REQUEST_NOT_FOUND':
       case 'REVIEW_VALIDATION_FAILED':
       case 'STALE_DIFF_POSITION':
+      case 'PR_HEAD_CHANGED':
+      case 'FILE_CHANGED':
+      case 'PATCH_INVALID':
+      case 'PATCH_CONFLICT':
+      case 'PATCH_UNSUPPORTED':
+      case 'COMMIT_VALIDATION_FAILED':
+      case 'CHECK_NOT_FOUND':
+      case 'CHECK_DETAILS_UNAVAILABLE':
+      case 'CI_LOGS_UNAVAILABLE':
+      case 'CI_EVIDENCE_TOO_LARGE':
+      case 'STALE_CI_CONTEXT':
+      case 'AI_ANALYSIS_FAILED':
         return HttpStatus.BAD_REQUEST;
       case 'IDEMPOTENCY_CONFLICT':
         return HttpStatus.CONFLICT;
@@ -40,7 +55,7 @@ export class GithubErrorNormalizer {
   fromGitHubStatus(
     status: number,
     payloadMessage: string | undefined,
-    context: 'comment' | 'review',
+    context: 'comment' | 'review' | 'patch' | 'ci',
   ): HttpException {
     const message = payloadMessage?.trim();
 
@@ -65,24 +80,70 @@ export class GithubErrorNormalizer {
             'GitHub does not allow this review action for the connected account on this pull request.',
         );
       }
+      if (
+        lower.includes('protected') ||
+        lower.includes('resource not accessible') ||
+        lower.includes('not authorized')
+      ) {
+        return this.toHttpException(
+          context === 'patch'
+            ? 'BRANCH_NOT_WRITABLE'
+            : context === 'ci'
+              ? 'CHECKS_NOT_ACCESSIBLE'
+              : 'INSUFFICIENT_PERMISSION',
+          message ||
+            (context === 'patch'
+              ? 'Your connected GitHub account cannot update this pull request branch.'
+              : context === 'ci'
+                ? 'Your GitHub connection cannot read checks for this pull request.'
+                : 'GitHub forbade this action. Check PAT permissions and org SSO.'),
+        );
+      }
       return this.toHttpException(
-        'INSUFFICIENT_PERMISSION',
+        context === 'ci' ? 'CHECKS_NOT_ACCESSIBLE' : 'INSUFFICIENT_PERMISSION',
         message ||
           (context === 'review'
             ? 'The connected GitHub account cannot submit this review. Check PAT permissions (Pull requests: Read and write) and org SSO.'
-            : 'GitHub forbade posting this comment. Check PAT permissions (Pull requests: Read and write) and org SSO.'),
+            : context === 'patch'
+              ? 'The connected GitHub account cannot update repository contents. Check Contents write permission and org SSO.'
+              : context === 'ci'
+                ? 'Your GitHub connection cannot read checks for this pull request. Grant Checks (read) and optionally Actions (read) on the PAT, then reconnect.'
+                : 'GitHub forbade posting this comment. Check PAT permissions (Pull requests: Read and write) and org SSO.'),
       );
     }
 
     if (status === 404) {
       return this.toHttpException(
-        'PULL_REQUEST_NOT_FOUND',
-        'GitHub could not find that repository or pull request (or the token cannot access it).',
+        context === 'patch'
+          ? 'REPOSITORY_NOT_ACCESSIBLE'
+          : context === 'ci'
+            ? 'CHECK_NOT_FOUND'
+            : 'PULL_REQUEST_NOT_FOUND',
+        context === 'ci'
+          ? 'GitHub could not find that check, repository, or pull request (or the token cannot access it).'
+          : 'GitHub could not find that repository or pull request (or the token cannot access it).',
+      );
+    }
+
+    if (status === 409) {
+      return this.toHttpException(
+        'FILE_CHANGED',
+        message || 'The target file changed after this fix was prepared.',
       );
     }
 
     if (status === 422) {
       const lower = (message ?? '').toLowerCase();
+      if (
+        lower.includes('protected') ||
+        lower.includes('branch is protected') ||
+        lower.includes('required status')
+      ) {
+        return this.toHttpException(
+          'BRANCH_PROTECTED',
+          message || 'GitHub repository rules prevent this branch from being updated this way.',
+        );
+      }
       if (
         lower.includes('diff hunk') ||
         lower.includes('pull request review thread') ||
@@ -105,8 +166,11 @@ export class GithubErrorNormalizer {
         );
       }
       return this.toHttpException(
-        'REVIEW_VALIDATION_FAILED',
-        message || 'GitHub rejected the review payload.',
+        context === 'patch' ? 'PATCH_INVALID' : 'REVIEW_VALIDATION_FAILED',
+        message ||
+          (context === 'patch'
+            ? 'GitHub rejected the patch payload.'
+            : 'GitHub rejected the review payload.'),
       );
     }
 

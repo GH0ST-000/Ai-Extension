@@ -13,6 +13,9 @@ import {
 } from '../utils/build-pr-review-report';
 import { parseSuggestFixContent } from '../utils/parse-suggest-fix';
 import { PrReviewReportView } from './pr-review-report-view';
+import { ApplyFixPanel, canOfferApplyFix } from '../patch-apply/apply-fix-panel';
+import type { SuggestFixApplyTarget } from '../patch-apply/patch-apply.store';
+import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
 
 type ResultPanelProps = {
   action: AIAction;
@@ -29,6 +32,7 @@ type ResultPanelProps = {
   onCopyCommentDraft?: () => Promise<boolean>;
   onPostComment?: (body: string) => Promise<{ ok: boolean; message?: string; commentUrl?: string }>;
   githubConnected?: boolean | null;
+  applyTarget?: SuggestFixApplyTarget | null;
   onSuggestFix?: () => void;
   onSuggestFixForFinding?: (finding: PRReviewFinding) => void;
   onFindingFilterChange?: (filter: PrFindingFilter) => void;
@@ -157,6 +161,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     onCopyCommentDraft,
     onPostComment,
     githubConnected = null,
+    applyTarget = null,
     onSuggestFix,
     onSuggestFixForFinding,
     onFindingFilterChange,
@@ -173,8 +178,10 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
   const [copiedReview, setCopiedReview] = useState(false);
   const [replaced, setReplaced] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [showApplyFix, setShowApplyFix] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
+  const patchPhase = usePatchApplyStore((s) => s.phase);
 
   const isSuggestFix = action === AIAction.SUGGEST_FIX;
   const isEntirePr = action === AIAction.REVIEW_ENTIRE_PR;
@@ -217,6 +224,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     setReplaceError(null);
     setCopiedFix(false);
     setCopiedReview(false);
+    setShowApplyFix(false);
   }, [content, action]);
 
   return (
@@ -276,7 +284,25 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
             githubConnected={githubConnected}
           />
         ) : showSuggestFix && parsedFix ? (
-          <SuggestFixView content={content} streaming={streaming} parsed={parsedFix} />
+          <div className="space-y-3">
+            <SuggestFixView content={content} streaming={streaming} parsed={parsedFix} />
+            {!streaming &&
+            showApplyFix &&
+            applyTarget &&
+            canOfferApplyFix({ fixCode: parsedFix.fixCode, target: applyTarget }) ? (
+              <ApplyFixPanel
+                fixCode={parsedFix.fixCode!}
+                target={applyTarget}
+                githubConnected={githubConnected}
+                onClose={() => {
+                  setShowApplyFix(false);
+                  if (patchPhase === 'success' || patchPhase === 'idle') {
+                    usePatchApplyStore.getState().reset();
+                  }
+                }}
+              />
+            ) : null}
+          </div>
         ) : (
           <p className="whitespace-pre-wrap break-words text-[12.5px] leading-5 text-primary">
             {content}
@@ -331,6 +357,20 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
             className="rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
           >
             {copiedFix ? 'Copied Fix' : 'Copy Fix'}
+          </button>
+        ) : null}
+        {isSuggestFix &&
+        !streaming &&
+        canOfferApplyFix({ fixCode: parsedFix?.fixCode, target: applyTarget }) ? (
+          <button
+            type="button"
+            onClick={() => {
+              setShowApplyFix(true);
+              usePatchApplyStore.getState().setPhase('idle');
+            }}
+            className="rounded-md px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft"
+          >
+            Apply Fix
           </button>
         ) : null}
         {canReplace && onReplace ? (

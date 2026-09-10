@@ -37,7 +37,9 @@ import { ErrorPanel } from './error-panel';
 import { FloatingTriggerButton } from './floating-trigger-button';
 import { LoadingPanel } from './loading-panel';
 import { ResultPanel } from './result-panel';
-
+import { CiEntryButton, CiPanel, useGithubCiStore } from '../ci';
+import { extractPageContext } from '../../context/extract-page-context';
+import { parseGitHubUrl } from '../../context/adapters/github.adapter';
 export function SelectionToolbar() {
   useTextSelection();
   useEscapeToDismiss();
@@ -50,6 +52,7 @@ export function SelectionToolbar() {
   const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
   const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
   const findingDispositions = useSelectionToolbarStore((s) => s.findingDispositions);
+  const suggestFixApplyTarget = useSelectionToolbarStore((s) => s.suggestFixApplyTarget);
   const openMenu = useSelectionToolbarStore((s) => s.openMenu);
   const dismiss = useSelectionToolbarStore((s) => s.dismiss);
   const openCustomPrompt = useSelectionToolbarStore((s) => s.openCustomPrompt);
@@ -63,6 +66,58 @@ export function SelectionToolbar() {
   const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
   const canReplace = Boolean(editableSnapshot);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
+  const ciView = useGithubCiStore((s) => s.view);
+  const openCi = useGithubCiStore((s) => s.open);
+
+  const prCiDestination = useMemo(() => {
+    const fromReview = lastReviewContext?.github;
+    if (
+      fromReview?.owner &&
+      fromReview.repository &&
+      fromReview.pullRequestNumber &&
+      fromReview.pullRequestNumber > 0
+    ) {
+      return {
+        owner: fromReview.owner,
+        repository: fromReview.repository,
+        pullRequestNumber: fromReview.pullRequestNumber,
+        pullRequestTitle: fromReview.pullRequestTitle,
+        changedFiles: fromReview.changedFiles,
+      };
+    }
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    try {
+      const parsed = parseGitHubUrl(new URL(window.location.href));
+      if (
+        parsed?.owner &&
+        parsed.repository &&
+        parsed.isPullRequest &&
+        parsed.pullRequestNumber &&
+        parsed.pullRequestNumber > 0
+      ) {
+        const ctx = extractPageContext();
+        return {
+          owner: parsed.owner,
+          repository: parsed.repository,
+          pullRequestNumber: parsed.pullRequestNumber,
+          pullRequestTitle: ctx.github?.pullRequestTitle,
+          changedFiles: ctx.github?.changedFiles,
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }, [lastReviewContext]);
+
+  const handleOpenCi = useCallback(() => {
+    if (!prCiDestination) {
+      return;
+    }
+    openCi(prCiDestination);
+  }, [openCi, prCiDestination]);
 
   const rankedActions = useMemo(() => {
     if (!selectedText.trim()) {
@@ -153,12 +208,28 @@ export function SelectionToolbar() {
       if (assistant.status !== 'success' || assistant.action !== AIAction.REVIEW_ENTIRE_PR) {
         return;
       }
-      const focus = finding.filePath ? `File: ${finding.filePath}\n` : '';
+      const owner = lastReviewContext?.github?.owner?.trim();
+      const repository = lastReviewContext?.github?.repository?.trim();
+      const pullRequestNumber = lastReviewContext?.github?.pullRequestNumber;
+      const path = finding.filePath?.trim();
+      const focus = path ? `File: ${path}\n` : '';
+      const applyTarget =
+        owner && repository && pullRequestNumber && pullRequestNumber > 0 && path
+          ? {
+              owner,
+              repository,
+              pullRequestNumber,
+              path,
+              findingId: finding.id,
+              findingTitle: finding.title,
+            }
+          : null;
       void startAction(AIAction.SUGGEST_FIX, {
         customPrompt: `Prior PR finding to fix:\n${focus}${finding.raw}`,
+        applyTarget,
       });
     },
-    [assistant, startAction],
+    [assistant, lastReviewContext, startAction],
   );
 
   const getCurrentPrReport = useCallback(() => {
@@ -218,11 +289,11 @@ export function SelectionToolbar() {
   }, [getCurrentPrReport, findingDispositions]);
 
   useEffect(() => {
-    const isPrResult =
+    const isPrOrFix =
       (assistant.status === 'success' || assistant.status === 'streaming') &&
-      assistant.action === AIAction.REVIEW_ENTIRE_PR;
+      (assistant.action === AIAction.REVIEW_ENTIRE_PR || assistant.action === AIAction.SUGGEST_FIX);
 
-    if (!isPrResult) {
+    if (!isPrOrFix) {
       setGithubConnected(null);
       return;
     }
@@ -329,7 +400,15 @@ export function SelectionToolbar() {
             ) : null}
 
             {phase === 'assistant' && assistant.status === 'menu' ? (
-              <ActionMenu key="menu" actions={rankedActions} onSelect={handleSelectAction} />
+              <div key="menu" className="space-y-1">
+                {prCiDestination ? (
+                  <div className="rounded-[12px] border border-border bg-elevated px-2 py-1.5 shadow-menu">
+                    <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
+                  </div>
+                ) : null}
+                <ActionMenu actions={rankedActions} onSelect={handleSelectAction} />
+                {ciView !== 'closed' ? <CiPanel /> : null}
+              </div>
             ) : null}
 
             {phase === 'assistant' && assistant.status === 'custom-prompt' ? (
@@ -385,7 +464,13 @@ export function SelectionToolbar() {
                     : undefined
                 }
                 githubConnected={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? githubConnected : null
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ||
+                  assistant.action === AIAction.SUGGEST_FIX
+                    ? githubConnected
+                    : null
+                }
+                applyTarget={
+                  assistant.action === AIAction.SUGGEST_FIX ? suggestFixApplyTarget : null
                 }
                 onSuggestFix={
                   assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
@@ -412,6 +497,22 @@ export function SelectionToolbar() {
                 onBack={backToMenu}
                 onClose={dismiss}
               />
+            ) : null}
+
+            {phase === 'assistant' &&
+            (assistant.status === 'streaming' || assistant.status === 'success') &&
+            ciView !== 'closed' ? (
+              <CiPanel key="ci-panel" />
+            ) : null}
+
+            {phase === 'assistant' &&
+            (assistant.status === 'streaming' || assistant.status === 'success') &&
+            assistant.action === AIAction.REVIEW_ENTIRE_PR &&
+            prCiDestination &&
+            ciView === 'closed' ? (
+              <div key="ci-entry" className="mt-1">
+                <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
+              </div>
             ) : null}
 
             {phase === 'assistant' && assistant.status === 'error' ? (

@@ -41,6 +41,8 @@ export enum AIAction {
   REVIEW_ENTIRE_PR = 'REVIEW_ENTIRE_PR',
   UNDERSTAND_ERROR = 'UNDERSTAND_ERROR',
   FIND_ROOT_CAUSE = 'FIND_ROOT_CAUSE',
+  /** Day 15 — CI failure analysis (typically invoked server-side with trusted evidence). */
+  ANALYZE_CI_FAILURE = 'ANALYZE_CI_FAILURE',
   CUSTOM = 'CUSTOM',
 }
 
@@ -214,7 +216,7 @@ export const GITHUB_REVIEW_MAX_BODY_CHARACTERS = 65_536;
 export const GITHUB_REVIEW_MAX_COMMENT_CHARACTERS = 65_536;
 export const GITHUB_REVIEW_MAX_COMMENTS = 50;
 
-/** Normalized GitHub write error codes (Day 12 + Day 13). */
+/** Normalized GitHub write/read error codes (Day 12–15). */
 export type GitHubWriteErrorCode =
   | 'NOT_CONNECTED'
   | 'INSUFFICIENT_PERMISSION'
@@ -223,11 +225,96 @@ export type GitHubWriteErrorCode =
   | 'REVIEW_ACTION_NOT_ALLOWED'
   | 'REVIEW_VALIDATION_FAILED'
   | 'STALE_DIFF_POSITION'
+  | 'PR_HEAD_CHANGED'
+  | 'FILE_CHANGED'
+  | 'PATCH_INVALID'
+  | 'PATCH_CONFLICT'
+  | 'PATCH_UNSUPPORTED'
+  | 'BRANCH_NOT_WRITABLE'
+  | 'BRANCH_PROTECTED'
+  | 'COMMIT_VALIDATION_FAILED'
+  | 'CHECKS_NOT_ACCESSIBLE'
+  | 'CHECK_NOT_FOUND'
+  | 'CHECK_DETAILS_UNAVAILABLE'
+  | 'CI_LOGS_UNAVAILABLE'
+  | 'CI_EVIDENCE_TOO_LARGE'
+  | 'STALE_CI_CONTEXT'
+  | 'AI_ANALYSIS_FAILED'
   | 'RATE_LIMITED'
   | 'GITHUB_UNAVAILABLE'
   | 'WRITE_OUTCOME_UNKNOWN'
   | 'IDEMPOTENCY_CONFLICT'
   | 'UNKNOWN';
+
+/** Day 14 — patch apply limits. */
+export const GITHUB_PATCH_MAX_FILE_BYTES = 512_000;
+export const GITHUB_PATCH_MAX_COMMIT_MESSAGE_CHARACTERS = 1_024;
+export const GITHUB_PATCH_MAX_PATH_CHARACTERS = 512;
+export const GITHUB_PATCH_PREPARE_TTL_SECONDS = 30 * 60;
+
+export type GitHubPatchFileOperation = 'modify' | 'create' | 'delete';
+
+/** Normalized single-file change for prepare/apply (Day 14 primary: modify). */
+export interface GitHubPatchFileChange {
+  path: string;
+  operation: GitHubPatchFileOperation;
+  expectedBlobSha?: string;
+  originalContent?: string;
+  newContent?: string;
+}
+
+export interface PreparePullRequestPatchRequest {
+  /** Trusted repo-relative path — never from AI prose alone; must match finding/context. */
+  path: string;
+  /** Full new file content after the fix. */
+  newContent: string;
+  /** Optional suggested commit message (user-editable later). */
+  commitMessage?: string;
+  findingId?: string;
+}
+
+export interface PreparePullRequestPatchResponse {
+  preparedPatchId: string;
+  owner: string;
+  repository: string;
+  /** Head repository that will receive the commit (may differ on forks). */
+  headOwner: string;
+  headRepository: string;
+  pullRequestNumber: number;
+  headRef: string;
+  expectedHeadSha: string;
+  baseOwner: string;
+  baseRepository: string;
+  baseRef: string;
+  files: Array<{
+    path: string;
+    operation: GitHubPatchFileOperation;
+    expectedBlobSha?: string;
+    originalContent: string;
+    newContent: string;
+    additions: number;
+    deletions: number;
+  }>;
+  commitMessage: string;
+  fingerprint: string;
+  expiresAt: string;
+}
+
+export interface ApplyPullRequestPatchRequest {
+  preparedPatchId: string;
+  commitMessage: string;
+  clientRequestId: string;
+}
+
+export interface ApplyPullRequestPatchResponse {
+  success: true;
+  commitSha: string;
+  commitUrl: string;
+  branch: string;
+  appliedAt: string;
+  changedFiles: number;
+  deduplicated: boolean;
+}
 
 /** Session-only draft comment (extension). Credentials never stored here. */
 export interface GitHubReviewDraftComment {
@@ -433,4 +520,159 @@ export interface PRReviewReport {
     truncated: boolean;
     partialFailureCount: number;
   };
+}
+
+/** Day 15 — normalized CI / check status (independent of raw GitHub strings). */
+export type CIOverallStatus =
+  'SUCCESS' | 'FAILURE' | 'PENDING' | 'CANCELLED' | 'NEUTRAL' | 'SKIPPED' | 'UNKNOWN';
+
+export type CICheckRunStatus = 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED' | 'WAITING' | 'UNKNOWN';
+
+export type CICheckConclusion =
+  | 'SUCCESS'
+  | 'FAILURE'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'NEUTRAL'
+  | 'TIMED_OUT'
+  | 'ACTION_REQUIRED'
+  | 'STALE'
+  | 'UNKNOWN'
+  | null;
+
+export type CIEvidenceCapability =
+  'STATUS_ONLY' | 'ANNOTATIONS' | 'ACTIONS_LOGS' | 'SUMMARY' | 'EXTERNAL_LINK';
+
+/** Centralized CI evidence budgets. */
+export const CI_MAX_LOG_BYTES = 256_000;
+export const CI_MAX_LOG_CHARS_FOR_AI = 12_000;
+export const CI_MAX_LOG_CHARS_FOR_UI = 8_000;
+export const CI_MAX_ANNOTATIONS = 40;
+export const CI_MAX_ANNOTATION_MESSAGE_CHARS = 2_000;
+export const CI_MAX_EXCERPT_LINES = 80;
+export const CI_MAX_LINE_CHARS = 500;
+export const CI_MAX_FAILED_CHECKS_ANALYZED = 1;
+export const CI_MAX_CHANGED_FILES_IN_CONTEXT = 40;
+
+export interface CICheckAnnotation {
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  annotationLevel?: 'failure' | 'warning' | 'notice' | 'unknown';
+  title?: string;
+  message: string;
+  rawDetails?: string;
+}
+
+export interface CINormalizedCheck {
+  /** Stable provider id: `check_run:{id}` or `status:{context}`. */
+  id: string;
+  name: string;
+  source?: string;
+  status: CICheckRunStatus;
+  conclusion: CICheckConclusion;
+  startedAt?: string;
+  completedAt?: string;
+  /** HTTPS details URL when safely available (never signed log download URLs). */
+  detailsUrl?: string;
+  workflowName?: string;
+  jobName?: string;
+  /** Whether deeper failure evidence may be fetchable via GitHub APIs. */
+  canInspectDetails: boolean;
+  evidenceCapabilities: CIEvidenceCapability[];
+}
+
+export interface CICheckCounts {
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  cancelled: number;
+  neutral: number;
+  skipped: number;
+}
+
+export interface PullRequestCISummary {
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+  headSha: string;
+  overallStatus: CIOverallStatus;
+  counts: CICheckCounts;
+  checks: CINormalizedCheck[];
+  fetchedAt: string;
+  /** True when some check sources failed to load but others succeeded. */
+  partialData?: boolean;
+}
+
+export type CILogEvidenceSource =
+  'annotation' | 'check_summary' | 'actions_log' | 'changed_file' | 'other';
+
+export interface CIFailureEvidenceItem {
+  source: CILogEvidenceSource;
+  label: string;
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  excerpt: string;
+  truncated?: boolean;
+}
+
+export interface CICheckFailureEvidence {
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+  headSha: string;
+  check: CINormalizedCheck;
+  summaryText?: string;
+  annotations: CICheckAnnotation[];
+  logExcerpt?: string;
+  evidence: CIFailureEvidenceItem[];
+  truncated: boolean;
+  redacted: boolean;
+  /** True when Actions logs were unavailable but other evidence exists. */
+  logsUnavailable?: boolean;
+  fetchedAt: string;
+}
+
+export type CIAnalysisConfidence = 'high' | 'medium' | 'low';
+export type CIRelatedToPullRequest = 'likely' | 'unlikely' | 'uncertain';
+
+export interface CIAffectedFile {
+  path: string;
+  /** True when path was validated against trusted PR/changed-file context. */
+  verified: boolean;
+  reason?: string;
+  startLine?: number;
+}
+
+export interface CIFailureAnalysis {
+  summary: string;
+  likelyRootCause: string;
+  confidence: CIAnalysisConfidence;
+  relatedToPullRequest: CIRelatedToPullRequest;
+  evidence: CIFailureEvidenceItem[];
+  affectedFiles: CIAffectedFile[];
+  suggestedNextSteps: string[];
+  canSuggestFix: boolean;
+  evidenceTruncated: boolean;
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+  headSha: string;
+  checkId: string;
+  analyzedAt: string;
+}
+
+export interface AnalyzeCIFailureRequest {
+  /** Optional client-known head; mismatch with trusted head → STALE_CI_CONTEXT. */
+  expectedHeadSha?: string;
+  /** Bounded changed-file paths from page context (correlation only). */
+  changedFiles?: Array<{ path: string }>;
+  pullRequestTitle?: string;
+}
+
+export interface AnalyzeCIFailureResponse {
+  analysis: CIFailureAnalysis;
+  evidence: CICheckFailureEvidence;
 }

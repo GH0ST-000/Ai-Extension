@@ -19,6 +19,9 @@ import type { AssistantView, SelectionRect, ToolbarPhase } from './types';
 import type { PrFindingDisposition, PrFindingFilter } from './utils/build-pr-review-report';
 import { extractFixClipboardText } from './utils/parse-suggest-fix';
 import { useGithubReviewDraftStore } from './review-draft';
+import type { SuggestFixApplyTarget } from './patch-apply/patch-apply.store';
+import { usePatchApplyStore } from './patch-apply/patch-apply.store';
+import { useGithubCiStore } from './ci';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -31,6 +34,8 @@ type SelectionToolbarState = {
   abortController: AbortController | null;
   /** Page context captured for the latest REVIEW_ENTIRE_PR run. */
   lastReviewContext: PageContext | null;
+  /** Trusted Apply Fix destination captured when launching SUGGEST_FIX from a PR finding. */
+  suggestFixApplyTarget: SuggestFixApplyTarget | null;
   /** Session-only finding dispositions (cleared on dismiss / new PR review). */
   findingDispositions: Record<string, PrFindingDisposition>;
   findingFilter: PrFindingFilter;
@@ -42,7 +47,10 @@ type SelectionToolbarState = {
   openCustomPrompt: () => void;
   setCustomPromptInput: (value: string) => void;
   backToMenu: () => void;
-  startAction: (action: AIAction, options?: { customPrompt?: string }) => Promise<void>;
+  startAction: (
+    action: AIAction,
+    options?: { customPrompt?: string; applyTarget?: SuggestFixApplyTarget | null },
+  ) => Promise<void>;
   retry: () => Promise<void>;
   replaceSelection: () => ReplacementResult;
   cancelActiveRequest: () => void;
@@ -63,6 +71,7 @@ const INITIAL_STATE = {
   requestId: 0,
   abortController: null as AbortController | null,
   lastReviewContext: null as PageContext | null,
+  suggestFixApplyTarget: null as SuggestFixApplyTarget | null,
   findingDispositions: {} as Record<string, PrFindingDisposition>,
   findingFilter: 'all' as PrFindingFilter,
 };
@@ -174,6 +183,8 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
   dismiss: () => {
     get().cancelActiveRequest();
     useGithubReviewDraftStore.getState().clearDraft();
+    usePatchApplyStore.getState().reset();
+    useGithubCiStore.getState().close();
     set({ ...INITIAL_STATE });
   },
 
@@ -258,12 +269,21 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
             findingDispositions: {},
             findingFilter: 'all' as const,
             lastReviewContext: null,
+            suggestFixApplyTarget: null,
           }
-        : {}),
+        : action === AIAction.SUGGEST_FIX
+          ? {
+              suggestFixApplyTarget:
+                options && Object.prototype.hasOwnProperty.call(options, 'applyTarget')
+                  ? (options.applyTarget ?? null)
+                  : get().suggestFixApplyTarget,
+            }
+          : {}),
     });
 
     if (resetReviewSession) {
       useGithubReviewDraftStore.getState().clearDraft();
+      usePatchApplyStore.getState().reset();
     }
 
     let receivedChunk = false;

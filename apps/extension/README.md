@@ -78,6 +78,10 @@ Curate findings into a session-only **Review Draft**, edit comments / overall bo
 - Draft stays bound to the original PR — never retargets on SPA navigation
 - Day 12 **Post to GitHub** comment flow still works alongside reviews
 
+### Day 14 — Apply Fix
+
+After **Suggest Fix** on a PR finding that has a trusted file path, **Apply Fix** prepares against the live PR head (no write), shows the exact old→new diff + editable commit message, then **Apply Fix & Commit** updates only the PR head branch via the GitHub Contents API (single-file modify). Stale head/file SHA blocks the write. **Copy Fix** still works without GitHub write access.
+
 ## Day 11 — Error Intelligence
 
 When a software error is confidently detected (local multi-signal scoring — not an AI classify call), Smart Actions promote:

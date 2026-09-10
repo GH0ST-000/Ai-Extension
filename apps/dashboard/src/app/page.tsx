@@ -2,187 +2,159 @@ import Link from 'next/link';
 
 import { APP_NAME } from '@project-x/shared';
 
-import { BrandGlyph, BrandMark } from '../components/brand-mark';
-import { ThemeToggle } from '../components/theme-toggle';
+import { BrandGlyph } from '../components/brand-mark';
+import { LandingHeader } from '../components/landing-header';
+import { LandingHeroCtas } from '../components/landing-hero-ctas';
+
+const CAPABILITIES = [
+  {
+    label: 'Smart Actions',
+    title: 'Menu follows the selection',
+    copy: 'Code, errors, and prose reorder Ask AI locally — no extra model call before you choose.',
+  },
+  {
+    label: 'Replace',
+    title: 'Write back in place',
+    copy: 'Improve or translate in a field, then Replace. Password and locked inputs stay untouched.',
+  },
+  {
+    label: 'Error Intelligence',
+    title: 'Stack → next step',
+    copy: 'On-device classification, secret redaction, then Understand Error, Find Root Cause, or Suggest Fix.',
+  },
+  {
+    label: 'Suggest Fix',
+    title: 'Patch you can copy',
+    copy: 'Minimal correction with a safe preview. Project X never applies the patch or pushes code.',
+  },
+] as const;
+
+const PR_FLOW = [
+  ['Review', 'Bounded multi-file PR analysis into a filterable report'],
+  ['Curate', 'Add findings to a Review Draft — ignored items stay out'],
+  ['Confirm', 'COMMENT / APPROVE / REQUEST_CHANGES only after you preview'],
+  ['Submit', 'Encrypted PAT on the API · idempotent · View on GitHub'],
+] as const;
 
 export default function HomePage() {
   return (
     <main className="atmosphere relative min-h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" aria-hidden />
       <div
-        className="pointer-events-none absolute left-[-10%] top-[-10%] h-[42rem] w-[42rem] rounded-full bg-accent/20 blur-3xl float-soft"
+        className="pointer-events-none absolute left-[-10%] top-[-12%] h-[36rem] w-[36rem] rounded-full bg-accent/20 blur-3xl float-soft"
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute bottom-[-20%] right-[-8%] h-[36rem] w-[36rem] rounded-full bg-spark/15 blur-3xl"
+        className="pointer-events-none absolute bottom-[-18%] right-[-10%] h-[30rem] w-[30rem] rounded-full bg-spark/15 blur-3xl"
         aria-hidden
       />
 
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 py-8 md:px-10">
-        <header className="flex items-center justify-between rise-in">
-          <BrandMark />
-          <div className="flex items-center gap-2 sm:gap-3">
-            <ThemeToggle compact />
-            <Link
-              href="/login"
-              className="rounded-xl px-3 py-2 text-sm font-semibold text-muted-foreground transition hover:text-ink"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/app"
-              className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90"
-            >
-              Open studio
-            </Link>
-          </div>
-        </header>
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 py-6 md:px-10 md:py-8">
+        <LandingHeader />
 
-        {/* Hero — first viewport stays lean */}
-        <section className="flex min-h-[78vh] flex-col justify-center py-16 md:py-20">
+        <section className="flex min-h-[68vh] flex-col justify-center py-12 md:min-h-[72vh] md:py-14">
           <div className="rise-in-delay-1 max-w-3xl">
-            <div className="mb-6">
-              <BrandGlyph size={72} className="rounded-[1.35rem] shadow-soft" />
-            </div>
-            <p className="mb-5 font-display text-5xl font-semibold tracking-tight text-ink md:text-7xl">
+            <BrandGlyph size={56} className="mb-5 rounded-[1.15rem] shadow-soft" />
+            <p className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
               {APP_NAME}
             </p>
-            <h1 className="max-w-2xl font-display text-3xl font-semibold leading-[1.08] tracking-tight text-ink text-balance md:text-5xl">
+            <h1 className="max-w-2xl font-display text-2xl font-semibold leading-[1.12] tracking-tight text-ink text-balance md:text-4xl">
               AI that reads the page with you.
             </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Highlight anything in Chrome. Smart actions, in-place replace, full PR review reports,
-              and a safe patch preview — without leaving the tab.
+            <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
+              Highlight anything in Chrome. Smart actions, error intelligence, PR reports, and
+              confirmed GitHub reviews — without leaving the tab.
             </p>
-
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Link
-                href="/login"
-                className="rounded-2xl bg-accent px-5 py-3 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/login"
-                className="rounded-2xl border border-line bg-panel/75 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-panel"
-              >
-                Create account
-              </Link>
-            </div>
+            <LandingHeroCtas />
           </div>
         </section>
 
-        {/* Capability story — one job per section */}
-        <section className="rise-in border-t border-line/70 py-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-            Smart Actions
-          </p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            The menu reorders itself to the selection.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            Code, errors, short phrases, and prose each surface the most useful Ask AI action first
-            — locally, with no extra model call before you choose.
-          </p>
-          <ul className="mt-10 max-w-2xl space-y-4 text-sm text-ink">
-            {[
-              ['Code & diffs', 'Explain Code, Code Review, and Suggest Fix rise to the top'],
-              ['Errors', 'Explain leads, then Explain Code'],
-              ['Prose', 'Summarize and Improve Writing come first'],
-            ].map(([label, detail]) => (
-              <li key={label} className="flex gap-4 border-b border-line/60 pb-4">
-                <span className="w-36 shrink-0 font-semibold">{label}</span>
-                <span className="text-muted-foreground">{detail}</span>
-              </li>
+        <section className="rise-in border-t border-line/70 py-12 md:py-14">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                In the extension
+              </p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+                Built for the tab you already have open.
+              </h2>
+            </div>
+            <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
+              Ranking and error detection run on-device. OpenAI keys and GitHub PATs stay on the
+              API.
+            </p>
+          </div>
+
+          <div className="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+            {CAPABILITIES.map((item) => (
+              <div key={item.label} className="border-t border-line/70 pt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  {item.label}
+                </p>
+                <h3 className="mt-1.5 font-display text-xl font-semibold tracking-tight text-ink">
+                  {item.title}
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{item.copy}</p>
+              </div>
             ))}
-          </ul>
+          </div>
         </section>
 
-        <section className="rise-in border-t border-line/70 py-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-            In-place Replace
-          </p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            Write back into the field you selected.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            Improve Writing or Translate on a textarea, text input, or contenteditable — then
-            Replace instead of copy-paste. Password and locked fields stay untouched.
-          </p>
+        <section className="rise-in-delay-1 border-t border-line/70 py-12 md:py-14">
+          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:items-start">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                GitHub workflow
+              </p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+                From PR report to a review you actually submit.
+              </h2>
+              <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground md:text-base">
+                Review Entire PR builds a structured findings report. You curate a draft, edit the
+                exact text, preview, then confirm. AI never posts, approves, or requests changes
+                alone.
+              </p>
+            </div>
+
+            <ol className="space-y-0">
+              {PR_FLOW.map(([label, detail], index) => (
+                <li
+                  key={label}
+                  className="flex gap-3 border-t border-line/70 py-3 first:border-t-0 first:pt-0 last:pb-0"
+                >
+                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink font-display text-[11px] font-bold text-inverse">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">{label}</p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
         </section>
 
-        <section className="rise-in border-t border-line/70 py-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-            GitHub intelligence
-          </p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            Review one hunk — or the whole PR.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            On GitHub PRs, Project X reads title, body, branches, and nearby diff context. Code
-            Review targets your selection; Review Entire PR analyzes a bounded multi-file slice from
-            the Files tab.
-          </p>
-        </section>
-
-        <section className="rise-in border-t border-line/70 py-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-            Review Entire PR
-          </p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            A structured report you can filter, resolve, and export.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            Open the PR Files tab, run Review Entire PR, then work the findings in a compact report:
-            filter by severity, mark items resolved for the session, generate a handoff summary, and
-            Copy Full Review as Markdown — still read-only, never posted to GitHub.
-          </p>
-          <ol className="mt-10 max-w-2xl space-y-4 text-sm text-ink">
-            {[
-              ['Files tab', 'Load the PR files so diffs are in the page'],
-              ['Review Entire PR', 'Collect bounded changed-file context and stream risks'],
-              ['Filter & resolve', 'Inspect findings; mark open items for this session only'],
-              ['Export', 'Copy Full Review Markdown and share manually with your team'],
-            ].map(([label, detail], index) => (
-              <li key={label} className="flex gap-4 border-b border-line/60 pb-4">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-ink font-display text-xs font-bold text-inverse">
-                  {index + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="font-semibold">{label}</p>
-                  <p className="mt-0.5 text-muted-foreground">{detail}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section className="rise-in border-t border-line/70 py-20">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-            Suggest Fix
-          </p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-            From a finding to a patch you can copy.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            After Code Review or a PR finding, Suggest Fix proposes a minimal correction. You see a
-            safe patch preview in the floating panel, then Copy Fix — Project X never writes to
-            GitHub for you.
-          </p>
-          <div className="mt-10 flex flex-wrap gap-3">
+        <section className="rise-in-delay-2 border-t border-line/70 py-10 md:py-12">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-xl">
+              <p className="font-display text-xl font-semibold tracking-tight text-ink md:text-2xl">
+                Same account for extension, studio, and GitHub.
+              </p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Connect a PAT in Settings when you are ready to post comments or submit reviews.
+              </p>
+            </div>
             <Link
-              href="/login"
-              className="rounded-2xl bg-ink px-5 py-3 text-sm font-semibold text-inverse transition hover:opacity-90"
+              href="/app"
+              className="inline-flex shrink-0 rounded-2xl bg-ink px-5 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90"
             >
               Open the studio
             </Link>
-            <p className="self-center text-sm text-muted-foreground">
-              Same account unlocks the extension and settings.
-            </p>
           </div>
         </section>
 
-        <footer className="border-t border-line/70 py-10 text-sm text-muted-foreground">
+        <footer className="border-t border-line/70 py-6 text-sm text-muted-foreground">
           {APP_NAME} · Chrome extension + studio
         </footer>
       </div>

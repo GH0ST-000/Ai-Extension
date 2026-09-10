@@ -1,8 +1,12 @@
+import Link from 'next/link';
+
 import { APP_NAME } from '@project-x/shared';
 
 type BrandMarkProps = {
   size?: 'sm' | 'lg';
   showWordmark?: boolean;
+  /** Defaults to landing `/`. Pass `null` to render without a link. */
+  href?: string | null;
 };
 
 const SIZES = {
@@ -32,12 +36,12 @@ export function BrandGlyph({ size = 36, className = '' }: { size?: number; class
   );
 }
 
-export function BrandMark({ size = 'sm', showWordmark = true }: BrandMarkProps) {
+function BrandMarkInner({ size, showWordmark }: { size: 'sm' | 'lg'; showWordmark: boolean }) {
   const box = SIZES[size];
   const radius = size === 'lg' ? 'rounded-2xl' : 'rounded-xl';
 
   return (
-    <div className="flex items-center gap-3">
+    <>
       <BrandGlyph size={box} className={`shrink-0 shadow-soft ${radius}`} />
       {showWordmark ? (
         <div className="min-w-0">
@@ -49,6 +53,24 @@ export function BrandMark({ size = 'sm', showWordmark = true }: BrandMarkProps) 
           </p>
         </div>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+export function BrandMark({ size = 'sm', showWordmark = true, href = '/' }: BrandMarkProps) {
+  const className = 'flex items-center gap-3 transition hover:opacity-90';
+
+  if (href == null) {
+    return (
+      <div className={className}>
+        <BrandMarkInner size={size} showWordmark={showWordmark} />
+      </div>
+    );
+  }
+
+  return (
+    <Link href={href} className={className} aria-label={`${APP_NAME} home`}>
+      <BrandMarkInner size={size} showWordmark={showWordmark} />
+    </Link>
   );
 }

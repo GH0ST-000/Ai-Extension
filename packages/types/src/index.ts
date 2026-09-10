@@ -188,6 +188,135 @@ export interface PostPullRequestCommentResponse {
   deduplicated: boolean;
 }
 
+/** Day 13 — GitHub pull request review event (not an AIAction). */
+export type GitHubReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+
+export const GITHUB_REVIEW_EVENTS = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] as const;
+
+export type GitHubReviewCommentMode = 'line' | 'pr';
+
+export type GitHubReviewPositionStatus = 'valid' | 'unavailable' | 'stale';
+
+export type GitHubReviewDiffSide = 'LEFT' | 'RIGHT';
+
+/** Trusted deterministic diff coordinates only — never guess from DOM/AI. */
+export interface GitHubReviewDiffPosition {
+  path: string;
+  line: number;
+  side: GitHubReviewDiffSide;
+  startLine?: number;
+  startSide?: GitHubReviewDiffSide;
+  commitId?: string;
+}
+
+/** Centralized GitHub review payload limits (aligned with GitHub API + project conventions). */
+export const GITHUB_REVIEW_MAX_BODY_CHARACTERS = 65_536;
+export const GITHUB_REVIEW_MAX_COMMENT_CHARACTERS = 65_536;
+export const GITHUB_REVIEW_MAX_COMMENTS = 50;
+
+/** Normalized GitHub write error codes (Day 12 + Day 13). */
+export type GitHubWriteErrorCode =
+  | 'NOT_CONNECTED'
+  | 'INSUFFICIENT_PERMISSION'
+  | 'REPOSITORY_NOT_ACCESSIBLE'
+  | 'PULL_REQUEST_NOT_FOUND'
+  | 'REVIEW_ACTION_NOT_ALLOWED'
+  | 'REVIEW_VALIDATION_FAILED'
+  | 'STALE_DIFF_POSITION'
+  | 'RATE_LIMITED'
+  | 'GITHUB_UNAVAILABLE'
+  | 'WRITE_OUTCOME_UNKNOWN'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'UNKNOWN';
+
+/** Session-only draft comment (extension). Credentials never stored here. */
+export interface GitHubReviewDraftComment {
+  id: string;
+  findingId?: string;
+  originalBody: string;
+  body: string;
+  filePath?: string;
+  enabled: boolean;
+  mode: GitHubReviewCommentMode;
+  position?: GitHubReviewDiffPosition;
+  positionStatus: GitHubReviewPositionStatus;
+  severity?: 'high' | 'medium' | 'low';
+  findingTitle?: string;
+  /** Soft-removed from draft; finding itself is unchanged. */
+  removed?: boolean;
+}
+
+export interface GitHubReviewDraftDestination {
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+}
+
+/** Session-only review draft bound to a trusted PR destination. */
+export interface GitHubReviewDraft {
+  id: string;
+  destination: GitHubReviewDraftDestination;
+  event: GitHubReviewEvent;
+  body: string;
+  comments: GitHubReviewDraftComment[];
+  createdAt: string;
+  sourceReviewSessionId?: string;
+  expectedHeadSha?: string;
+  /** True when the live page PR no longer matches destination. */
+  staleNavigation?: boolean;
+}
+
+/** Immutable confirmation payload — submit only from this, never from live form state. */
+export interface GitHubReviewSubmissionSnapshot {
+  clientRequestId: string;
+  owner: string;
+  repository: string;
+  pullRequestNumber: number;
+  event: GitHubReviewEvent;
+  body: string;
+  comments: Array<{
+    body: string;
+    path?: string;
+    line?: number;
+    side?: GitHubReviewDiffSide;
+    startLine?: number;
+    startSide?: GitHubReviewDiffSide;
+  }>;
+  expectedHeadSha?: string;
+  fingerprint: string;
+  createdAt: string;
+}
+
+export interface SubmitPullRequestReviewRequest {
+  event: GitHubReviewEvent;
+  body?: string;
+  comments: Array<{
+    body: string;
+    path?: string;
+    line?: number;
+    side?: GitHubReviewDiffSide;
+    startLine?: number;
+    startSide?: GitHubReviewDiffSide;
+  }>;
+  clientRequestId: string;
+  expectedHeadSha?: string;
+}
+
+export interface SubmitPullRequestReviewResponse {
+  success: true;
+  reviewId: number;
+  state: string;
+  reviewUrl: string;
+  submittedAt: string;
+  commentCount: number;
+  deduplicated: boolean;
+}
+
+export interface GitHubWriteErrorBody {
+  code: GitHubWriteErrorCode;
+  message: string;
+}
+
 /** Day 11 — local error classification (extension → API for error actions). */
 export type ErrorCategory =
   | 'runtime'

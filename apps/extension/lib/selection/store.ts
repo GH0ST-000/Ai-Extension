@@ -18,6 +18,7 @@ import {
 import type { AssistantView, SelectionRect, ToolbarPhase } from './types';
 import type { PrFindingDisposition, PrFindingFilter } from './utils/build-pr-review-report';
 import { extractFixClipboardText } from './utils/parse-suggest-fix';
+import { useGithubReviewDraftStore } from './review-draft';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -172,6 +173,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
 
   dismiss: () => {
     get().cancelActiveRequest();
+    useGithubReviewDraftStore.getState().clearDraft();
     set({ ...INITIAL_STATE });
   },
 
@@ -259,6 +261,10 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           }
         : {}),
     });
+
+    if (resetReviewSession) {
+      useGithubReviewDraftStore.getState().clearDraft();
+    }
 
     let receivedChunk = false;
 

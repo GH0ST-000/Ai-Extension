@@ -15,15 +15,15 @@ const CAPABILITIES = [
   },
   {
     label: 'GitHub',
-    value: 'PR-aware review',
-    copy: 'Pull requests send title, body, branches, and a bounded multi-file slice. Review Entire PR → Suggest Fix on findings.',
+    value: 'Review with confirmation',
+    copy: 'PR report → curated Review Draft → COMMENT / APPROVE / REQUEST_CHANGES. Your PAT stays encrypted on the API.',
   },
 ] as const;
 
 const FLOW_STEPS = [
-  'Highlight text, code, or a PR diff',
+  'Highlight text, code, an error, or a PR diff',
   'Pick a smart-ranked action (or press A / R / F…)',
-  'Stream the answer — Copy, Copy Fix, or Replace when editable',
+  'Stream the answer — Copy, Replace, or confirm a GitHub write',
 ] as const;
 
 export default function DashboardHomePage() {
@@ -43,11 +43,11 @@ export default function DashboardHomePage() {
           Extension studio
         </p>
         <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold tracking-tight text-ink text-balance md:text-5xl">
-          Smart actions, replace, and GitHub review — live in Chrome.
+          Smart actions, PR reports, and confirmed GitHub reviews.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-          Sign in here to tune response length and page context. The extension uses the same account
-          for Ask AI, ranking, and in-place edits.
+          Sign in here to tune response length, page context, and your GitHub token. The extension
+          uses the same account for Ask AI, ranking, and safe writes.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -111,11 +111,11 @@ export default function DashboardHomePage() {
         </p>
         <p className="mt-2 font-display text-xl font-semibold tracking-tight text-ink">
           Explain · Improve Writing · Summarize · Translate · Explain Code · Code Review · Suggest
-          Fix · Review Entire PR · Custom
+          Fix · Review Entire PR · Understand Error · Find Root Cause · Custom
         </p>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Shortcuts stay bound to each action (E, I, S, T, C, R, F, A, P) even when Smart Actions
-          reorders the menu.
+          Shortcuts stay bound to each action even when Smart Actions reorders the menu. GitHub
+          comment and review submit are confirmed writes — not AI actions.
         </p>
       </section>
     </div>

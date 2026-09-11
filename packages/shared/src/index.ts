@@ -1,3 +1,16 @@
+export { findJiraIssueKeysInText, detectJiraKeysInPrSignals } from './jira/jira-key-match';
+export {
+  validateOpenApiFetchUrl,
+  sanitizeOpenApiDocumentUrl,
+  isPrivateOrReservedIp,
+  isIPv4,
+  isIPv6,
+} from './openapi/safe-url';
+export type { SafeUrlResult, SafeUrlRejectReason } from './openapi/safe-url';
+export { findOperation, buildOperationAiContext } from './openapi/operation-context';
+export { generateApiExample } from './openapi/example';
+export { isOpenApiSpecPath, filterOpenApiSpecPaths } from './openapi/spec-path';
+
 export { normalizeRepositoryPath } from './ci-fix/normalize-path';
 export {
   extractPathsFromText,
@@ -12,7 +25,6 @@ export {
   verificationToSessionStatus,
 } from './ci-fix/verify-fix';
 export type { VerifyCIFixInput } from './ci-fix/verify-fix';
-export { findJiraIssueKeysInText, detectJiraKeysInPrSignals } from './jira/jira-key-match';
 
 export const APP_NAME = 'Project X' as const;
 
@@ -24,18 +36,12 @@ export const SERVICE_NAMES = {
 
 export type ServiceName = (typeof SERVICE_NAMES)[keyof typeof SERVICE_NAMES];
 
-/**
- * Sleep helper for retries and backoff without pulling in extra deps.
- */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
-/**
- * Narrow unknown errors to a readable message.
- */
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -48,9 +54,6 @@ export function getErrorMessage(error: unknown): string {
   return 'Unknown error';
 }
 
-/**
- * Ensure a value is a non-empty trimmed string.
- */
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }

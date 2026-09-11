@@ -5,6 +5,8 @@ import type {
   ApplyPullRequestPatchResponse,
   CICheckFailureEvidence,
   GitHubConnectionStatus,
+  GitHubFileVersionsRequest,
+  GitHubFileVersionsResponse,
   GitHubWriteErrorBody,
   GitHubWriteErrorCode,
   PostPullRequestCommentRequest,
@@ -210,6 +212,43 @@ export function analyzeCheckFailure(
     {
       method: 'POST',
       body: JSON.stringify(input),
+      signal,
+    },
+  );
+}
+
+/** Day 18 — read-only Contents API at explicit baseSha + headSha. */
+export function fetchRepoFileVersions(
+  owner: string,
+  repository: string,
+  input: GitHubFileVersionsRequest,
+  signal?: AbortSignal,
+): Promise<GitHubFileVersionsResponse> {
+  return apiFetch<GitHubFileVersionsResponse>(
+    `/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/file-versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
+}
+
+/**
+ * Day 18 — resolve PR base/head SHAs then fetch one path at both (read-only).
+ */
+export function fetchPullRequestFileVersions(
+  owner: string,
+  repository: string,
+  pullRequestNumber: number,
+  path: string,
+  signal?: AbortSignal,
+): Promise<GitHubFileVersionsResponse & { pullRequestNumber: number }> {
+  return apiFetch<GitHubFileVersionsResponse & { pullRequestNumber: number }>(
+    `/github/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${pullRequestNumber}/file-versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ path }),
       signal,
     },
   );

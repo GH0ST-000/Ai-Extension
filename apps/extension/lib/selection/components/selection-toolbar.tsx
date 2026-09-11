@@ -40,6 +40,12 @@ import { LoadingPanel } from './loading-panel';
 import { ResultPanel } from './result-panel';
 import { CiEntryButton, CiPanel, useGithubCiStore } from '../ci';
 import { JiraIssuePanel, useJiraSessionStore } from '../jira';
+import {
+  OpenApiPanel,
+  PrOpenApiChangesButton,
+  buildCompareApiWithJiraText,
+  useOpenApiSessionStore,
+} from '../openapi';
 import { extractPageContext } from '../../context/extract-page-context';
 import { parseGitHubUrl } from '../../context/adapters/github.adapter';
 import { detectJiraKeysInPrSignals } from '@project-x/shared';
@@ -74,56 +80,6 @@ export function SelectionToolbar() {
   const ciView = useGithubCiStore((s) => s.view);
   const openCi = useGithubCiStore((s) => s.open);
 
-  const prCiDestination = useMemo(() => {
-    const fromReview = lastReviewContext?.github;
-    if (
-      fromReview?.owner &&
-      fromReview.repository &&
-      fromReview.pullRequestNumber &&
-      fromReview.pullRequestNumber > 0
-    ) {
-      return {
-        owner: fromReview.owner,
-        repository: fromReview.repository,
-        pullRequestNumber: fromReview.pullRequestNumber,
-        pullRequestTitle: fromReview.pullRequestTitle,
-        changedFiles: fromReview.changedFiles,
-      };
-    }
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    try {
-      const parsed = parseGitHubUrl(new URL(window.location.href));
-      if (
-        parsed?.owner &&
-        parsed.repository &&
-        parsed.isPullRequest &&
-        parsed.pullRequestNumber &&
-        parsed.pullRequestNumber > 0
-      ) {
-        const ctx = extractPageContext();
-        return {
-          owner: parsed.owner,
-          repository: parsed.repository,
-          pullRequestNumber: parsed.pullRequestNumber,
-          pullRequestTitle: ctx.github?.pullRequestTitle,
-          changedFiles: ctx.github?.changedFiles,
-        };
-      }
-    } catch {
-      // ignore
-    }
-    return null;
-  }, [lastReviewContext]);
-
-  const handleOpenCi = useCallback(() => {
-    if (!prCiDestination) {
-      return;
-    }
-    openCi(prCiDestination);
-  }, [openCi, prCiDestination]);
-
   const documentHref = useDocumentHref();
 
   const pageSnapshot = useMemo(() => {
@@ -143,6 +99,16 @@ export function SelectionToolbar() {
 
   const jiraIssueKey = pageSnapshot?.type === 'jira' ? pageSnapshot.jira?.issueKey : undefined;
   const jiraHost = pageSnapshot?.type === 'jira' ? pageSnapshot.jira?.siteHost : undefined;
+  const sessionJiraIssue = useJiraSessionStore((s) => s.issue);
+  /** Prefer live page issue; keep session issue when browsing API/GitHub for Day 17/18 bridge. */
+  const effectiveJiraKey = jiraIssueKey ?? sessionJiraIssue?.key;
+  const effectiveJiraHost = jiraHost ?? sessionJiraIssue?.siteHost;
+
+  const openApiContext = pageSnapshot?.type === 'openapi' ? pageSnapshot.openapi : undefined;
+  const openApiDocumentUrl = openApiContext?.documentUrl;
+  const openApiOperationKey = openApiContext?.selectedOperation
+    ? `${openApiContext.selectedOperation.method}:${openApiContext.selectedOperation.path}`
+    : undefined;
 
   const githubJiraKeys = useMemo(() => {
     if (pageSnapshot?.type !== 'github' || !pageSnapshot.github) {
@@ -157,19 +123,106 @@ export function SelectionToolbar() {
   }, [pageSnapshot]);
 
   const clearJira = useJiraSessionStore((s) => s.clearIssue);
+  const clearOpenApi = useOpenApiSessionStore((s) => s.clear);
   const markComparison = useJiraSessionStore((s) => s.markComparison);
   const comparisonStale = useJiraSessionStore((s) => s.isComparisonStale);
   const ciSummary = useGithubCiStore((s) => s.summary);
   const prevJiraNavRef = useRef<{ key?: string; host?: string } | null>(null);
+  const prevOpenApiNavRef = useRef<{ documentUrl?: string; operationKey?: string } | null>(null);
 
   useEffect(() => {
     const prev = prevJiraNavRef.current;
-    if (prev && (prev.key !== jiraIssueKey || prev.host !== jiraHost)) {
-      // Invalidate only on real SPA issue/site navigation — not on first mount
+    // Only invalidate when switching between two concrete Jira issues — keep session
+    // when leaving Jira for OpenAPI/GitHub so Compare still works.
+    if (prev?.key && jiraIssueKey && (prev.key !== jiraIssueKey || prev.host !== jiraHost)) {
       clearJira();
     }
     prevJiraNavRef.current = { key: jiraIssueKey, host: jiraHost };
   }, [jiraIssueKey, jiraHost, clearJira]);
+
+  useEffect(() => {
+    const prev = prevOpenApiNavRef.current;
+    if (
+      prev &&
+      (prev.documentUrl !== openApiDocumentUrl || prev.operationKey !== openApiOperationKey)
+    ) {
+      clearOpenApi();
+    }
+    prevOpenApiNavRef.current = {
+      documentUrl: openApiDocumentUrl,
+      operationKey: openApiOperationKey,
+    };
+  }, [openApiDocumentUrl, openApiOperationKey, clearOpenApi]);
+
+  const prCiDestination = useMemo(() => {
+    const fromReview = lastReviewContext?.github;
+    const fromPage = pageSnapshot?.type === 'github' ? pageSnapshot.github : undefined;
+
+    if (
+      fromReview?.owner &&
+      fromReview.repository &&
+      fromReview.pullRequestNumber &&
+      fromReview.pullRequestNumber > 0
+    ) {
+      return {
+        owner: fromReview.owner,
+        repository: fromReview.repository,
+        pullRequestNumber: fromReview.pullRequestNumber,
+        pullRequestTitle: fromReview.pullRequestTitle,
+        // Prefer live Files-tab DOM list when present; fall back to review session.
+        changedFiles: fromPage?.changedFiles?.length
+          ? fromPage.changedFiles
+          : fromReview.changedFiles,
+      };
+    }
+
+    if (
+      fromPage?.owner &&
+      fromPage.repository &&
+      fromPage.pullRequestNumber &&
+      fromPage.pullRequestNumber > 0
+    ) {
+      return {
+        owner: fromPage.owner,
+        repository: fromPage.repository,
+        pullRequestNumber: fromPage.pullRequestNumber,
+        pullRequestTitle: fromPage.pullRequestTitle,
+        changedFiles: fromPage.changedFiles,
+      };
+    }
+
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    try {
+      const parsed = parseGitHubUrl(new URL(window.location.href));
+      if (
+        parsed?.owner &&
+        parsed.repository &&
+        parsed.isPullRequest &&
+        parsed.pullRequestNumber &&
+        parsed.pullRequestNumber > 0
+      ) {
+        return {
+          owner: parsed.owner,
+          repository: parsed.repository,
+          pullRequestNumber: parsed.pullRequestNumber,
+          pullRequestTitle: fromPage?.pullRequestTitle,
+          changedFiles: fromPage?.changedFiles,
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }, [lastReviewContext, pageSnapshot]);
+
+  const handleOpenCi = useCallback(() => {
+    if (!prCiDestination) {
+      return;
+    }
+    openCi(prCiDestination);
+  }, [openCi, prCiDestination]);
 
   const comparisonHeadToken =
     ciSummary?.headSha ??
@@ -226,6 +279,19 @@ export function SelectionToolbar() {
     useSelectionToolbarStore.setState({ selectedText: text });
     void startAction(AIAction.COMPARE_JIRA_WITH_PR);
   }, [ciSummary?.headSha, lastReviewContext, markComparison, pageSnapshot, startAction]);
+
+  const handleCompareApiWithJira = useCallback(() => {
+    const text = buildCompareApiWithJiraText();
+    if (!text) {
+      return;
+    }
+    const api = useOpenApiSessionStore.getState();
+    if (api.contract) {
+      api.markAnalyzed(api.contract.documentHash);
+    }
+    useSelectionToolbarStore.setState({ selectedText: text });
+    void startAction(AIAction.COMPARE_API_WITH_JIRA);
+  }, [startAction]);
 
   const rankedActions = useMemo(() => {
     if (!selectedText.trim()) {
@@ -509,52 +575,88 @@ export function SelectionToolbar() {
 
             {phase === 'assistant' && assistant.status === 'menu' ? (
               <div key="menu" className="space-y-1">
-                {jiraIssueKey ? (
-                  <JiraIssuePanel
-                    issueKey={jiraIssueKey}
-                    siteHost={jiraHost}
-                    comparisonStale={comparisonStale(comparisonHeadToken)}
-                    onCompareWithPr={
-                      lastReviewContext?.github?.pullRequestNumber ||
-                      pageSnapshot?.github?.pullRequestNumber
-                        ? handleCompareJiraWithPr
-                        : undefined
-                    }
-                    relatedPrLabel={
-                      lastReviewContext?.github?.pullRequestNumber
-                        ? `GitHub PR #${lastReviewContext.github.pullRequestNumber} in session`
-                        : pageSnapshot?.github?.pullRequestNumber
-                          ? `GitHub PR #${pageSnapshot.github.pullRequestNumber}`
-                          : null
-                    }
-                  />
-                ) : null}
-                {githubJiraKeys.length === 1 ? (
-                  <JiraIssuePanel
-                    issueKey={githubJiraKeys[0]!}
-                    comparisonStale={comparisonStale(comparisonHeadToken)}
-                    onCompareWithPr={
-                      pageSnapshot?.github?.pullRequestNumber ? handleCompareJiraWithPr : undefined
-                    }
-                    relatedPrLabel={
-                      pageSnapshot?.github?.pullRequestNumber
-                        ? `GitHub PR #${pageSnapshot.github.pullRequestNumber} (key in title/body/branch)`
-                        : null
-                    }
-                  />
-                ) : null}
-                {githubJiraKeys.length > 1 ? (
-                  <div className="rounded-[12px] border border-border bg-elevated px-2 py-1.5 text-[11px] text-secondary shadow-menu">
-                    Multiple Jira keys detected ({githubJiraKeys.join(', ')}). Open an issue or
-                    choose one action after loading a single key.
-                  </div>
-                ) : null}
-                {prCiDestination ? (
-                  <div className="rounded-[12px] border border-border bg-elevated px-2 py-1.5 shadow-menu">
-                    <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
-                  </div>
-                ) : null}
-                <ActionMenu actions={rankedActions} onSelect={handleSelectAction} />
+                <ActionMenu
+                  actions={rankedActions}
+                  onSelect={handleSelectAction}
+                  pageType={pageSnapshot?.type ?? null}
+                  hasOpenApi={Boolean(openApiContext)}
+                  hasJiraIssue={Boolean(effectiveJiraKey || githubJiraKeys.length === 1)}
+                  hasGithub={Boolean(pageSnapshot?.type === 'github' || prCiDestination)}
+                  githubSlot={
+                    prCiDestination || pageSnapshot?.type === 'github' ? (
+                      <div className="space-y-1 px-1 py-1">
+                        {prCiDestination ? (
+                          <div className="px-1 py-1">
+                            <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
+                          </div>
+                        ) : null}
+                        {prCiDestination ? (
+                          <PrOpenApiChangesButton
+                            embedded
+                            owner={prCiDestination.owner}
+                            repository={prCiDestination.repository}
+                            pullRequestNumber={prCiDestination.pullRequestNumber}
+                            changedFilePaths={(prCiDestination.changedFiles ?? []).map(
+                              (f) => f.path,
+                            )}
+                          />
+                        ) : null}
+                      </div>
+                    ) : null
+                  }
+                  jiraSlot={
+                    effectiveJiraKey ? (
+                      <JiraIssuePanel
+                        embedded
+                        issueKey={effectiveJiraKey}
+                        siteHost={effectiveJiraHost}
+                        comparisonStale={comparisonStale(comparisonHeadToken)}
+                        onCompareWithPr={
+                          lastReviewContext?.github?.pullRequestNumber ||
+                          pageSnapshot?.github?.pullRequestNumber
+                            ? handleCompareJiraWithPr
+                            : undefined
+                        }
+                        relatedPrLabel={
+                          lastReviewContext?.github?.pullRequestNumber
+                            ? `GitHub PR #${lastReviewContext.github.pullRequestNumber} in session`
+                            : pageSnapshot?.github?.pullRequestNumber
+                              ? `GitHub PR #${pageSnapshot.github.pullRequestNumber}`
+                              : null
+                        }
+                      />
+                    ) : githubJiraKeys.length === 1 ? (
+                      <JiraIssuePanel
+                        embedded
+                        issueKey={githubJiraKeys[0]!}
+                        comparisonStale={comparisonStale(comparisonHeadToken)}
+                        onCompareWithPr={
+                          pageSnapshot?.github?.pullRequestNumber
+                            ? handleCompareJiraWithPr
+                            : undefined
+                        }
+                        relatedPrLabel={
+                          pageSnapshot?.github?.pullRequestNumber
+                            ? `GitHub PR #${pageSnapshot.github.pullRequestNumber} (key in title/body/branch)`
+                            : null
+                        }
+                      />
+                    ) : githubJiraKeys.length > 1 ? (
+                      <p className="px-3 py-3 text-[11px] text-secondary">
+                        Multiple Jira keys detected ({githubJiraKeys.join(', ')}). Open a single
+                        issue to continue.
+                      </p>
+                    ) : null
+                  }
+                  apiSlot={
+                    openApiContext ? (
+                      <OpenApiPanel
+                        pageOpenApi={openApiContext}
+                        onCompareWithJira={handleCompareApiWithJira}
+                      />
+                    ) : null
+                  }
+                />
                 {ciView !== 'closed' ? <CiPanel /> : null}
               </div>
             ) : null}

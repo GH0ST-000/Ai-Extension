@@ -115,6 +115,30 @@ describe('ExecuteAiActionDto', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('accepts openapi page context', async () => {
+    const errors = await validateDto({
+      action: AIAction.EXPLAIN_API_ENDPOINT,
+      text: 'GET /pets/{id} operation context',
+      context: {
+        type: 'openapi',
+        url: 'https://api.example.com/docs',
+        title: 'Petstore',
+        openapi: {
+          pageType: 'swagger-ui',
+          origin: 'https://api.example.com',
+          documentUrl: 'https://api.example.com/openapi.json',
+          selectedOperation: {
+            method: 'GET',
+            path: '/pets/{id}',
+            operationId: 'getPet',
+            summary: 'Find pet by ID',
+          },
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
   it('rejects an invalid context type', async () => {
     const errors = await validateDto({
       action: AIAction.EXPLAIN,

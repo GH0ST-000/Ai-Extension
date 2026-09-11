@@ -233,9 +233,57 @@ export class PageContextJiraDto {
   priority?: string | null;
 }
 
+export class PageContextOpenApiOperationDto {
+  @IsIn(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'])
+  method!: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(512)
+  path!: string;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  operationId?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_TITLE_CHARACTERS)
+  summary?: string | null;
+}
+
+export class PageContextOpenApiDto {
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsIn(['swagger-ui', 'redoc', 'openapi-document', 'unknown'])
+  pageType?: 'swagger-ui' | 'redoc' | 'openapi-document' | 'unknown' | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(253)
+  origin?: string | null;
+
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(AI_DEFAULT_MAX_CONTEXT_URL_CHARACTERS)
+  documentUrl?: string | null;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PageContextOpenApiOperationDto)
+  selectedOperation?: PageContextOpenApiOperationDto;
+}
+
 export class PageContextDto {
   @IsIn([...PAGE_CONTEXT_TYPES], {
-    message: 'context.type must be generic, github, or jira',
+    message: 'context.type must be generic, github, jira, or openapi',
   })
   type!: (typeof PAGE_CONTEXT_TYPES)[number];
 
@@ -280,6 +328,12 @@ export class PageContextDto {
   @ValidateNested()
   @Type(() => PageContextJiraDto)
   jira?: PageContextJiraDto;
+
+  @Transform(emptyObjectToUndefined)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PageContextOpenApiDto)
+  openapi?: PageContextOpenApiDto;
 }
 
 export class ExecuteAiActionDto {

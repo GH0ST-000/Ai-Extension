@@ -198,6 +198,20 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     isSuggestFix && parsedFix && (parsedFix.fixCode || parsedFix.issue || parsedFix.why),
   );
   const showPrReport = Boolean(isEntirePr && prReport);
+  const isApiOrJiraResult =
+    action === AIAction.EXPLAIN_API_ENDPOINT ||
+    action === AIAction.EXPLAIN_API_REQUEST ||
+    action === AIAction.EXPLAIN_API_RESPONSE ||
+    action === AIAction.GENERATE_API_EXAMPLE ||
+    action === AIAction.ANALYZE_API_CONTRACT ||
+    action === AIAction.COMPARE_API_WITH_JIRA ||
+    action === AIAction.ANALYZE_API_CHANGES ||
+    action === AIAction.SUMMARIZE_JIRA_ISSUE ||
+    action === AIAction.EXTRACT_ACCEPTANCE_CRITERIA ||
+    action === AIAction.CREATE_TECHNICAL_PLAN ||
+    action === AIAction.ANALYZE_JIRA_RISKS ||
+    action === AIAction.COMPARE_JIRA_WITH_PR;
+
   const panelWidthPx = useMemo(() => {
     if (isSuggestFix) {
       return suggestFixPanelWidthPx(parsedFix?.fixCode);
@@ -205,8 +219,11 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     if (isEntirePr) {
       return 400;
     }
-    return 280;
-  }, [isSuggestFix, isEntirePr, parsedFix?.fixCode]);
+    if (isApiOrJiraResult) {
+      return 340;
+    }
+    return 300;
+  }, [isSuggestFix, isEntirePr, isApiOrJiraResult, parsedFix?.fixCode]);
 
   useEffect(() => {
     if (!streaming || !stickToBottomRef.current) {
@@ -242,7 +259,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
       }}
       style={{ width: panelWidthPx }}
       className={cn(
-        'pointer-events-auto flex max-h-[440px] flex-col overflow-hidden rounded-[12px]',
+        'pointer-events-auto flex max-h-[440px] flex-col overflow-hidden rounded-[14px]',
         'bg-elevated text-primary shadow-menu backdrop-blur-2xl border border-border',
       )}
     >
@@ -304,10 +321,12 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
             ) : null}
           </div>
         ) : (
-          <p className="whitespace-pre-wrap break-words text-[12.5px] leading-5 text-primary">
-            {content}
-            {streaming ? <span className="ml-0.5 inline-block text-accent">0</span> : null}
-          </p>
+          <div className="rounded-lg border border-border bg-surface/70 px-2.5 py-2.5">
+            <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[1.55] text-primary">
+              {content}
+              {streaming ? <span className="ml-0.5 inline-block text-accent">0</span> : null}
+            </p>
+          </div>
         )}
         {replaceError ? (
           <p className="mt-2 text-[11px] leading-4 text-[#e11d48]">{replaceError}</p>

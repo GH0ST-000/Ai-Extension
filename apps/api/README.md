@@ -51,12 +51,21 @@ API listens on `http://localhost:3001` by default (`/api` global prefix).
 | GET | `/api/github/pull-requests/:owner/:repo/:number/checks` | JWT | Normalized CI/check summary for trusted current PR head |
 | GET | `/api/github/pull-requests/:owner/:repo/:number/checks/:checkId` | JWT | Bounded failure evidence (annotations / summary / Actions logs) |
 | POST | `/api/github/pull-requests/:owner/:repo/:number/checks/:checkId/analyze` | JWT | User-triggered AI CI failure analysis (`ANALYZE_CI_FAILURE`) |
+| POST | `/api/github/repos/:owner/:repo/file-versions` | JWT | Read-only: fetch one path at `baseSha` + `headSha` (Contents API; Day 18 OpenAPI diffs) |
+| POST | `/api/github/pull-requests/:owner/:repo/:number/file-versions` | JWT | Read-only: resolve PR base/head SHAs, then fetch one path at both |
+| POST | `/api/openapi/parse-url` | JWT | Fetch + normalize a public OpenAPI/Swagger document (SSRF-hardened; https only) |
+| POST | `/api/openapi/parse-content` | JWT | Normalize OpenAPI content already in hand |
+| POST | `/api/openapi/example` | JWT | Deterministic request example template (never executes; no auth capture) |
+| POST | `/api/openapi/risks` | JWT | Deterministic contract risk scan |
+| POST | `/api/openapi/diff` | JWT | Deterministic structural OpenAPI diff (`baseContent`/`headContent` + refs) |
 | POST | `/api/ai/actions/stream` | JWT | Stream an AI action as plain text |
 | POST | `/api/ai/actions` | JWT | Non-streaming AI action (debug/tests) |
 
 Day 16 CI Fix Loop is session-scoped in the extension (not a new mutation API). It orchestrates Day 15 analysis → target selection → Day 8 `SUGGEST_FIX` (optional `CI_FIX_CONTEXT` in `customPrompt`) → Day 14 prepare/apply → CI refresh/verification. No automatic commits, CI reruns, or recursive fixes.
 
 Day 17 Jira Intelligence is **read-only**. Connect via dashboard Settings (Atlassian account email + API token + `*.atlassian.net` site host). The API never posts comments, transitions issues, creates/edits issues, or downloads attachment binaries. Cross-tool compare reuses existing GitHub PR context; GitHub mutations still require Days 13/14 flows.
+
+Day 18 OpenAPI / API docs is **read-only**. Parse/diff/example/risks never execute HTTP calls against the documented API (“no Try It”). Document URL fetch is SSRF-hardened (https-only, block private/metadata hosts; DNS allow-list checks live only in `OpenApiFetchService`). GitHub PR ↔ contract wiring uses Contents API file-at-SHA reads bound to `baseSha`/`headSha` — no GitHub mutations. AI action `ANALYZE_API_CHANGES` explains a deterministic `/openapi/diff` summary; structural breaking/non-breaking labels win.
 
 ### Auth
 

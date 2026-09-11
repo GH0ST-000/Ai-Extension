@@ -1,20 +1,75 @@
-import { forwardRef } from 'react';
+import { forwardRef, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 
 import { cn } from '~/lib/utils/cn';
 
 import type { AiActionDefinition } from '../types';
 import { ActionMenuItem } from './action-menu-item';
+import {
+  ASSISTANT_TABS,
+  actionsForTab,
+  resolveDefaultAssistantTab,
+  type AssistantTabId,
+} from './assistant-tabs';
 
 type ActionMenuProps = {
   actions: readonly AiActionDefinition[];
   onSelect: (action: AiActionDefinition) => void;
+  pageType?: string | null;
+  hasOpenApi?: boolean;
+  hasJiraIssue?: boolean;
+  hasGithub?: boolean;
+  /** Extra chrome rendered inside the active tab (context panels). */
+  textSlot?: ReactNode;
+  githubSlot?: ReactNode;
+  jiraSlot?: ReactNode;
+  apiSlot?: ReactNode;
 };
 
 export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function ActionMenu(
-  { actions, onSelect },
+  {
+    actions,
+    onSelect,
+    pageType = null,
+    hasOpenApi = false,
+    hasJiraIssue = false,
+    hasGithub = false,
+    textSlot,
+    githubSlot,
+    jiraSlot,
+    apiSlot,
+  },
   ref,
 ) {
+  const defaultTab = useMemo(
+    () =>
+      resolveDefaultAssistantTab({
+        pageType,
+        hasOpenApi,
+        hasJiraIssue,
+        hasGithub,
+      }),
+    [pageType, hasOpenApi, hasJiraIssue, hasGithub],
+  );
+
+  const [tab, setTab] = useState<AssistantTabId>(defaultTab);
+
+  useEffect(() => {
+    setTab(defaultTab);
+  }, [defaultTab]);
+
+  const filtered = useMemo(() => {
+    const allowed = actionsForTab(tab);
+    return actions.filter((action) => allowed.has(action.id));
+  }, [actions, tab]);
+
+  const slot =
+    tab === 'text' ? textSlot : tab === 'github' ? githubSlot : tab === 'jira' ? jiraSlot : apiSlot;
+
+  const showCatalogActions = tab === 'text' || tab === 'github';
+  // Jira / API tabs render context panels only — show a real empty state when none.
+  const showEmptyHint = !slot && (tab === 'jira' || tab === 'api' || !showCatalogActions);
+
   return (
     <motion.div
       ref={ref}
@@ -29,18 +84,84 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
         event.stopPropagation();
       }}
       className={cn(
-        'pointer-events-auto w-[280px] overflow-hidden rounded-[12px] p-1',
+        'pointer-events-auto w-[300px] overflow-hidden rounded-[14px]',
         'bg-elevated text-primary shadow-menu backdrop-blur-2xl',
         'border border-border',
       )}
     >
-      <div className="px-2 pb-1 pt-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Actions</p>
+      <div className="border-b border-border px-2.5 pb-2 pt-2.5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+          Project X
+        </p>
+        <div
+          role="tablist"
+          aria-label="Action categories"
+          className="mt-2 grid grid-cols-4 gap-0.5 rounded-lg bg-icon p-0.5"
+        >
+          {ASSISTANT_TABS.map((item) => {
+            const active = tab === item.id;
+            const accent =
+              (item.id === 'api' && hasOpenApi) ||
+              (item.id === 'jira' && hasJiraIssue) ||
+              (item.id === 'github' && hasGithub);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(item.id)}
+                className={cn(
+                  'relative rounded-md px-1 py-1.5 text-[11px] font-semibold tracking-tight transition-colors',
+                  active ? 'bg-elevated text-primary shadow-sm' : 'text-muted hover:text-secondary',
+                )}
+              >
+                {item.label}
+                {accent && !active ? (
+                  <span
+                    aria-hidden
+                    className="absolute right-1 top-1 h-1 w-1 rounded-full bg-accent"
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="flex flex-col">
-        {actions.map((action, index) => (
-          <ActionMenuItem key={action.id} action={action} index={index} onSelect={onSelect} />
-        ))}
+
+      <div className="max-h-[360px] overflow-y-auto">
+        {slot ? <div className="border-b border-border">{slot}</div> : null}
+
+        {showCatalogActions ? (
+          <div className="flex flex-col p-1">
+            {filtered.map((action, index) => (
+              <ActionMenuItem key={action.id} action={action} index={index} onSelect={onSelect} />
+            ))}
+          </div>
+        ) : null}
+
+        {showEmptyHint ? (
+          <div className="px-3 py-5 text-center">
+            <p className="text-[12px] font-medium text-secondary">
+              {tab === 'api'
+                ? 'No API contract here'
+                : tab === 'jira'
+                  ? 'No Jira issue in context'
+                  : tab === 'github'
+                    ? 'No GitHub context'
+                    : 'Nothing here yet'}
+            </p>
+            <p className="mt-1 text-[11px] leading-4 text-muted">
+              {tab === 'api'
+                ? 'Open Swagger UI or an OpenAPI JSON/YAML document to analyze endpoints.'
+                : tab === 'jira'
+                  ? 'Open a Jira issue first. Project X keeps it for Compare with API when you switch to Swagger.'
+                  : tab === 'github'
+                    ? 'Open a GitHub pull request or file view to use review actions.'
+                    : 'Select text to get started.'}
+            </p>
+          </div>
+        ) : null}
       </div>
     </motion.div>
   );

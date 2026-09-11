@@ -24,6 +24,7 @@ import { usePatchApplyStore } from './patch-apply/patch-apply.store';
 import { useGithubCiStore } from './ci';
 import { useCIFixSessionStore } from './ci/fix/ci-fix.store';
 import { useJiraSessionStore } from './jira';
+import { useOpenApiSessionStore } from './openapi';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -189,6 +190,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     useGithubCiStore.getState().close();
     useCIFixSessionStore.getState().clear();
     useJiraSessionStore.getState().clear();
+    useOpenApiSessionStore.getState().clear();
     set({ ...INITIAL_STATE });
   },
 

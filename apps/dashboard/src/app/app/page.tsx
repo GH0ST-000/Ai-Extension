@@ -18,12 +18,27 @@ const CAPABILITIES = [
     value: 'Issue intelligence',
     copy: 'Summarize, acceptance criteria, technical plan, risks — then compare with a PR. Read-only; token stays on the API.',
   },
+  {
+    label: 'OpenAPI',
+    value: 'Contract intelligence',
+    copy: 'Explain endpoints, generate synthetic examples, surface contract risks — never execute the documented API.',
+  },
+  {
+    label: 'Alignment',
+    value: 'Cross-context analysis',
+    copy: 'Jira + PR + OpenAPI in one bounded Engineering Context, with validated evidence and stale bindings.',
+  },
+  {
+    label: 'Flow',
+    value: 'Safe workflow agent',
+    copy: 'Approve a plan first. Read-only steps may run; every GitHub write still needs Day 12 / 13 / 14 confirmation.',
+  },
 ] as const;
 
 const FLOW_STEPS = [
-  'Highlight text, code, an error, a PR diff, or open a Jira issue',
-  'Pick a smart-ranked action (or use the Jira / CI panels)',
-  'Stream the answer — Copy, Replace, Compare with PR, or confirm a GitHub write',
+  'Highlight text, open a PR, Jira issue, or Swagger/OpenAPI page',
+  'Use Text · GitHub · Jira · API tabs — or Flow for a multi-step plan',
+  'Stream answers — Copy, Replace, Align, or confirm a GitHub write',
 ] as const;
 
 export default function DashboardHomePage() {
@@ -43,11 +58,12 @@ export default function DashboardHomePage() {
           Extension studio
         </p>
         <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold tracking-tight text-ink text-balance md:text-5xl">
-          Smart actions, PR reports, Jira context, and confirmed GitHub reviews.
+          Smart actions, PRs, Jira, OpenAPI, alignment, and a safe Flow agent.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
           Sign in here to tune response length, page context, GitHub, and read-only Jira. The
-          extension uses the same account for Ask AI, ranking, and safe writes.
+          extension uses the same account for Ask AI, ranking, contract intelligence, and safe
+          writes.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -83,11 +99,11 @@ export default function DashboardHomePage() {
           <div className="p-7 md:p-9">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Flow</p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-balance">
-              Select → ranked menu → stream → Replace when you can.
+              Select → tabs → stream → confirm writes.
             </h2>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-inverse/65">
-              Works on docs, forms, GitHub pull requests, and Jira Cloud issues. Context stays in
-              the extension; secrets never leave the API.
+              Works on docs, GitHub PRs, Jira issues, and OpenAPI/Swagger. Context stays in the
+              extension; secrets never leave the API.
             </p>
           </div>
           <div className="relative border-t border-inverse/10 p-7 md:border-l md:border-t-0 md:p-9">
@@ -112,11 +128,14 @@ export default function DashboardHomePage() {
         <p className="mt-2 font-display text-xl font-semibold tracking-tight text-ink">
           Explain · Improve Writing · Summarize · Translate · Explain Code · Code Review · Suggest
           Fix · Review Entire PR · Understand Error · Find Root Cause · Summarize Issue · Acceptance
-          Criteria · Technical Plan · Risks & Questions · Compare Jira ↔ PR · Custom
+          Criteria · Technical Plan · Risks & Questions · Compare Jira ↔ PR · Explain Endpoint ·
+          Generate Example · Analyze Contract · Analyze API Changes · Engineering Alignment · Plan
+          Workflow · Custom
         </p>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Shortcuts stay bound to each action even when Smart Actions reorders the menu. GitHub
-          comment and review submit are confirmed writes — not AI actions. Jira stays read-only.
+          comment and review submit are confirmed writes — not AI actions. OpenAPI never executes
+          the documented API. Flow never auto-runs writes. Jira stays read-only.
         </p>
       </section>
     </div>

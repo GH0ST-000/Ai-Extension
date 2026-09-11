@@ -146,6 +146,8 @@ lib/selection/
   ci/                            CI status + CI Fix Session (Days 15–16)
   jira/                          Jira issue session + panel (Day 17, read-only)
   openapi/                       OpenAPI panel + PR API-change analyze (Day 18)
+  engineering/                   Cross-context Engineering Alignment (Day 19)
+  workflow/                      Developer Workflow Agent / Flow tab (Day 20)
   store.ts                       Zustand assistant view state
   hooks/                         Selection + dismiss + document href SPA watch
   components/                    FAB, menu, loading, result, error, custom prompt
@@ -163,6 +165,28 @@ Assistant views use a discriminated union: `menu` → `custom-prompt` | `loading
   3. Starts `ANALYZE_API_CHANGES` with that structural summary as `selectedText`
 - Never executes the documented API (no Try It), never captures auth credentials, never mutates GitHub for this flow.
 - Shared URL helpers in `@project-x/shared` are browser-safe (no `node:dns` / `node:net`); DNS SSRF checks stay on the API fetch path only.
+
+### Day 19 — Engineering Alignment (read-only)
+
+When **≥2** of Jira issue / GitHub PR / OpenAPI operation are in session, a slim **Engineering Context** banner appears above the Action Menu:
+
+- Shows identity chips (e.g. `PAY-321 · PR #142 · POST /payments/{id}/retry`)
+- **Analyze Alignment** builds a bounded `EngineeringContext`, sets `selectedText` via `formatEngineeringContextPrompt`, and runs `ANALYZE_ENGINEERING_ALIGNMENT`
+- Banner-only action — not listed under Text / GitHub / Jira / API tabs
+- Optional CI slice when `headSha` matches the PR head
+- Stale banner on the result when Jira / PR head / API document / CI binding drifts; Retry re-runs with current sources
+- No GitHub or Jira writes
+
+### Day 20 — Developer Workflow Agent (Flow tab)
+
+**Flow** tab in the Action Menu owns multi-step orchestration:
+
+- Enter a goal → **Generate Plan** runs `PLAN_DEVELOPER_WORKFLOW` with capability catalog + binding flags
+- Plan preview lists steps and write checkpoints; **Approve** starts execution (never applies/submits)
+- AUTO_READ steps run via thin handlers that reuse Day 13–19 stores/AI actions
+- Write steps (`APPLY_PATCH`, `SUBMIT_PR_COMMENT`, `SUBMIT_PR_REVIEW`) pause for Day 14 Apply Fix / Day 13 Review UI
+- Stop / Retry / Skip; stale banner when context binding drifts
+- No shell, merge, Jira write, API execution, or CI re-run capabilities
 
 ## Stack
 

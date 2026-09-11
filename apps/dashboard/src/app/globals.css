@@ -153,6 +153,14 @@ body {
     animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both;
   }
 
+  .landing-stage-in {
+    animation: rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .landing-stage-in-delay {
+    animation: rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
+  }
+
   .float-soft {
     animation: float-soft 7s ease-in-out infinite;
   }
@@ -182,6 +190,8 @@ body {
     .rise-in-delay-1,
     .rise-in-delay-2,
     .rise-in-delay-3,
+    .landing-stage-in,
+    .landing-stage-in-delay,
     .float-soft,
     .health-backdrop-in,
     .health-panel-in,

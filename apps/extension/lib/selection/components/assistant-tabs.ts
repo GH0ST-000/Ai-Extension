@@ -1,6 +1,6 @@
 import { AIAction } from '@project-x/types';
 
-export type AssistantTabId = 'text' | 'github' | 'jira' | 'api';
+export type AssistantTabId = 'text' | 'github' | 'jira' | 'api' | 'workflow';
 
 export type AssistantTab = {
   id: AssistantTabId;
@@ -12,6 +12,7 @@ export const ASSISTANT_TABS: readonly AssistantTab[] = [
   { id: 'github', label: 'GitHub' },
   { id: 'jira', label: 'Jira' },
   { id: 'api', label: 'API' },
+  { id: 'workflow', label: 'Flow' },
 ] as const;
 
 /** Verbal / writing / general diagnostics. */
@@ -53,6 +54,12 @@ export const API_TAB_ACTIONS: ReadonlySet<AIAction> = new Set([
   AIAction.ANALYZE_API_CHANGES,
 ]);
 
+/**
+ * Flow tab — panel owns UX; planner action is not listed in the catalog.
+ * PLAN_DEVELOPER_WORKFLOW and ANALYZE_ENGINEERING_ALIGNMENT stay out of all catalogs.
+ */
+export const WORKFLOW_TAB_ACTIONS: ReadonlySet<AIAction> = new Set();
+
 export function actionsForTab(tab: AssistantTabId): ReadonlySet<AIAction> {
   switch (tab) {
     case 'text':
@@ -63,6 +70,8 @@ export function actionsForTab(tab: AssistantTabId): ReadonlySet<AIAction> {
       return JIRA_TAB_ACTIONS;
     case 'api':
       return API_TAB_ACTIONS;
+    case 'workflow':
+      return WORKFLOW_TAB_ACTIONS;
   }
 }
 

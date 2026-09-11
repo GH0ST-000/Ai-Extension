@@ -5,42 +5,38 @@ import { APP_NAME } from '@project-x/shared';
 import { BrandGlyph } from '../components/brand-mark';
 import { LandingHeader } from '../components/landing-header';
 import { LandingHeroCtas } from '../components/landing-hero-ctas';
+import { LandingProductStage } from '../components/landing-product-stage';
 
-const CAPABILITIES = [
+const SIGNALS = [
   {
     label: 'Smart Actions',
-    title: 'Menu follows the selection',
-    copy: 'Code, errors, and prose reorder Ask AI locally — no extra model call before you choose.',
+    line: 'Menu follows the selection — ranked on-device.',
   },
   {
     label: 'Replace',
-    title: 'Write back in place',
-    copy: 'Improve or translate in a field, then Replace. Password and locked inputs stay untouched.',
+    line: 'Write back in place. Locked inputs stay locked.',
   },
   {
-    label: 'Error Intelligence',
-    title: 'Stack → next step',
-    copy: 'On-device classification, secret redaction, then Understand Error, Find Root Cause, or Suggest Fix.',
+    label: 'Errors',
+    line: 'Stack classified locally, then Understand / Root Cause / Fix.',
   },
   {
     label: 'Suggest Fix',
-    title: 'Patch you can copy',
-    copy: 'Minimal correction with a safe preview. Project X never applies the patch or pushes code.',
+    line: 'Minimal patch preview. Never a silent commit.',
   },
 ] as const;
 
-const PR_FLOW = [
-  ['Review', 'Bounded multi-file PR analysis into a filterable report'],
-  ['Curate', 'Add findings to a Review Draft — ignored items stay out'],
-  ['Confirm', 'COMMENT / APPROVE / REQUEST_CHANGES only after you preview'],
-  ['Submit', 'Encrypted PAT on the API · idempotent · View on GitHub'],
+const ALIGN_NODES = [
+  { label: 'Jira', detail: 'Requirement' },
+  { label: 'PR', detail: 'Implementation' },
+  { label: 'API', detail: 'Contract' },
 ] as const;
 
-const JIRA_FLOW = [
-  ['Connect', 'Email + API token + *.atlassian.net — encrypted on the API, never in the extension'],
-  ['Open issue', 'Extension detects the Jira Cloud issue and loads normalized context'],
-  ['Understand', 'Summarize · Acceptance Criteria · Technical Plan · Risks & Questions'],
-  ['Compare', 'Link a PR by issue key, then compare requirement vs diff — read-only on Jira'],
+const GUARDS = [
+  'Plan approval ≠ write confirmation',
+  'No merge · no shell · no Jira writes',
+  'OpenAPI is analysis-only',
+  'Tokens stay on the API',
 ] as const;
 
 export default function HomePage() {
@@ -59,7 +55,7 @@ export default function HomePage() {
       <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 py-6 md:px-10 md:py-8">
         <LandingHeader />
 
-        <section className="flex min-h-[68vh] flex-col justify-center py-12 md:min-h-[72vh] md:py-14">
+        <section className="flex min-h-[62vh] flex-col justify-center py-12 md:min-h-[68vh] md:py-14">
           <div className="rise-in-delay-1 max-w-3xl">
             <BrandGlyph size={56} className="mb-5 rounded-[1.15rem] shadow-soft" />
             <p className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
@@ -69,133 +65,140 @@ export default function HomePage() {
               AI that reads the page with you.
             </h1>
             <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-              Highlight anything in Chrome. Smart actions, PR reviews, Jira issue intelligence, and
-              confirmed GitHub writes — without leaving the tab.
+              One Chrome selection. Five focused tabs. Confirmed GitHub writes only when you say so.
             </p>
             <LandingHeroCtas />
           </div>
         </section>
 
-        <section className="rise-in border-t border-line/70 py-12 md:py-14">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <section className="rise-in pb-4 md:pb-6">
+          <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                In the extension
+                Extension surface
               </p>
               <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-                Built for the tab you already have open.
+                Text · GitHub · Jira · API · Flow
               </h2>
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
-              Ranking and error detection run on-device. OpenAI keys, GitHub PATs, and Jira tokens
-              stay on the API.
+              Switch the tab below — same chrome you get in the toolbar.
             </p>
           </div>
+          <LandingProductStage />
+        </section>
 
-          <div className="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2">
-            {CAPABILITIES.map((item) => (
-              <div key={item.label} className="border-t border-line/70 pt-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  {item.label}
-                </p>
-                <h3 className="mt-1.5 font-display text-xl font-semibold tracking-tight text-ink">
-                  {item.title}
-                </h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{item.copy}</p>
-              </div>
+        <section className="rise-in-delay-1 py-14 md:py-16">
+          <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-14">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                Before the cloud
+              </p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+                Ranking and redaction stay on the device.
+              </h2>
+              <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
+                The menu reacts to what you highlighted. Secrets are stripped before anything leaves
+                the browser for a model call.
+              </p>
+            </div>
+
+            <ul className="grid gap-0 sm:grid-cols-2">
+              {SIGNALS.map((item, index) => (
+                <li
+                  key={item.label}
+                  className={[
+                    'border-line/70 py-4',
+                    index % 2 === 0 ? 'sm:pr-6 sm:border-r' : 'sm:pl-6',
+                    index < 2 ? 'border-b' : '',
+                  ].join(' ')}
+                >
+                  <p className="font-display text-lg font-semibold tracking-tight text-ink">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{item.line}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="rise-in-delay-2 overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-inverse shadow-panel md:px-10 md:py-12">
+          <div className="grid gap-10 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:gap-12">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                Engineering alignment
+              </p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-balance md:text-3xl">
+                Three sources. One bounded answer.
+              </h2>
+              <p className="mt-3 max-w-md text-sm leading-relaxed text-inverse/65 md:text-base">
+                When Jira, a PR, and OpenAPI are in session, Project X builds a typed Engineering
+                Context — coverage and conflicts with evidence, not vibes.
+              </p>
+            </div>
+
+            <div className="relative">
+              <div
+                className="pointer-events-none absolute left-[12%] right-[12%] top-1/2 hidden h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-accent/50 to-transparent sm:block"
+                aria-hidden
+              />
+              <ul className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+                {ALIGN_NODES.map((node, index) => (
+                  <li
+                    key={node.label}
+                    className={[
+                      'rounded-2xl border border-inverse/10 bg-inverse/5 px-4 py-5 text-center backdrop-blur-sm',
+                      index === 1 ? 'sm:-translate-y-2 sm:border-accent/40 sm:bg-accent/10' : '',
+                    ].join(' ')}
+                  >
+                    <p className="font-display text-xl font-semibold tracking-tight">
+                      {node.label}
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-inverse/50">
+                      {node.detail}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-5 text-center text-sm text-inverse/55">
+                Optional CI head · hallucinated paths dropped · stale bindings flagged
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rise-in-delay-3 py-14 md:py-16">
+          <div className="max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+              Control plane
+            </p>
+            <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+              Autonomy stops where risk starts.
+            </h2>
+          </div>
+          <ul className="mt-8 grid gap-x-10 gap-y-4 sm:grid-cols-2">
+            {GUARDS.map((guard) => (
+              <li key={guard} className="flex gap-3 text-sm font-medium text-ink">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
+                <span className="leading-relaxed">{guard}</span>
+              </li>
             ))}
-          </div>
+          </ul>
+          <p className="mt-5 max-w-xl text-sm leading-relaxed text-muted-foreground">
+            Flow can plan and adapt. GitHub comment, review submit, and Apply Fix still open the
+            exact confirmation UI — plan approval never authorizes a write.
+          </p>
         </section>
 
-        <section className="rise-in-delay-1 border-t border-line/70 py-12 md:py-14">
-          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:items-start">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                GitHub workflow
-              </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-                From PR report to a review you actually submit.
-              </h2>
-              <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground md:text-base">
-                Review Entire PR builds a structured findings report. You curate a draft, edit the
-                exact text, preview, then confirm. AI never posts, approves, or requests changes
-                alone.
-              </p>
-            </div>
-
-            <ol className="space-y-0">
-              {PR_FLOW.map(([label, detail], index) => (
-                <li
-                  key={label}
-                  className="flex gap-3 border-t border-line/70 py-3 first:border-t-0 first:pt-0 last:pb-0"
-                >
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink font-display text-[11px] font-bold text-inverse">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">{label}</p>
-                    <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{detail}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        <section className="rise-in-delay-2 border-t border-line/70 py-12 md:py-14">
-          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:items-start">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                Jira workflow
-              </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-                From ticket to engineering context — then compare with a PR.
-              </h2>
-              <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground md:text-base">
-                Connect Jira Cloud once in Settings. On an issue page, Project X summarizes
-                requirements, extracts explicit vs inferred acceptance criteria, and can compare
-                against a linked GitHub PR. Jira stays read-only.
-              </p>
-              <p className="mt-4 text-sm text-muted-foreground">
-                Setup steps live in{' '}
-                <Link
-                  href="/app/settings"
-                  className="font-semibold text-ink underline-offset-2 hover:underline"
-                >
-                  Settings → Jira
-                </Link>
-                .
-              </p>
-            </div>
-
-            <ol className="space-y-0">
-              {JIRA_FLOW.map(([label, detail], index) => (
-                <li
-                  key={label}
-                  className="flex gap-3 border-t border-line/70 py-3 first:border-t-0 first:pt-0 last:pb-0"
-                >
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink font-display text-[11px] font-bold text-inverse">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">{label}</p>
-                    <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{detail}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        <section className="rise-in-delay-3 border-t border-line/70 py-10 md:py-12">
+        <section className="rise-in border-t border-line/70 py-10 md:py-12">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="max-w-xl">
               <p className="font-display text-xl font-semibold tracking-tight text-ink md:text-2xl">
                 Same account for extension, studio, GitHub, and Jira.
               </p>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                Connect a GitHub PAT and/or Jira API token in Settings when you need those
-                integrations.
+                Connect tokens in Settings. OpenAPI and Flow light up once you are signed in.
               </p>
             </div>
             <Link

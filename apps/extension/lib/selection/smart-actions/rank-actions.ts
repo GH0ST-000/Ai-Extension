@@ -28,6 +28,12 @@ const OPENAPI_ACTIONS_TAIL: readonly AIAction[] = [
   AIAction.ANALYZE_API_CHANGES,
 ];
 
+/** Day 19 cross-context — banner-only; still ranked for assertCompleteRanking. */
+const ENGINEERING_ACTIONS_TAIL: readonly AIAction[] = [AIAction.ANALYZE_ENGINEERING_ALIGNMENT];
+
+/** Day 20 workflow planner — Flow tab owns UX; still ranked for assertCompleteRanking. */
+const WORKFLOW_ACTIONS_TAIL: readonly AIAction[] = [AIAction.PLAN_DEVELOPER_WORKFLOW];
+
 const RANKINGS: Record<ContentType, readonly AIAction[]> = {
   code: [
     AIAction.EXPLAIN_CODE,
@@ -43,6 +49,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.IMPROVE_WRITING,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
   error: [
     AIAction.FIND_ROOT_CAUSE,
@@ -58,6 +66,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.IMPROVE_WRITING,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
   prose: [
     AIAction.SUMMARIZE,
@@ -73,6 +83,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
   'short-text': [
     AIAction.EXPLAIN,
@@ -88,6 +100,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
   'structured-data': [
     AIAction.EXPLAIN,
@@ -103,6 +117,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
   unknown: [
     AIAction.EXPLAIN,
@@ -118,6 +134,8 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
     ...OPENAPI_ACTIONS_TAIL,
+    ...ENGINEERING_ACTIONS_TAIL,
+    ...WORKFLOW_ACTIONS_TAIL,
   ],
 };
 

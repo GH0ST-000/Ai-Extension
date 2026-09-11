@@ -25,6 +25,8 @@ import { useGithubCiStore } from './ci';
 import { useCIFixSessionStore } from './ci/fix/ci-fix.store';
 import { useJiraSessionStore } from './jira';
 import { useOpenApiSessionStore } from './openapi';
+import { useEngineeringSessionStore } from './engineering';
+import { useWorkflowSessionStore } from './workflow';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -191,6 +193,8 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     useCIFixSessionStore.getState().clear();
     useJiraSessionStore.getState().clear();
     useOpenApiSessionStore.getState().clear();
+    useEngineeringSessionStore.getState().clear();
+    useWorkflowSessionStore.getState().clear();
     set({ ...INITIAL_STATE });
   },
 

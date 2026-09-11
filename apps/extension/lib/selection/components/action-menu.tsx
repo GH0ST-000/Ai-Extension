@@ -24,6 +24,7 @@ type ActionMenuProps = {
   githubSlot?: ReactNode;
   jiraSlot?: ReactNode;
   apiSlot?: ReactNode;
+  workflowSlot?: ReactNode;
 };
 
 export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function ActionMenu(
@@ -38,6 +39,7 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
     githubSlot,
     jiraSlot,
     apiSlot,
+    workflowSlot,
   },
   ref,
 ) {
@@ -64,11 +66,19 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
   }, [actions, tab]);
 
   const slot =
-    tab === 'text' ? textSlot : tab === 'github' ? githubSlot : tab === 'jira' ? jiraSlot : apiSlot;
+    tab === 'text'
+      ? textSlot
+      : tab === 'github'
+        ? githubSlot
+        : tab === 'jira'
+          ? jiraSlot
+          : tab === 'api'
+            ? apiSlot
+            : workflowSlot;
 
   const showCatalogActions = tab === 'text' || tab === 'github';
-  // Jira / API tabs render context panels only — show a real empty state when none.
-  const showEmptyHint = !slot && (tab === 'jira' || tab === 'api' || !showCatalogActions);
+  const showEmptyHint =
+    !slot && (tab === 'jira' || tab === 'api' || tab === 'workflow' || !showCatalogActions);
 
   return (
     <motion.div
@@ -96,7 +106,7 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
         <div
           role="tablist"
           aria-label="Action categories"
-          className="mt-2 grid grid-cols-4 gap-0.5 rounded-lg bg-icon p-0.5"
+          className="mt-2 grid grid-cols-5 gap-0.5 rounded-lg bg-icon p-0.5"
         >
           {ASSISTANT_TABS.map((item) => {
             const active = tab === item.id;
@@ -112,7 +122,7 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
                 aria-selected={active}
                 onClick={() => setTab(item.id)}
                 className={cn(
-                  'relative rounded-md px-1 py-1.5 text-[11px] font-semibold tracking-tight transition-colors',
+                  'relative rounded-md px-0.5 py-1.5 text-[10px] font-semibold tracking-tight transition-colors',
                   active ? 'bg-elevated text-primary shadow-sm' : 'text-muted hover:text-secondary',
                 )}
               >
@@ -120,7 +130,7 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
                 {accent && !active ? (
                   <span
                     aria-hidden
-                    className="absolute right-1 top-1 h-1 w-1 rounded-full bg-accent"
+                    className="absolute right-0.5 top-1 h-1 w-1 rounded-full bg-accent"
                   />
                 ) : null}
               </button>
@@ -147,8 +157,8 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
                 ? 'No API contract here'
                 : tab === 'jira'
                   ? 'No Jira issue in context'
-                  : tab === 'github'
-                    ? 'No GitHub context'
+                  : tab === 'workflow'
+                    ? 'No workflow yet'
                     : 'Nothing here yet'}
             </p>
             <p className="mt-1 text-[11px] leading-4 text-muted">
@@ -156,8 +166,8 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
                 ? 'Open Swagger UI or an OpenAPI JSON/YAML document to analyze endpoints.'
                 : tab === 'jira'
                   ? 'Open a Jira issue first. Project X keeps it for Compare with API when you switch to Swagger.'
-                  : tab === 'github'
-                    ? 'Open a GitHub pull request or file view to use review actions.'
+                  : tab === 'workflow'
+                    ? 'Describe a goal to generate a safe multi-step plan.'
                     : 'Select text to get started.'}
             </p>
           </div>

@@ -38,5 +38,7 @@ export const ACTION_ICONS: Record<AIAction, ComponentType<SVGProps<SVGSVGElement
   [AIAction.ANALYZE_API_CONTRACT]: ReviewIcon,
   [AIAction.COMPARE_API_WITH_JIRA]: PrReviewIcon,
   [AIAction.ANALYZE_API_CHANGES]: ReviewIcon,
+  [AIAction.ANALYZE_ENGINEERING_ALIGNMENT]: PrReviewIcon,
+  [AIAction.PLAN_DEVELOPER_WORKFLOW]: CodeIcon,
   [AIAction.CUSTOM]: PromptIcon,
 };

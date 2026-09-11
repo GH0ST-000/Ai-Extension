@@ -67,6 +67,10 @@ Day 17 Jira Intelligence is **read-only**. Connect via dashboard Settings (Atlas
 
 Day 18 OpenAPI / API docs is **read-only**. Parse/diff/example/risks never execute HTTP calls against the documented API (“no Try It”). Document URL fetch is SSRF-hardened (https-only, block private/metadata hosts; DNS allow-list checks live only in `OpenApiFetchService`). GitHub PR ↔ contract wiring uses Contents API file-at-SHA reads bound to `baseSha`/`headSha` — no GitHub mutations. AI action `ANALYZE_API_CHANGES` explains a deterministic `/openapi/diff` summary; structural breaking/non-breaking labels win.
 
+Day 19 Engineering Alignment is **session-scoped and read-only**. The extension builds a bounded `EngineeringContext` from current Jira + GitHub PR + OpenAPI (+ optional CI) slices, then streams `ANALYZE_ENGINEERING_ALIGNMENT`. Evidence references are validated client-side against known context (hallucinated files/operations/criteria dropped). No persistent knowledge graph, no RAG, no automatic writes — Suggest Fix / Apply Fix / PR comments reuse Days 8–16.
+
+Day 20 Developer Workflow Agent is **planning + session orchestration only**. `PLAN_DEVELOPER_WORKFLOW` returns a validated JSON plan from an allowlisted capability catalog (no merge/shell/jira-write/api-exec/ci-rerun). The extension Flow tab approves the plan and advances AUTO_READ steps; write steps (`APPLY_PATCH`, `SUBMIT_PR_*`) pause for the existing Day 13/14 confirmation UIs — never auto-apply.
+
 ### Auth
 
 ```json

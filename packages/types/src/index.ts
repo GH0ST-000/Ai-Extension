@@ -57,6 +57,10 @@ export enum AIAction {
   ANALYZE_API_CONTRACT = 'ANALYZE_API_CONTRACT',
   COMPARE_API_WITH_JIRA = 'COMPARE_API_WITH_JIRA',
   ANALYZE_API_CHANGES = 'ANALYZE_API_CHANGES',
+  /** Day 19 — cross-context engineering alignment (Jira + GitHub + OpenAPI). */
+  ANALYZE_ENGINEERING_ALIGNMENT = 'ANALYZE_ENGINEERING_ALIGNMENT',
+  /** Day 20 — safe multi-step developer workflow planning. */
+  PLAN_DEVELOPER_WORKFLOW = 'PLAN_DEVELOPER_WORKFLOW',
   CUSTOM = 'CUSTOM',
 }
 
@@ -1314,3 +1318,817 @@ export interface JiraApiComparison {
   openQuestions: string[];
   analyzedAt: string;
 }
+
+/** Day 19 — cross-context engineering alignment budgets. */
+export const ENGINEERING_MAX_JIRA_CHARS = 6_000;
+export const ENGINEERING_MAX_ACCEPTANCE_CRITERIA = 20;
+export const ENGINEERING_MAX_PR_FILES = 14;
+export const ENGINEERING_MAX_DIFF_CHARS = 10_000;
+export const ENGINEERING_MAX_FINDINGS = 20;
+export const ENGINEERING_MAX_API_CONTEXT_CHARS = 8_000;
+export const ENGINEERING_MAX_CI_CHARS = 1_500;
+export const ENGINEERING_MAX_TOTAL_PROMPT_CHARS = 22_000;
+export const ENGINEERING_MAX_EVIDENCE_EXCERPT = 280;
+
+export type EngineeringErrorCode =
+  | 'ENGINEERING_CONTEXT_INSUFFICIENT'
+  | 'ENGINEERING_CONTEXT_AMBIGUOUS'
+  | 'ENGINEERING_CONTEXT_STALE'
+  | 'ENGINEERING_CONTEXT_SOURCE_UNAVAILABLE'
+  | 'ENGINEERING_CONTEXT_BUILD_FAILED'
+  | 'ENGINEERING_ALIGNMENT_FAILED'
+  | 'ENGINEERING_EVIDENCE_INVALID'
+  | 'ENGINEERING_CONTEXT_TOO_LARGE'
+  | 'UNKNOWN';
+
+export interface EngineeringErrorBody {
+  code: EngineeringErrorCode;
+  message: string;
+}
+
+export type EngineeringContextSource = 'jira' | 'github-pr' | 'github-review' | 'openapi' | 'ci';
+
+export type EngineeringConfidence = 'high' | 'medium' | 'low';
+
+export type EngineeringCoverageStatus =
+  'covered' | 'partial' | 'not-evident' | 'conflicting' | 'uncertain';
+
+export type EngineeringAlignment = 'strong' | 'partial' | 'weak' | 'conflicting' | 'uncertain';
+
+export type EngineeringEvidenceSource =
+  'jira' | 'github-diff' | 'github-finding' | 'openapi' | 'ci';
+
+export interface EngineeringEvidenceReference {
+  issueKey?: string;
+  criterionId?: string;
+  filePath?: string;
+  line?: number;
+  operationId?: string;
+  method?: string;
+  path?: string;
+  responseCode?: string;
+  checkId?: string;
+  findingId?: string;
+}
+
+export interface EngineeringEvidence {
+  source: EngineeringEvidenceSource;
+  label: string;
+  reference?: EngineeringEvidenceReference;
+  excerpt?: string;
+}
+
+export type EngineeringFileRelevance = 'high' | 'medium' | 'low';
+
+export interface EngineeringChangedFile {
+  path: string;
+  patchExcerpt?: string;
+  relevance?: EngineeringFileRelevance;
+}
+
+export interface EngineeringFindingSummary {
+  id: string;
+  severity: PRReviewFindingSeverity;
+  title: string;
+  filePath?: string;
+}
+
+export interface EngineeringCICheckSummary {
+  name: string;
+  conclusion?: string;
+  htmlUrl?: string;
+}
+
+/** Lean PR review summary for engineering context (not a full PRReviewReport). */
+export interface PRReviewReportSummary {
+  riskLevel: PRReviewRiskLevel;
+  overview?: string;
+  findingCount?: number;
+  truncated?: boolean;
+}
+
+/** Lean API contract diff summary for engineering context. */
+export interface ApiContractDiffSummary {
+  baseRef?: string;
+  headRef?: string;
+  breakingCount: number;
+  nonBreakingCount: number;
+  uncertainCount: number;
+}
+
+export interface EngineeringContextJiraSlice {
+  issueKey: string;
+  siteHost: string;
+  updatedAt?: string;
+  summary: string;
+  /** Bounded plain-text description excerpt for prompts (untrusted). */
+  descriptionExcerpt?: string;
+  explicitAcceptanceCriteria: AcceptanceCriterion[];
+  inferredAcceptanceCriteria?: AcceptanceCriterion[];
+  truncated?: boolean;
+}
+
+export interface EngineeringContextGitHubSlice {
+  repository: {
+    owner: string;
+    name: string;
+  };
+  pullRequestNumber: number;
+  headSha: string;
+  baseSha?: string;
+  title?: string;
+  changedFiles: EngineeringChangedFile[];
+  reviewReport?: PRReviewReportSummary;
+  findings?: EngineeringFindingSummary[];
+}
+
+export interface EngineeringContextApiSlice {
+  documentHash: string;
+  title?: string;
+  operation?: {
+    method: HttpMethod;
+    path: string;
+    operationId?: string;
+  };
+  /** Bounded operation/contract text for prompts (untrusted). */
+  contextExcerpt?: string;
+  contractFindings?: ApiContractFinding[];
+  contractDiff?: ApiContractDiffSummary;
+}
+
+export interface EngineeringContextCISlice {
+  headSha: string;
+  status?: string;
+  failedChecks?: EngineeringCICheckSummary[];
+  /** Bounded CI summary text for prompts (untrusted). */
+  summaryExcerpt?: string;
+}
+
+export interface EngineeringContextScope {
+  partial: boolean;
+  truncationReasons: string[];
+  includedSources: EngineeringContextSource[];
+}
+
+export interface EngineeringContext {
+  id: string;
+  createdAt: string;
+  jira?: EngineeringContextJiraSlice;
+  github?: EngineeringContextGitHubSlice;
+  api?: EngineeringContextApiSlice;
+  ci?: EngineeringContextCISlice;
+  scope: EngineeringContextScope;
+}
+
+export interface AnalysisBinding {
+  jira?: {
+    issueKey: string;
+    updatedAt?: string;
+  };
+  github?: {
+    repository: string;
+    prNumber: number;
+    headSha: string;
+  };
+  api?: {
+    documentHash: string;
+    operationKey?: string;
+  };
+  ci?: {
+    headSha: string;
+    checkIds?: string[];
+  };
+}
+
+export interface EngineeringRequirementCoverage {
+  criterionId: string;
+  criterion: string;
+  /** Prefer explicit; inferred must be labeled separately. */
+  criterionSource?: AcceptanceCriterionSource;
+  status: EngineeringCoverageStatus;
+  evidence: EngineeringEvidence[];
+  notes?: string;
+  confidence: EngineeringConfidence;
+}
+
+export interface EngineeringImplementationObservation {
+  observation: string;
+  kind?: 'beyond-scope' | 'implementation' | 'other';
+  evidence?: EngineeringEvidence[];
+  confidence?: EngineeringConfidence;
+}
+
+export interface EngineeringContractAlignment {
+  aspect: string;
+  status: EngineeringCoverageStatus;
+  evidence?: EngineeringEvidence[];
+  notes?: string;
+  confidence?: EngineeringConfidence;
+}
+
+export interface EngineeringContextConflict {
+  id: string;
+  severity: 'high' | 'medium' | 'low';
+  sources: EngineeringContextSource[];
+  title: string;
+  description: string;
+  evidence: EngineeringEvidence[];
+  recommendation?: string;
+}
+
+export interface EngineeringAlignmentRisk {
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description?: string;
+  evidence?: EngineeringEvidence[];
+  kind?: 'fact' | 'potential' | 'recommendation';
+}
+
+export interface EngineeringAlignmentAnalysis {
+  overview: string;
+  alignment: EngineeringAlignment;
+  requirementCoverage: EngineeringRequirementCoverage[];
+  implementationObservations: EngineeringImplementationObservation[];
+  contractAlignment: EngineeringContractAlignment[];
+  crossContextConflicts: EngineeringContextConflict[];
+  risks: EngineeringAlignmentRisk[];
+  openQuestions: string[];
+  scope: {
+    partial: boolean;
+    limitations: string[];
+  };
+  analyzedAt: string;
+  binding: AnalysisBinding;
+}
+
+/** Lean inputs accepted by the pure engineering context builder. */
+export interface EngineeringContextBuildInput {
+  jira?: {
+    issueKey: string;
+    siteHost: string;
+    updatedAt?: string;
+    summary: string;
+    descriptionPlainText?: string;
+    explicitAcceptanceCriteria?: AcceptanceCriterion[];
+    inferredAcceptanceCriteria?: AcceptanceCriterion[];
+  };
+  github?: {
+    repository: {
+      owner: string;
+      name: string;
+    };
+    pullRequestNumber: number;
+    headSha: string;
+    baseSha?: string;
+    title?: string;
+    changedFiles: Array<{
+      path: string;
+      patch?: string;
+    }>;
+    findings?: EngineeringFindingSummary[];
+    reviewReport?: PRReviewReportSummary;
+  };
+  api?: {
+    documentHash: string;
+    title?: string;
+    operation?: {
+      method: HttpMethod;
+      path: string;
+      operationId?: string;
+    };
+    contextText?: string;
+    contractFindings?: ApiContractFinding[];
+    contractDiff?: ApiContractDiffSummary;
+  };
+  ci?: {
+    headSha: string;
+    status?: string;
+    failedChecks?: EngineeringCICheckSummary[];
+    summaryText?: string;
+  };
+  /** Optional fixed timestamp for deterministic tests. */
+  createdAt?: string;
+}
+
+/** Day 20/21 — developer workflow agent budgets. */
+export const WORKFLOW_MAX_STEPS = 16;
+export const WORKFLOW_MAX_WRITE_CHECKPOINTS = 2;
+export const WORKFLOW_MAX_AI_CALLS = 8;
+export const WORKFLOW_MAX_PLAN_ATTEMPTS = 3;
+export const WORKFLOW_MAX_GOAL_CHARS = 2000;
+export const WORKFLOW_MAX_PROVIDER_READS = 20;
+export const WORKFLOW_MAX_REPLANS = 3;
+export const WORKFLOW_MAX_BRANCH_DEPTH = 4;
+export const WORKFLOW_MAX_PLANNING_RETRIES = 3;
+
+export type WorkflowErrorCode =
+  | 'WORKFLOW_PLAN_INVALID'
+  | 'WORKFLOW_PLAN_TOO_LARGE'
+  | 'WORKFLOW_CAPABILITY_NOT_ALLOWED'
+  | 'WORKFLOW_DEPENDENCY_INVALID'
+  | 'WORKFLOW_CONTEXT_INSUFFICIENT'
+  | 'WORKFLOW_CONTEXT_STALE'
+  | 'WORKFLOW_STEP_FAILED'
+  | 'WORKFLOW_STEP_NOT_RETRYABLE'
+  | 'WORKFLOW_USER_INPUT_REQUIRED'
+  | 'WORKFLOW_WRITE_CONFIRMATION_REQUIRED'
+  | 'WORKFLOW_REPLAN_REQUIRED'
+  | 'WORKFLOW_BUDGET_EXCEEDED'
+  | 'WORKFLOW_CANCELLED'
+  | 'WORKFLOW_ARTIFACT_NOT_FOUND'
+  | 'WORKFLOW_ARTIFACT_STALE'
+  | 'AGENT_GOAL_INVALID'
+  | 'AGENT_GOAL_UNSUPPORTED'
+  | 'AGENT_GOAL_AMBIGUOUS'
+  | 'AGENT_PLAN_INVALID'
+  | 'AGENT_PLAN_UNSAFE'
+  | 'AGENT_PLAN_CONFLICTS_WITH_GOAL'
+  | 'AGENT_PLAN_COMPLETION_INVALID'
+  | 'AGENT_PLAN_REVISION_REQUIRED'
+  | 'AGENT_PLAN_REVISION_INVALID'
+  | 'AGENT_CONTEXT_CHANGED'
+  | 'AGENT_ARTIFACT_STALE'
+  | 'AGENT_PRECONDITION_FAILED'
+  | 'AGENT_BUDGET_EXCEEDED'
+  | 'AGENT_GOAL_NOT_SATISFIED'
+  | 'AGENT_BLOCKED'
+  | 'UNKNOWN';
+
+export interface WorkflowErrorBody {
+  code: WorkflowErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export const WorkflowStepType = {
+  BUILD_ENGINEERING_CONTEXT: 'BUILD_ENGINEERING_CONTEXT',
+  SUMMARIZE_JIRA: 'SUMMARIZE_JIRA',
+  EXTRACT_ACCEPTANCE_CRITERIA: 'EXTRACT_ACCEPTANCE_CRITERIA',
+  ANALYZE_ENGINEERING_ALIGNMENT: 'ANALYZE_ENGINEERING_ALIGNMENT',
+  REVIEW_PULL_REQUEST: 'REVIEW_PULL_REQUEST',
+  ANALYZE_API_CONTRACT: 'ANALYZE_API_CONTRACT',
+  ANALYZE_CI_FAILURE: 'ANALYZE_CI_FAILURE',
+  SUGGEST_FIX: 'SUGGEST_FIX',
+  GENERATE_PATCH: 'GENERATE_PATCH',
+  PREPARE_PATCH: 'PREPARE_PATCH',
+  APPLY_PATCH: 'APPLY_PATCH',
+  REFRESH_CI: 'REFRESH_CI',
+  VERIFY_CI_FIX: 'VERIFY_CI_FIX',
+  GENERATE_PR_COMMENT: 'GENERATE_PR_COMMENT',
+  CREATE_REVIEW_DRAFT: 'CREATE_REVIEW_DRAFT',
+  SUBMIT_PR_COMMENT: 'SUBMIT_PR_COMMENT',
+  SUBMIT_PR_REVIEW: 'SUBMIT_PR_REVIEW',
+  USER_SELECT_FINDING: 'USER_SELECT_FINDING',
+  USER_SELECT_FIX_TARGET: 'USER_SELECT_FIX_TARGET',
+  USER_SELECT_REVIEW_EVENT: 'USER_SELECT_REVIEW_EVENT',
+} as const;
+
+export type WorkflowStepType = (typeof WorkflowStepType)[keyof typeof WorkflowStepType];
+
+export const WORKFLOW_STEP_TYPE_VALUES = Object.values(WorkflowStepType) as WorkflowStepType[];
+
+export type WorkflowSessionStatus =
+  | 'DRAFTING_PLAN'
+  | 'PLAN_READY'
+  | 'AWAITING_PLAN_APPROVAL'
+  | 'AWAITING_REVISION_APPROVAL'
+  | 'AWAITING_CONTEXT_SELECTION'
+  | 'RUNNING'
+  | 'AWAITING_USER_INPUT'
+  | 'AWAITING_CONFIRMATION'
+  | 'PAUSED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'STALE'
+  | 'CANCELLED'
+  | 'NEEDS_ATTENTION';
+
+export type WorkflowStepStatus =
+  | 'PENDING'
+  | 'READY'
+  | 'RUNNING'
+  | 'WAITING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'SKIPPED'
+  | 'STALE'
+  | 'CANCELLED';
+
+export type WorkflowExecutionMode = 'AUTO_READ' | 'USER_DECISION' | 'EXPLICIT_CONFIRMATION';
+
+export type WorkflowMutationRisk = 'NONE' | 'LOW' | 'WRITE';
+
+export type WorkflowContextRequirement = 'jira' | 'github' | 'api' | 'ci';
+
+/** Mirrors AnalysisBinding identity fields for workflow stale checks. */
+export interface WorkflowContextBinding {
+  jira?: {
+    issueKey: string;
+    updatedAt?: string;
+  };
+  github?: {
+    repository: string;
+    prNumber: number;
+    headSha: string;
+  };
+  api?: {
+    documentHash: string;
+    operationKey?: string;
+  };
+  ci?: {
+    headSha: string;
+    checkIds?: string[];
+  };
+}
+
+export type WorkflowConditionType =
+  | 'HAS_HIGH_FINDINGS'
+  | 'HAS_BLOCKING_FINDINGS'
+  | 'CI_TARGET_FAILED'
+  | 'CI_TARGET_PASSED'
+  | 'CI_DIFFERENT_FAILURE'
+  | 'HAS_ENGINEERING_CONTEXT'
+  | 'PATCH_PREPARED'
+  | 'PATCH_APPLIED'
+  | 'REVIEW_DRAFT_READY'
+  | 'CONTEXT_PARTIAL'
+  | 'ALWAYS';
+
+export interface WorkflowStepCondition {
+  type: WorkflowConditionType;
+  /** When true, step runs only if the fact is false (deterministic invert). */
+  negate?: boolean;
+}
+
+export type AgentDesiredOutcome =
+  | 'UNDERSTAND'
+  | 'ASSESS'
+  | 'REVIEW'
+  | 'PREPARE_FIX'
+  | 'APPLY_FIX'
+  | 'VERIFY'
+  | 'PREPARE_REVIEW'
+  | 'CUSTOM_ALLOWED_GOAL';
+
+export type AgentGoalConstraint =
+  | { type: 'FOCUS'; value: string }
+  | { type: 'FILE_SCOPE'; paths: string[] }
+  | { type: 'SEVERITY_SCOPE'; severities: PRReviewFindingSeverity[] }
+  | { type: 'NO_WRITE' }
+  | { type: 'NO_PATCH_APPLY' }
+  | { type: 'NO_REVIEW_SUBMISSION' }
+  | { type: 'REQUIRE_CONTEXT'; source: EngineeringContextSource };
+
+export type AgentPlanConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface DeveloperAgentGoal {
+  id: string;
+  originalText: string;
+  normalizedIntent: {
+    objective: string;
+    scope: {
+      jiraIssue?: string;
+      repository?: string;
+      pullRequestNumber?: number;
+      apiOperation?: string;
+      ciCheck?: string;
+    };
+    desiredOutcome: AgentDesiredOutcome;
+    constraints: AgentGoalConstraint[];
+  };
+  unsupportedRequests: string[];
+  createdAt: string;
+}
+
+export type WorkflowCompletionCriterion =
+  | { type: 'ANALYSIS_PRESENTED'; artifactType: WorkflowArtifactKind }
+  | { type: 'PR_REVIEW_COMPLETED' }
+  | { type: 'PATCH_PREPARED' }
+  | { type: 'PATCH_APPLIED' }
+  | { type: 'CI_CHECK_VERIFIED'; expected: 'PASSED' }
+  | { type: 'REVIEW_DRAFT_PREPARED' }
+  | { type: 'REVIEW_SUBMITTED' };
+
+export type WorkflowFactName =
+  | 'HAS_BLOCKING_FINDINGS'
+  | 'HAS_HIGH_FINDINGS'
+  | 'CRITICAL_FINDING_COUNT'
+  | 'HIGH_FINDING_COUNT'
+  | 'PATCH_PREPARED'
+  | 'PATCH_APPLIED'
+  | 'CI_TARGET_PASSED'
+  | 'CI_TARGET_FAILED'
+  | 'CI_DIFFERENT_FAILURE'
+  | 'REVIEW_DRAFT_READY'
+  | 'CONTEXT_PARTIAL'
+  | 'HAS_ENGINEERING_CONTEXT';
+
+export type WorkflowFactValue = boolean | number;
+
+export interface WorkflowFact {
+  name: WorkflowFactName;
+  value: WorkflowFactValue;
+  sourceStepId?: string;
+}
+
+export type WorkflowArtifactProvenanceStatus = 'CURRENT' | 'STALE' | 'INVALID';
+
+export interface WorkflowArtifactProvenance {
+  artifactId: string;
+  artifactType: WorkflowArtifactKind;
+  producedByStepId?: string;
+  bindings: WorkflowContextBinding;
+  createdAt: string;
+  status: WorkflowArtifactProvenanceStatus;
+}
+
+export type WorkflowCapabilityPreconditionType =
+  | 'HAS_CONTEXT'
+  | 'HAS_ARTIFACT'
+  | 'ARTIFACT_CURRENT'
+  | 'USER_SELECTED_TARGET'
+  | 'PROVIDER_CONNECTED'
+  | 'WRITE_PERMISSION_AVAILABLE'
+  | 'EXPLICIT_CONFIRMATION';
+
+export interface WorkflowCapabilityPrecondition {
+  type: WorkflowCapabilityPreconditionType;
+  context?: WorkflowContextRequirement;
+  artifactKind?: WorkflowArtifactKind;
+  provider?: 'github' | 'jira';
+}
+
+export type WorkflowCapabilityOutcomeStatus =
+  'SUCCESS' | 'NO_RESULT' | 'USER_INPUT_REQUIRED' | 'STALE' | 'FAILED' | 'UNCERTAIN';
+
+export type WorkflowTransitionHint =
+  'CONTINUE' | 'SKIP_FIX_BRANCH' | 'REQUIRE_REVISION' | 'PAUSE_CONFIRMATION' | 'PAUSE_USER_INPUT';
+
+export interface WorkflowCapabilityOutcome {
+  status: WorkflowCapabilityOutcomeStatus;
+  artifact?: WorkflowArtifactRef;
+  facts?: WorkflowFact[];
+  suggestedTransition?: WorkflowTransitionHint;
+  summary?: string;
+}
+
+export type WorkflowCostClass = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface PlanningCapabilityDescription {
+  type: WorkflowStepType;
+  purpose: string;
+  consumes: WorkflowArtifactKind[];
+  produces: WorkflowArtifactKind[];
+  requiredContext: WorkflowContextRequirement[];
+  executionMode: WorkflowExecutionMode;
+  costClass: WorkflowCostClass;
+  mutationRisk: WorkflowMutationRisk;
+}
+
+export interface PlanningJiraContext {
+  issueKey: string;
+  summary?: string;
+  hasNormalizedIssue: boolean;
+  criteriaCount?: number;
+}
+
+export interface PlanningGitHubContext {
+  repository: string;
+  prNumber: number;
+  headSha: string;
+  hasPrReport: boolean;
+  findingCounts?: { high: number; medium: number; low: number };
+  writeAccessAvailable?: boolean;
+}
+
+export interface PlanningApiContext {
+  documentHash: string;
+  operationKey?: string;
+  hasContractAnalysis: boolean;
+}
+
+export interface PlanningCiContext {
+  headSha: string;
+  overallStatus?: string;
+  failedCheckCount: number;
+  hasFailureAnalysis: boolean;
+}
+
+export interface WorkflowArtifactSummary {
+  id: string;
+  kind: WorkflowArtifactKind;
+  summary?: string;
+  status: WorkflowArtifactProvenanceStatus;
+  createdAt: string;
+}
+
+export interface PlanningPolicySummary {
+  maxSteps: number;
+  maxWriteCheckpoints: number;
+  maxAiCalls: number;
+  maxReplans: number;
+  writesRequireConfirmation: true;
+}
+
+export interface PlanningLimitSummary {
+  maxGoalChars: number;
+  maxBranchDepth: number;
+  maxPlanningRetries: number;
+}
+
+export interface PlanningContext {
+  goal: DeveloperAgentGoal;
+  availableContexts: {
+    jira?: PlanningJiraContext;
+    github?: PlanningGitHubContext;
+    api?: PlanningApiContext;
+    ci?: PlanningCiContext;
+  };
+  availableArtifacts: WorkflowArtifactSummary[];
+  capabilities: PlanningCapabilityDescription[];
+  policy: PlanningPolicySummary;
+  limits: PlanningLimitSummary;
+  confidence: AgentPlanConfidence;
+  assumptions: string[];
+}
+
+export type WorkflowPlanningQuestionType =
+  'SELECT_CONTEXT' | 'SELECT_SCOPE' | 'CLARIFY_GOAL' | 'SELECT_TARGET';
+
+export interface PlanningQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface WorkflowPlanningQuestion {
+  id: string;
+  type: WorkflowPlanningQuestionType;
+  question: string;
+  options?: PlanningQuestionOption[];
+}
+
+export type WorkflowPlanRevisionReason =
+  'CONTEXT_CHANGED' | 'NEW_INFORMATION' | 'STEP_FAILED' | 'GOAL_NOT_SATISFIED' | 'USER_REQUEST';
+
+export interface DeveloperWorkflowPlanRevision {
+  id: string;
+  workflowId: string;
+  previousPlanId: string;
+  reason: WorkflowPlanRevisionReason;
+  preservedCompletedSteps: string[];
+  removedRemainingSteps: string[];
+  addedSteps: DeveloperWorkflowStep[];
+  summary: string;
+  requiresApproval: boolean;
+  proposedPlan: DeveloperWorkflowPlan;
+}
+
+export type WorkflowContextChange =
+  | {
+      source: 'github';
+      kind: 'HEAD_CHANGED';
+      previous: string;
+      current: string;
+    }
+  | { source: 'jira'; kind: 'ISSUE_UPDATED' }
+  | { source: 'api'; kind: 'DOCUMENT_CHANGED' }
+  | { source: 'ci'; kind: 'CHECK_STATE_CHANGED' };
+
+export interface WorkflowExecutionBudget {
+  aiCalls: { used: number; max: number };
+  providerReads: { used: number; max: number };
+  writeCheckpoints: { used: number; max: number };
+  replans: { used: number; max: number };
+  steps: { used: number; max: number };
+}
+
+export type WorkflowGoalOutcomeStatus =
+  'ACHIEVED' | 'PARTIALLY_ACHIEVED' | 'NOT_ACHIEVED' | 'CANCELLED' | 'BLOCKED';
+
+export interface WorkflowBlocker {
+  code: WorkflowErrorCode;
+  message: string;
+}
+
+export interface WorkflowGoalOutcome {
+  status: WorkflowGoalOutcomeStatus;
+  summary: string;
+  satisfiedCriteria: string[];
+  unsatisfiedCriteria: string[];
+  artifacts: WorkflowArtifactRef[];
+  blockers?: WorkflowBlocker[];
+}
+
+export interface DeveloperWorkflowStep {
+  id: string;
+  type: WorkflowStepType;
+  title: string;
+  description: string;
+  dependencies: string[];
+  requiredContext: WorkflowContextRequirement[];
+  executionMode: WorkflowExecutionMode;
+  mutationRisk: WorkflowMutationRisk;
+  status: WorkflowStepStatus;
+  condition?: WorkflowStepCondition;
+  /** Concise user-visible reason — never chain-of-thought. */
+  reason?: string;
+}
+
+export interface DeveloperWorkflowPlan {
+  id: string;
+  goal: string;
+  summary: string;
+  steps: DeveloperWorkflowStep[];
+  estimatedScope?: {
+    aiCalls?: number;
+    providerReads?: number;
+    writeCheckpoints?: number;
+  };
+  warnings?: string[];
+  assumptions?: string[];
+  completionCriteria?: WorkflowCompletionCriterion[];
+  confidence?: AgentPlanConfidence;
+}
+
+export interface WorkflowStepResult {
+  stepId: string;
+  status: WorkflowStepStatus;
+  startedAt?: string;
+  completedAt?: string;
+  artifactId?: string;
+  summary?: string;
+  errorCode?: WorkflowErrorCode;
+  errorMessage?: string;
+  retryable?: boolean;
+}
+
+export type WorkflowArtifactKind =
+  | 'engineering-context'
+  | 'alignment'
+  | 'pr-review'
+  | 'finding'
+  | 'ci-analysis'
+  | 'fix-suggestion'
+  | 'generated-patch'
+  | 'prepared-patch'
+  | 'commit'
+  | 'comment-draft'
+  | 'review-draft';
+
+export interface WorkflowArtifactRef {
+  id: string;
+  kind: WorkflowArtifactKind;
+  summary?: string;
+  createdAt: string;
+  binding?: WorkflowContextBinding;
+  producedByStepId?: string;
+  provenanceStatus?: WorkflowArtifactProvenanceStatus;
+}
+
+export interface DeveloperWorkflowSession {
+  id: string;
+  goal: string;
+  agentGoal?: DeveloperAgentGoal;
+  createdAt: string;
+  updatedAt: string;
+  contextBinding: WorkflowContextBinding;
+  status: WorkflowSessionStatus;
+  plan: DeveloperWorkflowPlan;
+  planHistory?: DeveloperWorkflowPlan[];
+  pendingRevision?: DeveloperWorkflowPlanRevision;
+  planningQuestions?: WorkflowPlanningQuestion[];
+  currentStepId?: string;
+  stepResults: Record<string, WorkflowStepResult>;
+  artifacts: Record<string, WorkflowArtifactRef>;
+  facts?: WorkflowFact[];
+  budget?: WorkflowExecutionBudget;
+  outcome?: WorkflowGoalOutcome;
+  execution: {
+    startedAt?: string;
+    completedAt?: string;
+    lastError?: WorkflowErrorBody;
+  };
+}
+
+/** Safe capability metadata for planner prompts — no handlers. */
+export interface PlannerCapabilitySummary {
+  type: WorkflowStepType;
+  title: string;
+  description: string;
+  mutationRisk: WorkflowMutationRisk;
+  requiredContext: WorkflowContextRequirement[];
+  executionMode: WorkflowExecutionMode;
+  consumes?: WorkflowArtifactKind[];
+  produces?: WorkflowArtifactKind[];
+  costClass?: WorkflowCostClass;
+}
+
+export type WorkflowPlanValidationResult =
+  | { ok: true; plan: DeveloperWorkflowPlan }
+  | {
+      ok: false;
+      code: WorkflowErrorCode;
+      message: string;
+      details?: Record<string, unknown>;
+    };

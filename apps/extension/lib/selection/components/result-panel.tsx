@@ -16,6 +16,11 @@ import { PrReviewReportView } from './pr-review-report-view';
 import { ApplyFixPanel, canOfferApplyFix } from '../patch-apply/apply-fix-panel';
 import type { SuggestFixApplyTarget } from '../patch-apply/patch-apply.store';
 import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
+import {
+  EngineeringAlignmentView,
+  useEngineeringAlignmentView,
+} from '../engineering/engineering-alignment-view';
+import { useEngineeringSessionStore } from '../engineering/engineering.store';
 
 type ResultPanelProps = {
   action: AIAction;
@@ -25,6 +30,8 @@ type ResultPanelProps = {
   reviewContext?: PageContext | null;
   findingFilter?: PrFindingFilter;
   findingDispositions?: PrFindingDispositionMap;
+  /** Optional freshness warning (e.g. engineering alignment sources changed). */
+  staleMessage?: string | null;
   onCopy: () => Promise<boolean>;
   onCopyFix?: () => Promise<boolean>;
   onCopyFullReview?: () => Promise<boolean>;
@@ -154,6 +161,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     reviewContext = null,
     findingFilter = 'all',
     findingDispositions = {},
+    staleMessage = null,
     onCopy,
     onCopyFix,
     onCopyFullReview,
@@ -185,6 +193,14 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
 
   const isSuggestFix = action === AIAction.SUGGEST_FIX;
   const isEntirePr = action === AIAction.REVIEW_ENTIRE_PR;
+  const isEngineeringAlignment = action === AIAction.ANALYZE_ENGINEERING_ALIGNMENT;
+  const engineeringContext = useEngineeringSessionStore((s) => s.context);
+  const engineeringBinding = useEngineeringSessionStore((s) => s.binding);
+  const engineeringView = useEngineeringAlignmentView(
+    content,
+    isEngineeringAlignment ? engineeringContext : null,
+    isEngineeringAlignment ? engineeringBinding : null,
+  );
   const parsedFix = useMemo(
     () => (isSuggestFix ? parseSuggestFixContent(content) : null),
     [content, isSuggestFix],
@@ -210,7 +226,8 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     action === AIAction.EXTRACT_ACCEPTANCE_CRITERIA ||
     action === AIAction.CREATE_TECHNICAL_PLAN ||
     action === AIAction.ANALYZE_JIRA_RISKS ||
-    action === AIAction.COMPARE_JIRA_WITH_PR;
+    action === AIAction.COMPARE_JIRA_WITH_PR ||
+    action === AIAction.ANALYZE_ENGINEERING_ALIGNMENT;
 
   const panelWidthPx = useMemo(() => {
     if (isSuggestFix) {
@@ -286,6 +303,11 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
         }}
         className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5"
       >
+        {staleMessage ? (
+          <p className="mb-2 text-[11px] leading-4 text-secondary" role="status">
+            {staleMessage}
+          </p>
+        ) : null}
         {showPrReport && prReport ? (
           <PrReviewReportView
             report={prReport}
@@ -320,6 +342,8 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
               />
             ) : null}
           </div>
+        ) : engineeringView ? (
+          <EngineeringAlignmentView analysis={engineeringView} streaming={streaming} />
         ) : (
           <div className="rounded-lg border border-border bg-surface/70 px-2.5 py-2.5">
             <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[1.55] text-primary">

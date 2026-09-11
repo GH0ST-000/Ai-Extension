@@ -46,4 +46,19 @@ describe('assistant tabs', () => {
   it('defaults to Text otherwise', () => {
     expect(resolveDefaultAssistantTab({})).toBe('text');
   });
+
+  it('keeps ANALYZE_ENGINEERING_ALIGNMENT out of all tab catalogs (banner-only)', () => {
+    expect(TEXT_TAB_ACTIONS.has(AIAction.ANALYZE_ENGINEERING_ALIGNMENT)).toBe(false);
+    expect(GITHUB_TAB_ACTIONS.has(AIAction.ANALYZE_ENGINEERING_ALIGNMENT)).toBe(false);
+    expect(JIRA_TAB_ACTIONS.has(AIAction.ANALYZE_ENGINEERING_ALIGNMENT)).toBe(false);
+    expect(API_TAB_ACTIONS.has(AIAction.ANALYZE_ENGINEERING_ALIGNMENT)).toBe(false);
+  });
+
+  it('keeps PLAN_DEVELOPER_WORKFLOW out of catalogs (Flow tab panel owns UX)', () => {
+    expect(TEXT_TAB_ACTIONS.has(AIAction.PLAN_DEVELOPER_WORKFLOW)).toBe(false);
+    expect(GITHUB_TAB_ACTIONS.has(AIAction.PLAN_DEVELOPER_WORKFLOW)).toBe(false);
+    expect(JIRA_TAB_ACTIONS.has(AIAction.PLAN_DEVELOPER_WORKFLOW)).toBe(false);
+    expect(API_TAB_ACTIONS.has(AIAction.PLAN_DEVELOPER_WORKFLOW)).toBe(false);
+    expect(actionsForTab('workflow').size).toBe(0);
+  });
 });

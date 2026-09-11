@@ -146,6 +146,16 @@ export const AI_ACTIONS: readonly AiActionDefinition[] = [
     description: 'Breaking change risks',
   },
   {
+    id: AIAction.ANALYZE_ENGINEERING_ALIGNMENT,
+    label: 'Analyze Alignment',
+    description: 'Jira · PR · API cross-check',
+  },
+  {
+    id: AIAction.PLAN_DEVELOPER_WORKFLOW,
+    label: 'Plan Workflow',
+    description: 'Safe multi-step flow',
+  },
+  {
     id: AIAction.CUSTOM,
     label: 'Custom Prompt',
     description: 'Ask anything',
@@ -171,6 +181,8 @@ export const DIAGNOSTIC_AI_ACTIONS: ReadonlySet<AIAction> = new Set([
   AIAction.ANALYZE_API_CONTRACT,
   AIAction.COMPARE_API_WITH_JIRA,
   AIAction.ANALYZE_API_CHANGES,
+  AIAction.ANALYZE_ENGINEERING_ALIGNMENT,
+  AIAction.PLAN_DEVELOPER_WORKFLOW,
 ]);
 
 export const ERROR_INTELLIGENCE_ACTIONS: ReadonlySet<AIAction> = new Set([

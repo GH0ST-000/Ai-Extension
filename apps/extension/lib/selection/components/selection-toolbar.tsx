@@ -39,6 +39,11 @@ import { FloatingTriggerButton } from './floating-trigger-button';
 import { LoadingPanel } from './loading-panel';
 import { ResultPanel } from './result-panel';
 import { CiEntryButton, CiPanel, useGithubCiStore } from '../ci';
+import {
+  EngineeringContextBanner,
+  useEngineeringAnalysisStale,
+  type EngineeringSessionsInput,
+} from '../engineering';
 import { JiraIssuePanel, useJiraSessionStore } from '../jira';
 import {
   OpenApiPanel,
@@ -46,6 +51,7 @@ import {
   buildCompareApiWithJiraText,
   useOpenApiSessionStore,
 } from '../openapi';
+import { WorkflowPanel, useWorkflowSessionStore } from '../workflow';
 import { extractPageContext } from '../../context/extract-page-context';
 import { parseGitHubUrl } from '../../context/adapters/github.adapter';
 import { detectJiraKeysInPrSignals } from '@project-x/shared';
@@ -127,6 +133,8 @@ export function SelectionToolbar() {
   const markComparison = useJiraSessionStore((s) => s.markComparison);
   const comparisonStale = useJiraSessionStore((s) => s.isComparisonStale);
   const ciSummary = useGithubCiStore((s) => s.summary);
+  const openApiContract = useOpenApiSessionStore((s) => s.contract);
+  const openApiSelectedOperationId = useOpenApiSessionStore((s) => s.selectedOperationId);
   const prevJiraNavRef = useRef<{ key?: string; host?: string } | null>(null);
   const prevOpenApiNavRef = useRef<{ documentUrl?: string; operationKey?: string } | null>(null);
 
@@ -223,6 +231,61 @@ export function SelectionToolbar() {
     }
     openCi(prCiDestination);
   }, [openCi, prCiDestination]);
+
+  const engineeringSessions = useMemo((): EngineeringSessionsInput => {
+    const openApiOperation =
+      openApiContract && openApiSelectedOperationId
+        ? useOpenApiSessionStore.getState().getSelectedOperation()
+        : null;
+    return {
+      jiraIssue: sessionJiraIssue,
+      pageSnapshot,
+      lastReviewContext,
+      openApiContract,
+      openApiOperation,
+      pageSelectedOperation: openApiContext?.selectedOperation ?? null,
+      ciSummary,
+    };
+  }, [
+    sessionJiraIssue,
+    pageSnapshot,
+    lastReviewContext,
+    openApiContract,
+    openApiSelectedOperationId,
+    openApiContext?.selectedOperation,
+    ciSummary,
+  ]);
+
+  const engineeringStale = useEngineeringAnalysisStale(engineeringSessions);
+
+  const pendingAiLaunch = useWorkflowSessionStore((s) => s.pendingAiLaunch);
+  const consumePendingAiLaunch = useWorkflowSessionStore((s) => s.consumePendingAiLaunch);
+  const notifyAssistantSuccess = useWorkflowSessionStore((s) => s.notifyAssistantSuccess);
+
+  useEffect(() => {
+    if (!pendingAiLaunch) {
+      return;
+    }
+    const launch = consumePendingAiLaunch();
+    if (!launch) {
+      return;
+    }
+    useSelectionToolbarStore.setState({ selectedText: launch.text });
+    void startAction(launch.action);
+  }, [pendingAiLaunch, consumePendingAiLaunch, startAction]);
+
+  useEffect(() => {
+    if (assistant.status !== 'success') {
+      return;
+    }
+    notifyAssistantSuccess(assistant.action, assistant.content);
+    if (assistant.action === AIAction.PLAN_DEVELOPER_WORKFLOW) {
+      const session = useWorkflowSessionStore.getState().session;
+      if (session?.status === 'AWAITING_PLAN_APPROVAL') {
+        backToMenu();
+      }
+    }
+  }, [assistant, notifyAssistantSuccess, backToMenu]);
 
   const comparisonHeadToken =
     ciSummary?.headSha ??
@@ -575,11 +638,12 @@ export function SelectionToolbar() {
 
             {phase === 'assistant' && assistant.status === 'menu' ? (
               <div key="menu" className="space-y-1">
+                <EngineeringContextBanner sessions={engineeringSessions} />
                 <ActionMenu
                   actions={rankedActions}
                   onSelect={handleSelectAction}
                   pageType={pageSnapshot?.type ?? null}
-                  hasOpenApi={Boolean(openApiContext)}
+                  hasOpenApi={Boolean(openApiContext || openApiContract)}
                   hasJiraIssue={Boolean(effectiveJiraKey || githubJiraKeys.length === 1)}
                   hasGithub={Boolean(pageSnapshot?.type === 'github' || prCiDestination)}
                   githubSlot={
@@ -656,6 +720,7 @@ export function SelectionToolbar() {
                       />
                     ) : null
                   }
+                  workflowSlot={<WorkflowPanel sessions={engineeringSessions} />}
                 />
                 {ciView !== 'closed' ? <CiPanel /> : null}
               </div>
@@ -689,6 +754,11 @@ export function SelectionToolbar() {
                   canReplace &&
                   assistant.status === 'success' &&
                   !DIAGNOSTIC_AI_ACTIONS.has(assistant.action)
+                }
+                staleMessage={
+                  assistant.action === AIAction.ANALYZE_ENGINEERING_ALIGNMENT && engineeringStale
+                    ? 'Sources changed since this analysis was generated. Retry to refresh.'
+                    : null
                 }
                 reviewContext={
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null

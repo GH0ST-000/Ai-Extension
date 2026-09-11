@@ -2,13 +2,19 @@ import type { PageContext } from '@project-x/types';
 
 import { githubPageAdapter } from './adapters/github.adapter';
 import { jiraPageAdapter } from './adapters/jira.adapter';
+import { openapiPageAdapter } from './adapters/openapi.adapter';
 import { genericPageAdapter } from './adapters/generic.adapter';
 import type { PageAdapter } from './page-adapter';
 
 /**
  * Ordered adapters. First match wins. Generic is always last.
  */
-const ADAPTERS: readonly PageAdapter[] = [githubPageAdapter, jiraPageAdapter, genericPageAdapter];
+const ADAPTERS: readonly PageAdapter[] = [
+  githubPageAdapter,
+  jiraPageAdapter,
+  openapiPageAdapter,
+  genericPageAdapter,
+];
 
 /**
  * Extract a normalized page context for the current document.

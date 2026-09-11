@@ -17,6 +17,17 @@ const JIRA_ACTIONS_TAIL: readonly AIAction[] = [
   AIAction.COMPARE_JIRA_WITH_PR,
 ];
 
+/** Day 18 OpenAPI actions — appended after Jira unless elevated elsewhere. */
+const OPENAPI_ACTIONS_TAIL: readonly AIAction[] = [
+  AIAction.EXPLAIN_API_ENDPOINT,
+  AIAction.EXPLAIN_API_REQUEST,
+  AIAction.EXPLAIN_API_RESPONSE,
+  AIAction.GENERATE_API_EXAMPLE,
+  AIAction.ANALYZE_API_CONTRACT,
+  AIAction.COMPARE_API_WITH_JIRA,
+  AIAction.ANALYZE_API_CHANGES,
+];
+
 const RANKINGS: Record<ContentType, readonly AIAction[]> = {
   code: [
     AIAction.EXPLAIN_CODE,
@@ -31,6 +42,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
   error: [
     AIAction.FIND_ROOT_CAUSE,
@@ -45,6 +57,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.TRANSLATE,
     AIAction.IMPROVE_WRITING,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
   prose: [
     AIAction.SUMMARIZE,
@@ -59,6 +72,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
   'short-text': [
     AIAction.EXPLAIN,
@@ -73,6 +87,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
   'structured-data': [
     AIAction.EXPLAIN,
@@ -87,6 +102,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
   unknown: [
     AIAction.EXPLAIN,
@@ -101,6 +117,7 @@ const RANKINGS: Record<ContentType, readonly AIAction[]> = {
     AIAction.FIND_ROOT_CAUSE,
     AIAction.UNDERSTAND_ERROR,
     ...JIRA_ACTIONS_TAIL,
+    ...OPENAPI_ACTIONS_TAIL,
   ],
 };
 

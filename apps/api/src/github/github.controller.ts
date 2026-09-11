@@ -4,6 +4,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
 import { AnalyzeCiFailureDto } from './dto/analyze-ci-failure.dto';
+import { FetchFileVersionsDto } from './dto/fetch-file-versions.dto';
+import { FetchPullRequestFileVersionsDto } from './dto/fetch-pull-request-file-versions.dto';
 import { PostPullRequestCommentDto } from './dto/post-pull-request-comment.dto';
 import {
   ApplyPullRequestPatchDto,
@@ -11,6 +13,7 @@ import {
 } from './dto/prepare-apply-patch.dto';
 import { SubmitPullRequestReviewDto } from './dto/submit-pull-request-review.dto';
 import { GithubCiService } from './github-ci.service';
+import { GithubContentService } from './github-content.service';
 import { GithubPatchService } from './github-patch.service';
 import { GithubReviewService } from './github-review.service';
 import { GithubWriteService } from './github-write.service';
@@ -23,6 +26,7 @@ export class GithubController {
     private readonly githubReviewService: GithubReviewService,
     private readonly githubPatchService: GithubPatchService,
     private readonly githubCiService: GithubCiService,
+    private readonly githubContentService: GithubContentService,
   ) {}
 
   @Post('pull-requests/comments')
@@ -109,6 +113,40 @@ export class GithubController {
       number,
       decodeURIComponent(checkId),
       body,
+    );
+  }
+
+  /**
+   * Day 18 — read-only: fetch one repo path at explicit baseSha + headSha (Contents API).
+   * Does not mutate GitHub. Used for OpenAPI contract diffs on PR pages.
+   */
+  @Post('repos/:owner/:repo/file-versions')
+  fetchFileVersions(
+    @CurrentUser() user: AuthRequestUser,
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Body() body: FetchFileVersionsDto,
+  ) {
+    return this.githubContentService.fetchFileVersions(user.id, owner, repo, body);
+  }
+
+  /**
+   * Day 18 — read-only: resolve PR base/head SHAs, then fetch one path at both.
+   */
+  @Post('pull-requests/:owner/:repo/:number/file-versions')
+  fetchPullRequestFileVersions(
+    @CurrentUser() user: AuthRequestUser,
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Param('number', ParseIntPipe) number: number,
+    @Body() body: FetchPullRequestFileVersionsDto,
+  ) {
+    return this.githubContentService.fetchPullRequestFileVersions(
+      user.id,
+      owner,
+      repo,
+      number,
+      body.path,
     );
   }
 }

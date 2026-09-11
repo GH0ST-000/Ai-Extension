@@ -145,6 +145,7 @@ lib/selection/
   smart-actions/                 Content classifier + action ranking (Day 5)
   ci/                            CI status + CI Fix Session (Days 15–16)
   jira/                          Jira issue session + panel (Day 17, read-only)
+  openapi/                       OpenAPI panel + PR API-change analyze (Day 18)
   store.ts                       Zustand assistant view state
   hooks/                         Selection + dismiss + document href SPA watch
   components/                    FAB, menu, loading, result, error, custom prompt
@@ -152,6 +153,16 @@ lib/selection/
 ```
 
 Assistant views use a discriminated union: `menu` → `custom-prompt` | `loading` → `streaming` → `success` | `error`.
+
+### Day 18 — OpenAPI / API contract (read-only)
+
+- Detects Swagger UI / Redoc / raw OpenAPI documents; panel actions: explain endpoint/request/response, generate example, contract risks, compare with Jira.
+- On GitHub PRs, when Files-tab context includes OpenAPI/Swagger paths (`openapi.json`, `*swagger*.yaml`, …), shows **Analyze API Changes**:
+  1. Fetches base + head file text via `POST /github/pull-requests/.../file-versions` (stored PAT; Contents API; bound to PR `baseSha`/`headSha`)
+  2. Runs deterministic `POST /openapi/diff`
+  3. Starts `ANALYZE_API_CHANGES` with that structural summary as `selectedText`
+- Never executes the documented API (no Try It), never captures auth credentials, never mutates GitHub for this flow.
+- Shared URL helpers in `@project-x/shared` are browser-safe (no `node:dns` / `node:net`); DNS SSRF checks stay on the API fetch path only.
 
 ## Stack
 

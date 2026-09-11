@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { SettingsModule } from '../settings/settings.module';
 import { GithubController } from './github.controller';
 import { GithubCiService } from './github-ci.service';
+import { GithubContentService } from './github-content.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { GithubPatchService } from './github-patch.service';
 import { GithubReviewService } from './github-review.service';
@@ -18,6 +19,7 @@ import { GithubWriteService } from './github-write.service';
     GithubReviewService,
     GithubPatchService,
     GithubCiService,
+    GithubContentService,
     GithubErrorNormalizer,
   ],
 })

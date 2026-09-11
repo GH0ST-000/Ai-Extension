@@ -133,6 +133,23 @@ export function formatPageContext(
     pushLine(lines, 'jiraPriority', j.priority);
   }
 
+  if (context.openapi) {
+    const o = context.openapi;
+    pushLine(lines, 'apiPage', o.pageType);
+    pushLine(lines, 'apiOrigin', o.origin);
+    pushLine(lines, 'apiDocUrl', o.documentUrl);
+    if (o.selectedOperation) {
+      pushLine(
+        lines,
+        'apiOp',
+        `${o.selectedOperation.method} ${o.selectedOperation.path}${
+          o.selectedOperation.operationId ? ` (${o.selectedOperation.operationId})` : ''
+        }`,
+      );
+      pushLine(lines, 'apiSummary', o.selectedOperation.summary);
+    }
+  }
+
   if (lines.length === 0) {
     return null;
   }

@@ -49,6 +49,14 @@ export enum AIAction {
   CREATE_TECHNICAL_PLAN = 'CREATE_TECHNICAL_PLAN',
   ANALYZE_JIRA_RISKS = 'ANALYZE_JIRA_RISKS',
   COMPARE_JIRA_WITH_PR = 'COMPARE_JIRA_WITH_PR',
+  /** Day 18 — OpenAPI / Swagger contract intelligence. */
+  EXPLAIN_API_ENDPOINT = 'EXPLAIN_API_ENDPOINT',
+  EXPLAIN_API_REQUEST = 'EXPLAIN_API_REQUEST',
+  EXPLAIN_API_RESPONSE = 'EXPLAIN_API_RESPONSE',
+  GENERATE_API_EXAMPLE = 'GENERATE_API_EXAMPLE',
+  ANALYZE_API_CONTRACT = 'ANALYZE_API_CONTRACT',
+  COMPARE_API_WITH_JIRA = 'COMPARE_API_WITH_JIRA',
+  ANALYZE_API_CHANGES = 'ANALYZE_API_CHANGES',
   CUSTOM = 'CUSTOM',
 }
 
@@ -74,9 +82,9 @@ export const CONTENT_TYPES = [
  * Website-specific DOM extraction stays in the extension; the API only
  * receives this normalized shape.
  */
-export type PageContextType = 'generic' | 'github' | 'jira';
+export type PageContextType = 'generic' | 'github' | 'jira' | 'openapi';
 
-export const PAGE_CONTEXT_TYPES = ['generic', 'github', 'jira'] as const;
+export const PAGE_CONTEXT_TYPES = ['generic', 'github', 'jira', 'openapi'] as const;
 
 export interface PageContextPageMeta {
   description?: string;
@@ -130,6 +138,34 @@ export interface PageContextJira {
   priority?: string;
 }
 
+export type ApiDocPageType = 'swagger-ui' | 'redoc' | 'openapi-document' | 'unknown';
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
+
+export const HTTP_METHODS = [
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+  'TRACE',
+] as const;
+
+export interface PageContextOpenApi {
+  pageType?: ApiDocPageType;
+  origin?: string;
+  /** Sanitized OpenAPI document URL (no credentials). */
+  documentUrl?: string;
+  selectedOperation?: {
+    method: HttpMethod;
+    path: string;
+    operationId?: string;
+    summary?: string;
+  };
+}
+
 export interface PageContext {
   type: PageContextType;
   url: string;
@@ -139,6 +175,7 @@ export interface PageContext {
   code?: PageContextCode;
   github?: PageContextGitHub;
   jira?: PageContextJira;
+  openapi?: PageContextOpenApi;
 }
 
 export type ResponseStyle = 'CONCISE' | 'BALANCED' | 'DETAILED';
@@ -281,6 +318,30 @@ export const GITHUB_PATCH_MAX_PATH_CHARACTERS = 512;
 export const GITHUB_PATCH_PREPARE_TTL_SECONDS = 30 * 60;
 
 export type GitHubPatchFileOperation = 'modify' | 'create' | 'delete';
+
+/**
+ * Day 18 — trusted read of one repo path at two SHAs (Contents API via stored PAT).
+ * Used for OpenAPI base/head comparison on GitHub PRs. Not a general file browser.
+ */
+export interface GitHubFileVersionsRequest {
+  path: string;
+  baseSha: string;
+  headSha: string;
+}
+
+export interface GitHubFileVersionsResponse {
+  owner: string;
+  repository: string;
+  path: string;
+  baseSha: string;
+  headSha: string;
+  /** UTF-8 text when the path exists as a file at baseSha; null when missing. */
+  baseContent: string | null;
+  /** UTF-8 text when the path exists as a file at headSha; null when missing. */
+  headContent: string | null;
+  basePresent: boolean;
+  headPresent: boolean;
+}
 
 /** Normalized single-file change for prepare/apply (Day 14 primary: modify). */
 export interface GitHubPatchFileChange {
@@ -1002,5 +1063,254 @@ export interface JiraPRComparison {
   risks: JiraPRRisk[];
   openQuestions: string[];
   reviewScopeTruncated?: boolean;
+  analyzedAt: string;
+}
+
+/** Day 18 — OpenAPI / Swagger intelligence budgets. */
+export const OPENAPI_MAX_DOCUMENT_BYTES = 1_500_000;
+export const OPENAPI_MAX_OPERATIONS = 200;
+export const OPENAPI_MAX_SCHEMAS = 300;
+export const OPENAPI_MAX_SCHEMA_DEPTH = 12;
+export const OPENAPI_MAX_PROPERTIES = 80;
+export const OPENAPI_MAX_DESCRIPTION_CHARS = 2_000;
+export const OPENAPI_MAX_AI_CONTEXT_CHARS = 18_000;
+export const OPENAPI_MAX_REDIRECTS = 3;
+export const OPENAPI_FETCH_TIMEOUT_MS = 12_000;
+
+export type OpenApiErrorCode =
+  | 'API_DOC_NOT_FOUND'
+  | 'API_DOC_INVALID'
+  | 'API_DOC_TOO_LARGE'
+  | 'API_DOC_UNSUPPORTED_VERSION'
+  | 'API_DOC_FETCH_BLOCKED'
+  | 'API_DOC_FETCH_FAILED'
+  | 'API_DOC_REDIRECT_BLOCKED'
+  | 'API_DOC_EXTERNAL_REF_UNSUPPORTED'
+  | 'API_DOC_REFERENCE_LIMIT_EXCEEDED'
+  | 'API_OPERATION_NOT_FOUND'
+  | 'API_OPERATION_AMBIGUOUS'
+  | 'API_SCHEMA_TOO_COMPLEX'
+  | 'API_CONTEXT_STALE'
+  | 'API_CONTRACT_COMPARISON_STALE'
+  | 'API_EXAMPLE_GENERATION_FAILED'
+  | 'RATE_LIMITED'
+  | 'AI_ANALYSIS_FAILED'
+  | 'UNKNOWN';
+
+export interface OpenApiErrorBody {
+  code: OpenApiErrorCode;
+  message: string;
+}
+
+export interface ApiServer {
+  url: string;
+  description?: string;
+}
+
+export interface ApiTag {
+  name: string;
+  description?: string;
+}
+
+export interface NormalizedApiParameter {
+  name: string;
+  in: 'path' | 'query' | 'header' | 'cookie';
+  required: boolean;
+  description?: string;
+  schema?: NormalizedApiSchema;
+  deprecated?: boolean;
+}
+
+export interface NormalizedRequestBody {
+  required: boolean;
+  description?: string;
+  contentType?: string;
+  schema?: NormalizedApiSchema;
+}
+
+export interface NormalizedApiResponse {
+  statusCode: string;
+  description?: string;
+  contentType?: string;
+  schema?: NormalizedApiSchema;
+}
+
+export interface NormalizedSecurityRequirement {
+  name: string;
+  scopes?: string[];
+}
+
+export interface NormalizedApiSchema {
+  name?: string;
+  type?: string;
+  format?: string;
+  description?: string;
+  required?: string[];
+  nullable?: boolean;
+  enum?: Array<string | number | boolean | null>;
+  default?: unknown;
+  example?: unknown;
+  properties?: Record<string, NormalizedApiSchema>;
+  items?: NormalizedApiSchema;
+  oneOf?: NormalizedApiSchema[];
+  anyOf?: NormalizedApiSchema[];
+  allOf?: NormalizedApiSchema[];
+  additionalProperties?: boolean | NormalizedApiSchema;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  truncated?: boolean;
+  unresolvedRef?: string;
+}
+
+export interface NormalizedApiOperation {
+  id: string;
+  method: HttpMethod;
+  path: string;
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  deprecated?: boolean;
+  parameters: NormalizedApiParameter[];
+  requestBody?: NormalizedRequestBody;
+  responses: NormalizedApiResponse[];
+  security?: NormalizedSecurityRequirement[];
+}
+
+export interface NormalizedApiContract {
+  version: string;
+  title?: string;
+  description?: string;
+  servers: ApiServer[];
+  tags: ApiTag[];
+  operations: NormalizedApiOperation[];
+  schemas: Record<string, NormalizedApiSchema>;
+  source: {
+    type: 'url' | 'page';
+    /** Sanitized document URL (credentials stripped). */
+    documentUrl?: string;
+  };
+  documentHash: string;
+  partial?: boolean;
+  warnings?: string[];
+  operationCountTotal?: number;
+  operationCountIncluded?: number;
+  fetchedAt: string;
+}
+
+export interface ParseOpenApiUrlRequest {
+  url: string;
+}
+
+export interface ParseOpenApiContentRequest {
+  content: string;
+  /** Optional page origin for logging only — not used as a fetch target. */
+  pageOrigin?: string;
+  sourceUrl?: string;
+}
+
+export interface GenerateApiExampleRequest {
+  documentHash: string;
+  operationId: string;
+}
+
+export interface ApiGeneratedExample {
+  method: HttpMethod;
+  path: string;
+  curl: string;
+  headers: Record<string, string>;
+  body?: unknown;
+  notes: string[];
+}
+
+export interface ApiContractEvidence {
+  kind: 'operation' | 'parameter' | 'request-schema' | 'response' | 'schema-field' | 'security';
+  operationId?: string;
+  method?: HttpMethod;
+  path?: string;
+  name?: string;
+  statusCode?: string;
+  note?: string;
+}
+
+export interface ApiContractFinding {
+  id: string;
+  severity: 'high' | 'medium' | 'low';
+  category: string;
+  title: string;
+  description: string;
+  evidence: ApiContractEvidence[];
+  recommendation?: string;
+}
+
+export interface ApiContractAnalysis {
+  overview: string;
+  riskLevel: 'high' | 'medium' | 'low';
+  findings: ApiContractFinding[];
+  openQuestions: string[];
+  scope?: string;
+}
+
+export type ApiContractChangeKind =
+  | 'removed-endpoint'
+  | 'added-endpoint'
+  | 'removed-response'
+  | 'added-response'
+  | 'new-required-request-field'
+  | 'removed-response-field'
+  | 'type-change'
+  | 'enum-narrowing'
+  | 'enum-widening'
+  | 'security-change'
+  | 'other';
+
+export type ApiContractChangeImpact = 'breaking' | 'non-breaking' | 'uncertain';
+
+export interface ApiContractChange {
+  id: string;
+  kind: ApiContractChangeKind;
+  impact: ApiContractChangeImpact;
+  title: string;
+  description: string;
+  method?: HttpMethod;
+  path?: string;
+}
+
+export interface ApiContractDiff {
+  baseRef: string;
+  headRef: string;
+  baseHash: string;
+  headHash: string;
+  breakingChanges: ApiContractChange[];
+  nonBreakingChanges: ApiContractChange[];
+  uncertainChanges: ApiContractChange[];
+}
+
+export interface ApiRequirementCoverage {
+  requirement: string;
+  status: 'covered' | 'partial' | 'not-evident' | 'uncertain';
+  notes?: string;
+  evidence?: string;
+}
+
+export interface ApiRequirementRisk {
+  severity: 'high' | 'medium' | 'low';
+  text: string;
+  kind: 'fact' | 'potential' | 'recommendation';
+}
+
+export interface JiraApiComparison {
+  issueKey: string;
+  operationId?: string;
+  method: HttpMethod;
+  path: string;
+  documentHash: string;
+  alignment: 'strong' | 'partial' | 'weak' | 'uncertain';
+  coveredCriteria: ApiRequirementCoverage[];
+  missingOrUnclearCriteria: ApiRequirementCoverage[];
+  risks: ApiRequirementRisk[];
+  openQuestions: string[];
   analyzedAt: string;
 }

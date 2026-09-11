@@ -6,15 +6,22 @@ import type {
   AiPromptBuildResult,
   AiPromptDefinition,
 } from '../interfaces/ai-prompt-definition.interface';
-import { customPrompt } from './custom.prompt';
+import { analyzeApiChangesPrompt } from './analyze-api-changes.prompt';
+import { analyzeApiContractPrompt } from './analyze-api-contract.prompt';
 import { analyzeCiFailurePrompt } from './analyze-ci-failure.prompt';
 import { analyzeJiraRisksPrompt } from './analyze-jira-risks.prompt';
+import { compareApiWithJiraPrompt } from './compare-api-with-jira.prompt';
 import { compareJiraWithPrPrompt } from './compare-jira-with-pr.prompt';
 import { createTechnicalPlanPrompt } from './create-technical-plan.prompt';
+import { customPrompt } from './custom.prompt';
+import { explainApiEndpointPrompt } from './explain-api-endpoint.prompt';
+import { explainApiRequestPrompt } from './explain-api-request.prompt';
+import { explainApiResponsePrompt } from './explain-api-response.prompt';
 import { explainCodePrompt } from './explain-code.prompt';
 import { explainPrompt } from './explain.prompt';
 import { extractAcceptanceCriteriaPrompt } from './extract-acceptance-criteria.prompt';
 import { findRootCausePrompt } from './find-root-cause.prompt';
+import { generateApiExamplePrompt } from './generate-api-example.prompt';
 import { improveWritingPrompt } from './improve-writing.prompt';
 import { reviewCodePrompt } from './review-code.prompt';
 import { reviewEntirePrPrompt } from './review-entire-pr.prompt';
@@ -46,6 +53,13 @@ export class PromptRegistry {
       createTechnicalPlanPrompt,
       analyzeJiraRisksPrompt,
       compareJiraWithPrPrompt,
+      explainApiEndpointPrompt,
+      explainApiRequestPrompt,
+      explainApiResponsePrompt,
+      generateApiExamplePrompt,
+      analyzeApiContractPrompt,
+      compareApiWithJiraPrompt,
+      analyzeApiChangesPrompt,
       customPrompt,
     ];
 

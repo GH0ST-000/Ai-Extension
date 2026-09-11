@@ -111,6 +111,41 @@ export const AI_ACTIONS: readonly AiActionDefinition[] = [
     description: 'Requirement coverage',
   },
   {
+    id: AIAction.EXPLAIN_API_ENDPOINT,
+    label: 'Explain Endpoint',
+    description: 'API operation summary',
+  },
+  {
+    id: AIAction.EXPLAIN_API_REQUEST,
+    label: 'Explain Request',
+    description: 'Request schema & params',
+  },
+  {
+    id: AIAction.EXPLAIN_API_RESPONSE,
+    label: 'Explain Response',
+    description: 'Response shapes',
+  },
+  {
+    id: AIAction.GENERATE_API_EXAMPLE,
+    label: 'Generate Example',
+    description: 'Example request template',
+  },
+  {
+    id: AIAction.ANALYZE_API_CONTRACT,
+    label: 'Contract Risks',
+    description: 'API contract findings',
+  },
+  {
+    id: AIAction.COMPARE_API_WITH_JIRA,
+    label: 'Compare API ↔ Jira',
+    description: 'Requirement vs contract',
+  },
+  {
+    id: AIAction.ANALYZE_API_CHANGES,
+    label: 'Analyze API Changes',
+    description: 'Breaking change risks',
+  },
+  {
     id: AIAction.CUSTOM,
     label: 'Custom Prompt',
     description: 'Ask anything',
@@ -129,6 +164,13 @@ export const DIAGNOSTIC_AI_ACTIONS: ReadonlySet<AIAction> = new Set([
   AIAction.ANALYZE_JIRA_RISKS,
   AIAction.COMPARE_JIRA_WITH_PR,
   AIAction.ANALYZE_CI_FAILURE,
+  AIAction.EXPLAIN_API_ENDPOINT,
+  AIAction.EXPLAIN_API_REQUEST,
+  AIAction.EXPLAIN_API_RESPONSE,
+  AIAction.GENERATE_API_EXAMPLE,
+  AIAction.ANALYZE_API_CONTRACT,
+  AIAction.COMPARE_API_WITH_JIRA,
+  AIAction.ANALYZE_API_CHANGES,
 ]);
 
 export const ERROR_INTELLIGENCE_ACTIONS: ReadonlySet<AIAction> = new Set([

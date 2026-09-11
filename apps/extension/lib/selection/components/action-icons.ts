@@ -31,5 +31,12 @@ export const ACTION_ICONS: Record<AIAction, ComponentType<SVGProps<SVGSVGElement
   [AIAction.CREATE_TECHNICAL_PLAN]: CodeIcon,
   [AIAction.ANALYZE_JIRA_RISKS]: ExplainIcon,
   [AIAction.COMPARE_JIRA_WITH_PR]: PrReviewIcon,
+  [AIAction.EXPLAIN_API_ENDPOINT]: ExplainIcon,
+  [AIAction.EXPLAIN_API_REQUEST]: CodeIcon,
+  [AIAction.EXPLAIN_API_RESPONSE]: CodeIcon,
+  [AIAction.GENERATE_API_EXAMPLE]: FixIcon,
+  [AIAction.ANALYZE_API_CONTRACT]: ReviewIcon,
+  [AIAction.COMPARE_API_WITH_JIRA]: PrReviewIcon,
+  [AIAction.ANALYZE_API_CHANGES]: ReviewIcon,
   [AIAction.CUSTOM]: PromptIcon,
 };

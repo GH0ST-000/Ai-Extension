@@ -14,6 +14,7 @@ import { AuthModule } from './auth/auth.module';
 import { SettingsModule } from './settings/settings.module';
 import { GithubModule } from './github/github.module';
 import { JiraModule } from './jira/jira.module';
+import { OpenApiModule } from './openapi/openapi.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { JiraModule } from './jira/jira.module';
     SettingsModule,
     GithubModule,
     JiraModule,
+    OpenApiModule,
     AiModule,
   ],
 })

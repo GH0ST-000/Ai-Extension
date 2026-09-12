@@ -79,6 +79,11 @@ export class PromptRegistry {
     return definition.build(input);
   }
 
+  /** Stable Day 24 prompt registry name used for PromptSnapshot versioning. */
+  registryNameFor(action: AIAction): string {
+    return `prompt-registry:${action}`;
+  }
+
   has(action: AIAction): boolean {
     return this.prompts.has(action);
   }

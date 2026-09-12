@@ -33,5 +33,6 @@ export {
   validateScope,
   normalizeMemoryKey,
   validateCreateRuleInput,
+  EXPLICIT_PROJECT_RULE_CATEGORIES,
 } from './validate';
-export type { ValidateResult, ValidatedCreateRule } from './validate';
+export type { ValidateResult, ValidatedCreateRule, ExplicitProjectRuleCategory } from './validate';

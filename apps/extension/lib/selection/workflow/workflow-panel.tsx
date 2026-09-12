@@ -5,6 +5,7 @@ import { cn } from '~/lib/utils/cn';
 
 import { parseOwnerRepo, useProjectMemoryStore } from '../../project-memory';
 import type { EngineeringSessionsInput } from '../engineering/engineering.store';
+import { useMultiRepoStore } from '../multi-repo';
 import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
 import { useGithubReviewDraftStore } from '../review-draft';
 import { bindingFromSessions, useWorkflowSessionStore } from './workflow.store';
@@ -62,6 +63,8 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
       usePatchApplyStore.getState().setPhase('idle');
     } else if (openPanelHint === 'review' || openPanelHint === 'comment') {
       useGithubReviewDraftStore.getState().setPhase('editing');
+    } else if (openPanelHint === 'multi-repo') {
+      useMultiRepoStore.getState().setPanelOpen(true);
     }
   }, [openPanelHint]);
 
@@ -491,6 +494,24 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
           >
             New goal
           </button>
+          {status === 'FAILED' || status === 'NEEDS_ATTENTION' ? (
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => void useWorkflowSessionStore.getState().resumeFailedExecution()}
+                className="flex-1 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-secondary hover:text-primary"
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={() => void useWorkflowSessionStore.getState().replayExecution()}
+                className="flex-1 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-secondary hover:text-primary"
+              >
+                Replay
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

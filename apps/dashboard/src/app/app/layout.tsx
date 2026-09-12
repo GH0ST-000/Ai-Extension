@@ -93,6 +93,18 @@ function DashboardShell({ children }: { children: ReactNode }) {
               Memory
             </Link>
             <Link
+              href="/app/systems"
+              className="shrink-0 rounded-full border border-line bg-panel/80 px-3 py-1.5 text-xs font-semibold"
+            >
+              Systems
+            </Link>
+            <Link
+              href="/app/reliability"
+              className="shrink-0 rounded-full border border-line bg-panel/80 px-3 py-1.5 text-xs font-semibold"
+            >
+              Reliability
+            </Link>
+            <Link
               href="/app/settings"
               className="shrink-0 rounded-full border border-line bg-panel/80 px-3 py-1.5 text-xs font-semibold"
             >

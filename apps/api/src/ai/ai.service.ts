@@ -1,13 +1,17 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
+  Optional,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { generateText, streamText } from 'ai';
 import type { ServerResponse } from 'node:http';
 import type { ApiConfig } from '../config/configuration';
+import { ReliabilityService } from '../reliability/reliability.service';
 import { SettingsService } from '../settings/settings.service';
 import type { ExecuteAiActionDto } from './dto/execute-ai-action.dto';
 import type { AiActionRequest } from './interfaces/ai-prompt-definition.interface';
@@ -25,6 +29,14 @@ type ResolvedAiRun = {
   messages: ReturnType<PromptRegistry['build']>['messages'];
   maxOutputTokens: number;
   requestTimeoutMs: number;
+  executionId?: string;
+  promptName: string;
+  contextVersions: {
+    memoryVersion?: string;
+    systemContextVersion?: string;
+    openapiVersion?: string;
+    jiraVersion?: string;
+  };
 };
 
 @Injectable()
@@ -36,11 +48,26 @@ export class AiService {
     private readonly modelFactory: AiModelFactory,
     private readonly config: ConfigService<ApiConfig, true>,
     private readonly settingsService: SettingsService,
+    @Optional()
+    @Inject(forwardRef(() => ReliabilityService))
+    private readonly reliability?: ReliabilityService,
   ) {}
 
   async generateAction(userId: string, input: ExecuteAiActionDto): Promise<string> {
     const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
+
+    await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+      status: 'started',
+      provider: this.modelFactory.getProviderName(),
+      model: this.modelFactory.getModelName(),
+      capability: String(run.request.action),
+      action: String(run.request.action),
+      promptName: run.promptName,
+      promptBody: run.instructions,
+      inputParts: [run.request.text],
+      ...run.contextVersions,
+    });
 
     try {
       const result = await generateText({
@@ -69,9 +96,33 @@ export class AiService {
         contextHost: this.safeHost(run.request.context?.url),
       });
 
+      await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+        status: 'completed',
+        provider: this.modelFactory.getProviderName(),
+        model: this.modelFactory.getModelName(),
+        capability: String(run.request.action),
+        action: String(run.request.action),
+        promptName: run.promptName,
+        inputParts: [run.request.text],
+        outputText: text,
+        durationMs: Date.now() - startedAt,
+        ...run.contextVersions,
+      });
+
       return text;
     } catch (error) {
       this.logFailure('ai.generate.failure', run.request, startedAt, error);
+      await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+        status: 'failed',
+        provider: this.modelFactory.getProviderName(),
+        model: this.modelFactory.getModelName(),
+        capability: String(run.request.action),
+        action: String(run.request.action),
+        promptName: run.promptName,
+        inputParts: [run.request.text],
+        durationMs: Date.now() - startedAt,
+        ...run.contextVersions,
+      });
       throw this.toSafeError(error);
     }
   }
@@ -83,6 +134,18 @@ export class AiService {
   ): Promise<AiTextStreamHandle> {
     const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
+
+    await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+      status: 'started',
+      provider: this.modelFactory.getProviderName(),
+      model: this.modelFactory.getModelName(),
+      capability: String(run.request.action),
+      action: String(run.request.action),
+      promptName: run.promptName,
+      promptBody: run.instructions,
+      inputParts: [run.request.text],
+      ...run.contextVersions,
+    });
 
     try {
       return streamText({
@@ -106,9 +169,32 @@ export class AiService {
             contextType: run.request.context?.type ?? null,
             contextHost: this.safeHost(run.request.context?.url),
           });
+          void this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+            status: 'completed',
+            provider: this.modelFactory.getProviderName(),
+            model: this.modelFactory.getModelName(),
+            capability: String(run.request.action),
+            action: String(run.request.action),
+            promptName: run.promptName,
+            inputParts: [run.request.text],
+            outputText: text,
+            durationMs: Date.now() - startedAt,
+            ...run.contextVersions,
+          });
         },
         onError: ({ error }) => {
           this.logFailure('ai.stream.failure', run.request, startedAt, error);
+          void this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
+            status: 'failed',
+            provider: this.modelFactory.getProviderName(),
+            model: this.modelFactory.getModelName(),
+            capability: String(run.request.action),
+            action: String(run.request.action),
+            promptName: run.promptName,
+            inputParts: [run.request.text],
+            durationMs: Date.now() - startedAt,
+            ...run.contextVersions,
+          });
         },
       });
     } catch (error) {
@@ -132,6 +218,25 @@ export class AiService {
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
     const prompt = this.promptRegistry.build(request);
+    const promptName = this.promptRegistry.registryNameFor(request.action);
+
+    let contextVersions: ResolvedAiRun['contextVersions'] = {};
+    if (input.executionId && this.reliability) {
+      try {
+        const detail = await this.reliability.getExecution(userId, input.executionId);
+        const ctx = detail.contextVersion;
+        contextVersions = {
+          ...(ctx.memoryVersion ? { memoryVersion: ctx.memoryVersion } : {}),
+          ...(ctx.systemContextVersion ? { systemContextVersion: ctx.systemContextVersion } : {}),
+          ...(ctx.openapiHash ? { openapiVersion: ctx.openapiHash } : {}),
+          ...(ctx.jiraUpdatedAt || ctx.jiraIssueKey
+            ? { jiraVersion: ctx.jiraUpdatedAt ?? ctx.jiraIssueKey }
+            : {}),
+        };
+      } catch {
+        // best-effort — AI must not fail if reliability lookup fails
+      }
+    }
 
     return {
       request,
@@ -139,6 +244,9 @@ export class AiService {
       messages: prompt.messages,
       maxOutputTokens: this.clampTokens(settings.maxOutputTokens),
       requestTimeoutMs: ai.requestTimeoutMs,
+      promptName,
+      contextVersions,
+      ...(input.executionId ? { executionId: input.executionId } : {}),
     };
   }
 

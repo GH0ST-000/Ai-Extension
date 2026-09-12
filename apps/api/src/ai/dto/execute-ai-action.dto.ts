@@ -379,6 +379,12 @@ export class ExecuteAiActionDto {
   @ValidateNested()
   @Type(() => ErrorIntelligenceContextDto)
   errorIntelligence?: ErrorIntelligenceContextDto | null;
+
+  /** Day 24 — optional reliability execution linkage for AI audit snapshots. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  executionId?: string | null;
 }
 
 export class ErrorClassificationDto {

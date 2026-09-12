@@ -14,6 +14,9 @@ describe('workflow facts', () => {
     expect(WORKFLOW_FACT_NAMES).toContain('HAS_BLOCKING_FINDINGS');
     expect(WORKFLOW_FACT_NAMES).toContain('CI_TARGET_PASSED');
     expect(WORKFLOW_FACT_NAMES).toContain('PATCH_APPLIED');
+    expect(WORKFLOW_FACT_NAMES).toContain('MULTI_REPO_IMPACT_FOUND');
+    expect(WORKFLOW_FACT_NAMES).toContain('SYSTEM_CONTEXT_PARTIAL');
+    expect(WORKFLOW_FACT_NAMES).toContain('CROSS_REPO_CONTRACT_RISK');
     expect(isKnownWorkflowFactName('HAS_BLOCKING_FINDINGS')).toBe(true);
     expect(isKnownWorkflowFactName('INVENTED_FACT')).toBe(false);
   });

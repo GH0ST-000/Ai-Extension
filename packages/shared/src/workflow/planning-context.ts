@@ -55,6 +55,7 @@ export type BuildPlanningContextInput = {
   confidence?: AgentPlanConfidence;
   assumptions?: string[];
   projectMemory?: ProjectMemorySummary;
+  multiRepoSystem?: PlanningContext['multiRepoSystem'];
 };
 
 function summarizeArtifacts(
@@ -133,6 +134,15 @@ export function buildPlanningContext(input: BuildPlanningContextInput): Planning
   assumptions.push('Project X will not merge the PR.');
   assumptions.push('Project X will not modify Jira.');
   assumptions.push('Every repository write requires separate confirmation.');
+  assumptions.push(
+    'Multi-repo steps are read-only — never plan multi-repo writes, commits, or branch creation.',
+  );
+
+  if (input.multiRepoSystem) {
+    assumptions.push(
+      `Multi-repo analysis is limited to system ${input.multiRepoSystem.name ?? input.multiRepoSystem.systemId} (${input.multiRepoSystem.enabledRepositories} enabled repositories) — not organization-wide.`,
+    );
+  }
 
   if (input.goal.unsupportedRequests.length > 0) {
     assumptions.push(
@@ -160,6 +170,7 @@ export function buildPlanningContext(input: BuildPlanningContextInput): Planning
       }),
     assumptions: [...new Set(assumptions)].slice(0, 12),
     ...(input.projectMemory ? { projectMemory: input.projectMemory } : {}),
+    ...(input.multiRepoSystem ? { multiRepoSystem: input.multiRepoSystem } : {}),
   };
 }
 
@@ -238,6 +249,25 @@ export function formatPlanningContextForPrompt(ctx: PlanningContext): string {
         `- [${rule.confidence.toUpperCase()}][${rule.category}] ${rule.key}: ${rule.text}`,
       );
     }
+  }
+
+  if (ctx.multiRepoSystem) {
+    lines.push(
+      '',
+      'MULTI_REPO_SYSTEM (read-only scope — never org-wide; never plan multi-repo writes):',
+      `systemId=${ctx.multiRepoSystem.systemId}; name=${ctx.multiRepoSystem.name ?? '(unnamed)'}; enabledRepos=${ctx.multiRepoSystem.enabledRepositories}`,
+      'knownRelationships (max 8 summaries):',
+    );
+    if (ctx.multiRepoSystem.knownRelationships.length === 0) {
+      lines.push('(none known yet in selected repositories)');
+    } else {
+      for (const rel of ctx.multiRepoSystem.knownRelationships.slice(0, 8)) {
+        lines.push(`- ${rel}`);
+      }
+    }
+    lines.push(
+      'Scope wording: use “Known … in selected repositories”. Never claim organization-wide coverage.',
+    );
   }
 
   return lines.join('\n');

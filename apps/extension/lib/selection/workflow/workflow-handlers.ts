@@ -1,4 +1,4 @@
-import { AIAction, type WorkflowStepType } from '@project-x/types';
+import { AIAction, type WorkflowArtifactKind, type WorkflowStepType } from '@project-x/types';
 import { WorkflowStepType as Step } from '@project-x/types';
 
 import {
@@ -9,13 +9,14 @@ import {
 } from '../engineering/engineering.store';
 import { useGithubCiStore } from '../ci';
 import { useCIFixSessionStore } from '../ci/fix/ci-fix.store';
+import { githubChangeFromSessions, useMultiRepoStore } from '../multi-repo';
 import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
 import { useGithubReviewDraftStore } from '../review-draft';
 
-export type WorkflowOpenPanel = 'patch' | 'review' | 'comment';
+export type WorkflowOpenPanel = 'patch' | 'review' | 'comment' | 'multi-repo';
 
 export type WorkflowHandlerResult =
-  | { ok: true; summary?: string; artifactKind?: string }
+  | { ok: true; summary?: string; artifactKind?: WorkflowArtifactKind; showPanel?: 'multi-repo' }
   | {
       ok: true;
       needsAiAction: AIAction;
@@ -25,7 +26,7 @@ export type WorkflowHandlerResult =
   | {
       ok: true;
       needsConfirmation: true;
-      openPanel: WorkflowOpenPanel;
+      openPanel: Exclude<WorkflowOpenPanel, 'multi-repo'>;
       summary?: string;
     }
   | {
@@ -46,6 +47,7 @@ export type WorkflowHandlerContext = {
 /**
  * Thin capability handlers — never call Octokit / write APIs directly.
  * Write steps only surface confirmation + which Day 13/14 panel to open.
+ * Day 23 multi-repo steps are READ-ONLY (artifact refs / panel only).
  */
 export function runWorkflowStepHandler(
   type: WorkflowStepType,
@@ -250,6 +252,170 @@ export function runWorkflowStepHandler(
         ok: false,
         message: 'CI fix session or summary unavailable — verify from the CI Fix panel',
         retryable: true,
+      };
+    }
+
+    case Step.BUILD_MULTI_REPO_CONTEXT: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        void multi.loadSystems();
+        return {
+          ok: false,
+          message: 'Select a multi-repo system in the Multi-Repo panel first',
+          retryable: true,
+        };
+      }
+      void multi.buildContext(multi.selectedSystemId);
+      return {
+        ok: true,
+        summary: 'Multi-repo context build started (read-only)',
+        artifactKind: 'multi-repo-context',
+        showPanel: 'multi-repo',
+      };
+    }
+
+    case Step.ANALYZE_CHANGE_IMPACT: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        return {
+          ok: false,
+          message: 'Select a multi-repo system before analyzing change impact',
+          retryable: true,
+        };
+      }
+      const change = githubChangeFromSessions(ctx.sessions);
+      if (!change) {
+        return {
+          ok: false,
+          message: 'GitHub change context unavailable for impact analysis',
+          retryable: true,
+        };
+      }
+      void multi.analyzeImpact(change);
+      return {
+        ok: true,
+        summary: 'Change impact analysis started (read-only)',
+        artifactKind: 'change-impact',
+        showPanel: 'multi-repo',
+      };
+    }
+
+    case Step.TRACE_SYSTEM_FLOW: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        return {
+          ok: false,
+          message: 'Select a multi-repo system before tracing flow',
+          retryable: true,
+        };
+      }
+      const change = githubChangeFromSessions(ctx.sessions);
+      const trigger = change
+        ? {
+            kind: 'pull_request' as const,
+            key: change.pullRequestNumber
+              ? `pr:${change.pullRequestNumber}`
+              : `${change.owner}/${change.repository}`,
+            repository: {
+              provider: 'github' as const,
+              owner: change.owner,
+              repository: change.repository,
+            },
+            summary: change.summary,
+          }
+        : { kind: 'unknown' as const, key: 'workflow', summary: 'Trace from workflow goal' };
+      void multi.traceFlow(trigger);
+      return {
+        ok: true,
+        summary: 'System flow trace started (read-only)',
+        artifactKind: 'system-flow',
+        showPanel: 'multi-repo',
+      };
+    }
+
+    case Step.COMPARE_REQUIREMENT_ACROSS_REPOS: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        return {
+          ok: false,
+          message: 'Select a multi-repo system before comparing requirements',
+          retryable: true,
+        };
+      }
+      const issueKey = ctx.sessions.jiraIssue?.key;
+      if (!issueKey) {
+        return {
+          ok: false,
+          message: 'Jira issue context required to compare requirements across repos',
+          retryable: true,
+        };
+      }
+      void multi.compareReq(issueKey);
+      return {
+        ok: true,
+        summary: 'Requirement coverage comparison started (read-only)',
+        artifactKind: 'requirement-coverage',
+        showPanel: 'multi-repo',
+      };
+    }
+
+    case Step.FIND_API_CONSUMERS: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        return {
+          ok: false,
+          message: 'Select a multi-repo system before finding API consumers',
+          retryable: true,
+        };
+      }
+      const op = ctx.sessions.openApiOperation ?? ctx.sessions.pageSelectedOperation;
+      if (!op?.path) {
+        return {
+          ok: false,
+          message: 'Select an API operation to find known consumers in selected repositories',
+          retryable: true,
+        };
+      }
+      void multi.findApi({
+        path: op.path,
+        method: op.method,
+        operationId: op.operationId,
+      });
+      return {
+        ok: true,
+        summary: 'API consumer search started (read-only)',
+        artifactKind: 'cross-repo-compatibility',
+        showPanel: 'multi-repo',
+      };
+    }
+
+    case Step.FIND_EVENT_CONSUMERS: {
+      const multi = useMultiRepoStore.getState();
+      if (!multi.selectedSystemId) {
+        return {
+          ok: false,
+          message: 'Select a multi-repo system before finding event consumers',
+          retryable: true,
+        };
+      }
+      const topicFromContext = multi.context?.resources.kafkaTopics[0]?.topic;
+      const topicFromFlow =
+        multi.lastFlow?.trigger.kind === 'kafka_topic' ? multi.lastFlow.trigger.key : null;
+      const topicHint = topicFromContext ?? topicFromFlow;
+      if (!topicHint) {
+        return {
+          ok: false,
+          message:
+            'No Kafka topic selected — build multi-repo context or trace flow first to identify a topic',
+          retryable: true,
+        };
+      }
+      void multi.findEvents({ topic: topicHint });
+      return {
+        ok: true,
+        summary: 'Event consumer search started (read-only)',
+        artifactKind: 'cross-repo-compatibility',
+        showPanel: 'multi-repo',
       };
     }
 

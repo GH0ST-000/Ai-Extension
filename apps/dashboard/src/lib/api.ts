@@ -1,20 +1,45 @@
 import type {
+  AddSystemRepositoryRequest,
+  AnalyzeChangeImpactRequest,
   AuthTokenResponse,
   AuthUser,
   CreateProjectMemoryRuleRequest,
+  CreateProjectSystemRequest,
+  DiscoverRelationshipsResponse,
   GitHubConnectionStatus,
   JiraConnectionStatus,
   LearnProjectMemoryResponse,
   ListProjectMemoryResponse,
   LoginRequest,
+  MultiRepoArchitectureContext,
+  MultiRepoChangeImpactAnalysis,
+  MultiRepoEvidence,
+  MultiRepoRequirementCoverage,
   ProjectMemoryItem,
   ProjectProfile,
+  ProjectSystem,
   RegisterRequest,
+  RelatedRepositoryCandidate,
+  RelationshipConfidence,
+  RepositoryIdentity,
+  RepositoryRelationship,
+  SystemFlowTrace,
+  TraceSystemFlowRequest,
   UpdateProjectMemoryRequest,
+  UpdateProjectSystemRequest,
+  UpdateSystemRepositoryRequest,
   UpdateUserSettingsRequest,
   UpsertGitHubConnectionRequest,
   UpsertJiraConnectionRequest,
   UserSettings,
+  WorkflowExecution,
+  WorkflowExecutionDetail,
+  ListWorkflowExecutionsResponse,
+  ResumeExecutionResponse,
+  ReplayPreviewResponse,
+  RetryExecutionResponse,
+  RetryExecutionRequest,
+  ReplayPreviewRequest,
 } from '@project-x/types';
 
 import { clearSession, getAccessToken, setSession } from './auth-storage';
@@ -268,6 +293,271 @@ export async function rejectMemoryCandidate(
     {
       method: 'POST',
       body: JSON.stringify({ candidateId }),
+    },
+  );
+}
+
+/** Day 23 — multi-repo systems (read-only analysis; no auto-add). */
+export type RefreshSystemResponse = {
+  analyzed: number;
+  relationshipsChecked: number;
+  candidates: RelatedRepositoryCandidate[];
+  unavailable: RepositoryIdentity[];
+  truncated: boolean;
+};
+
+export type CompareRequirementRequest = {
+  systemId: string;
+  issueKey: string;
+  criteria?: string[];
+};
+
+export type FindApiConsumersRequest = {
+  method?: string;
+  path: string;
+  operationId?: string;
+};
+
+export type FindEventConsumersRequest = {
+  topic: string;
+  eventType?: string;
+};
+
+export type FindConsumersResponse = {
+  consumers: Array<{
+    repository: RepositoryIdentity;
+    confidence: RelationshipConfidence;
+    evidence?: MultiRepoEvidence[];
+    summary?: string;
+  }>;
+  scope?: {
+    systemId: string;
+    repositoriesAnalyzed: number;
+    truncated?: boolean;
+  };
+};
+
+function systemsPath(suffix = ''): string {
+  return `/systems${suffix}`;
+}
+
+export async function listSystems(): Promise<ProjectSystem[]> {
+  return apiFetch<ProjectSystem[]>(systemsPath());
+}
+
+export async function createSystem(body: CreateProjectSystemRequest): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getSystem(systemId: string): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}`));
+}
+
+export async function updateSystem(
+  systemId: string,
+  body: UpdateProjectSystemRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}`), {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSystem(systemId: string): Promise<void> {
+  await apiFetch<void>(systemsPath(`/${encodeURIComponent(systemId)}`), {
+    method: 'DELETE',
+  });
+}
+
+export async function addSystemRepository(
+  systemId: string,
+  body: AddSystemRepositoryRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}/repositories`), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeSystemRepository(
+  systemId: string,
+  owner: string,
+  repo: string,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(
+    systemsPath(
+      `/${encodeURIComponent(systemId)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    ),
+    { method: 'DELETE' },
+  );
+}
+
+export async function updateSystemRepository(
+  systemId: string,
+  owner: string,
+  repo: string,
+  body: UpdateSystemRepositoryRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(
+    systemsPath(
+      `/${encodeURIComponent(systemId)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    ),
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function refreshSystem(systemId: string): Promise<RefreshSystemResponse> {
+  return apiFetch<RefreshSystemResponse>(systemsPath(`/${encodeURIComponent(systemId)}/refresh`), {
+    method: 'POST',
+  });
+}
+
+export async function listRelationships(systemId: string): Promise<RepositoryRelationship[]> {
+  return apiFetch<RepositoryRelationship[]>(
+    systemsPath(`/${encodeURIComponent(systemId)}/relationships`),
+  );
+}
+
+export async function discoverRelationships(
+  systemId: string,
+): Promise<DiscoverRelationshipsResponse> {
+  return apiFetch<DiscoverRelationshipsResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/relationships/discover`),
+    { method: 'POST' },
+  );
+}
+
+export async function getSystemContext(systemId: string): Promise<MultiRepoArchitectureContext> {
+  return apiFetch<MultiRepoArchitectureContext>(
+    systemsPath(`/${encodeURIComponent(systemId)}/context`),
+  );
+}
+
+export async function analyzeChangeImpact(
+  body: AnalyzeChangeImpactRequest,
+): Promise<MultiRepoChangeImpactAnalysis> {
+  return apiFetch<MultiRepoChangeImpactAnalysis>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/analyze-change-impact`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function traceSystemFlow(body: TraceSystemFlowRequest): Promise<SystemFlowTrace> {
+  return apiFetch<SystemFlowTrace>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/trace-system-flow`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function compareRequirement(
+  body: CompareRequirementRequest,
+): Promise<MultiRepoRequirementCoverage> {
+  return apiFetch<MultiRepoRequirementCoverage>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/compare-requirement`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function findApiConsumers(
+  systemId: string,
+  body: FindApiConsumersRequest,
+): Promise<FindConsumersResponse> {
+  return apiFetch<FindConsumersResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/find-api-consumers`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function findEventConsumers(
+  systemId: string,
+  body: FindEventConsumersRequest,
+): Promise<FindConsumersResponse> {
+  return apiFetch<FindConsumersResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/find-event-consumers`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function reliabilityPath(suffix = ''): string {
+  return `/reliability${suffix}`;
+}
+
+export async function listWorkflowExecutions(): Promise<WorkflowExecution[]> {
+  const response = await apiFetch<ListWorkflowExecutionsResponse>(reliabilityPath('/executions'));
+  return response.executions;
+}
+
+export async function getWorkflowExecution(executionId: string): Promise<WorkflowExecutionDetail> {
+  return apiFetch<WorkflowExecutionDetail>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}`),
+  );
+}
+
+export async function resumeWorkflowExecution(
+  executionId: string,
+): Promise<ResumeExecutionResponse> {
+  return apiFetch<ResumeExecutionResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/resume`),
+    { method: 'POST' },
+  );
+}
+
+export async function previewWorkflowReplay(
+  executionId: string,
+  body: ReplayPreviewRequest = {},
+): Promise<ReplayPreviewResponse> {
+  return apiFetch<ReplayPreviewResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay/preview`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function replayWorkflowExecution(
+  executionId: string,
+  body: ReplayPreviewRequest = {},
+): Promise<WorkflowExecution> {
+  return apiFetch<WorkflowExecution>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function retryWorkflowExecution(
+  executionId: string,
+  body: RetryExecutionRequest,
+): Promise<RetryExecutionResponse> {
+  return apiFetch<RetryExecutionResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/retry`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
     },
   );
 }

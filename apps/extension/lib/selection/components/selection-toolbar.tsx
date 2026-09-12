@@ -45,6 +45,7 @@ import {
   type EngineeringSessionsInput,
 } from '../engineering';
 import { JiraIssuePanel, useJiraSessionStore } from '../jira';
+import { MultiRepoPanel, useMultiRepoStore } from '../multi-repo';
 import {
   OpenApiPanel,
   PrOpenApiChangesButton,
@@ -84,6 +85,8 @@ export function SelectionToolbar() {
   const canReplace = Boolean(editableSnapshot);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const ciView = useGithubCiStore((s) => s.view);
+  const multiRepoPanelOpen = useMultiRepoStore((s) => s.panelOpen);
+  const workflowOpenPanelHint = useWorkflowSessionStore((s) => s.openPanelHint);
   const openCi = useGithubCiStore((s) => s.open);
 
   const documentHref = useDocumentHref();
@@ -639,6 +642,9 @@ export function SelectionToolbar() {
             {phase === 'assistant' && assistant.status === 'menu' ? (
               <div key="menu" className="space-y-1">
                 <EngineeringContextBanner sessions={engineeringSessions} />
+                {multiRepoPanelOpen || workflowOpenPanelHint === 'multi-repo' ? (
+                  <MultiRepoPanel sessions={engineeringSessions} />
+                ) : null}
                 <ActionMenu
                   actions={rankedActions}
                   onSelect={handleSelectAction}
@@ -665,6 +671,15 @@ export function SelectionToolbar() {
                             )}
                           />
                         ) : null}
+                        <div className="px-1 py-1">
+                          <button
+                            type="button"
+                            onClick={() => useMultiRepoStore.getState().setPanelOpen(true)}
+                            className="w-full rounded-lg bg-icon px-2.5 py-1.5 text-left text-[12px] font-semibold text-primary hover:bg-hover"
+                          >
+                            Multi-Repo · Systems
+                          </button>
+                        </div>
                       </div>
                     ) : null
                   }

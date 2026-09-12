@@ -2,7 +2,7 @@
 
 import { type FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type {
   ProjectMemoryCandidate,
   ProjectMemoryCategory,
@@ -10,10 +10,8 @@ import type {
   ProjectMemoryItem,
   ProjectProfile,
 } from '@project-x/types';
-import {
-  PROJECT_MEMORY_CATEGORY_VALUES,
-  ProjectMemoryCategory as Categories,
-} from '@project-x/types';
+import { ProjectMemoryCategory as Categories } from '@project-x/types';
+import { EXPLICIT_PROJECT_RULE_CATEGORIES } from '@project-x/shared';
 
 import {
   ApiError,
@@ -98,6 +96,7 @@ function profileChipCounts(profile: ProjectProfile | null): { label: string; cou
 
 function MemoryPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [owner, setOwner] = useState(() => searchParams.get('owner')?.trim() ?? '');
   const [repo, setRepo] = useState(() => searchParams.get('repo')?.trim() ?? '');
   const [items, setItems] = useState<ProjectMemoryItem[]>([]);
@@ -172,6 +171,17 @@ function MemoryPageContent() {
     };
   }, [searchParams]);
 
+  const syncRepoToUrl = useCallback(
+    (nextOwner: string, nextRepo: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('owner', nextOwner);
+      params.set('repo', nextRepo);
+      const query = params.toString();
+      router.replace(query ? `/app/memory?${query}` : '/app/memory');
+    },
+    [router, searchParams],
+  );
+
   const refresh = useCallback(async () => {
     if (!canQuery) {
       return;
@@ -188,6 +198,7 @@ function MemoryPageContent() {
       setMemoryVersion(list.memoryVersion);
       setProfile(nextProfile);
       setLoaded(true);
+      syncRepoToUrl(ownerTrimmed, repoTrimmed);
     } catch (err) {
       setLoaded(true);
       setItems([]);
@@ -197,7 +208,7 @@ function MemoryPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [canQuery, ownerTrimmed, repoTrimmed]);
+  }, [canQuery, ownerTrimmed, repoTrimmed, syncRepoToUrl]);
 
   async function onLoad(event?: FormEvent) {
     event?.preventDefault();
@@ -335,7 +346,7 @@ function MemoryPageContent() {
 
   const categoryOptions = useMemo(
     () =>
-      PROJECT_MEMORY_CATEGORY_VALUES.map((category) => ({
+      EXPLICIT_PROJECT_RULE_CATEGORIES.map((category) => ({
         value: category,
         label: formatCategory(category),
       })),

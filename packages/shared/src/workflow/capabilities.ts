@@ -307,6 +307,103 @@ export const CAPABILITY_CATALOG: Record<WorkflowStepType, WorkflowCapabilityDefi
     costClass: 'LOW',
     preconditions: [{ type: 'USER_SELECTED_TARGET' }],
   },
+  [Step.BUILD_MULTI_REPO_CONTEXT]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Build multi-repo context',
+    description:
+      'Assemble a bounded multi-repository architecture context for the selected system scope.',
+    plannerVisible: true,
+    consumes: [],
+    produces: ['multi-repo-context'],
+    costClass: 'MEDIUM',
+    preconditions: [
+      { type: 'HAS_CONTEXT', context: 'github' },
+      { type: 'PROVIDER_CONNECTED', provider: 'github' },
+    ],
+  },
+  [Step.ANALYZE_CHANGE_IMPACT]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Analyze change impact',
+    description:
+      'Analyze cross-repository change impact for the bound PR/change within the selected system.',
+    plannerVisible: true,
+    consumes: ['multi-repo-context'],
+    produces: ['change-impact', 'cross-repo-compatibility'],
+    costClass: 'HIGH',
+    preconditions: [
+      { type: 'HAS_ARTIFACT', artifactKind: 'multi-repo-context' },
+      { type: 'ARTIFACT_CURRENT', artifactKind: 'multi-repo-context' },
+      { type: 'HAS_CONTEXT', context: 'github' },
+    ],
+  },
+  [Step.TRACE_SYSTEM_FLOW]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Trace system flow',
+    description:
+      'Trace a typed end-to-end system flow across selected repositories (HTTP, events, services).',
+    plannerVisible: true,
+    consumes: ['multi-repo-context'],
+    produces: ['system-flow'],
+    costClass: 'HIGH',
+    preconditions: [
+      { type: 'HAS_ARTIFACT', artifactKind: 'multi-repo-context' },
+      { type: 'ARTIFACT_CURRENT', artifactKind: 'multi-repo-context' },
+    ],
+  },
+  [Step.COMPARE_REQUIREMENT_ACROSS_REPOS]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Compare requirement across repos',
+    description:
+      'Compare a Jira/requirement against selected repositories for end-to-end coverage gaps.',
+    plannerVisible: true,
+    consumes: ['multi-repo-context'],
+    produces: ['requirement-coverage'],
+    costClass: 'HIGH',
+    preconditions: [
+      { type: 'HAS_ARTIFACT', artifactKind: 'multi-repo-context' },
+      { type: 'ARTIFACT_CURRENT', artifactKind: 'multi-repo-context' },
+    ],
+  },
+  [Step.FIND_API_CONSUMERS]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Find API consumers',
+    description:
+      'Find known HTTP/API consumers of a selected operation within the selected system repositories.',
+    plannerVisible: true,
+    consumes: ['multi-repo-context'],
+    produces: ['cross-repo-compatibility'],
+    costClass: 'MEDIUM',
+    preconditions: [
+      { type: 'HAS_ARTIFACT', artifactKind: 'multi-repo-context' },
+      { type: 'HAS_CONTEXT', context: 'github' },
+    ],
+  },
+  [Step.FIND_EVENT_CONSUMERS]: {
+    mutationRisk: 'NONE',
+    executionMode: 'AUTO_READ',
+    requiredContext: ['github'],
+    title: 'Find event consumers',
+    description:
+      'Find known Kafka/event consumers of a selected topic within the selected system repositories.',
+    plannerVisible: true,
+    consumes: ['multi-repo-context'],
+    produces: ['cross-repo-compatibility'],
+    costClass: 'MEDIUM',
+    preconditions: [
+      { type: 'HAS_ARTIFACT', artifactKind: 'multi-repo-context' },
+      { type: 'HAS_CONTEXT', context: 'github' },
+    ],
+  },
 };
 
 export function getCapability(type: WorkflowStepType): WorkflowCapabilityDefinition {

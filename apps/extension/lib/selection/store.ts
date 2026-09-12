@@ -27,6 +27,7 @@ import { useJiraSessionStore } from './jira';
 import { useOpenApiSessionStore } from './openapi';
 import { useEngineeringSessionStore } from './engineering';
 import { useWorkflowSessionStore } from './workflow';
+import { getActiveReliabilityExecutionId } from './reliability/reliability-hooks';
 import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
 
 type SelectionToolbarState = {
@@ -334,6 +335,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           customPrompt: prompt,
           context: pageContext,
           errorIntelligence,
+          executionId: getActiveReliabilityExecutionId(),
         }),
         {
           signal: abortController.signal,

@@ -45,6 +45,13 @@ import {
   type EngineeringSessionsInput,
 } from '../engineering/engineering.store';
 import {
+  reliabilityCheckpoint,
+  reliabilityComplete,
+  reliabilityEvent,
+  reliabilityFail,
+  reliabilityStart,
+} from '../reliability/reliability-hooks';
+import {
   allStepsTerminal,
   canSkipStep,
   findNextRunnableStep,
@@ -52,6 +59,7 @@ import {
   type WorkflowEngineConditionState,
 } from './workflow-engine';
 import { parseOwnerRepo, useProjectMemoryStore } from '../../project-memory';
+import { useMultiRepoStore } from '../multi-repo';
 import { runWorkflowStepHandler, type WorkflowOpenPanel } from './workflow-handlers';
 import { buildPlannerPrompt, type WorkflowAvailableFlags } from './workflow-planner-prompt';
 
@@ -307,6 +315,50 @@ function factsForSucceededStep(
       return [createWorkflowFact('REVIEW_DRAFT_READY', true, stepId)];
     case Step.BUILD_ENGINEERING_CONTEXT:
       return [createWorkflowFact('HAS_ENGINEERING_CONTEXT', true, stepId)];
+    case Step.BUILD_MULTI_REPO_CONTEXT:
+      return [createWorkflowFact('SYSTEM_CONTEXT_PARTIAL', false, stepId)];
+    case Step.ANALYZE_CHANGE_IMPACT: {
+      const impact = useMultiRepoStore.getState().lastImpact;
+      const highCount =
+        impact?.impactedRepositories.filter((i) => i.likelihood === 'high').length ?? 0;
+      return [
+        createWorkflowFact(
+          'MULTI_REPO_IMPACT_FOUND',
+          Boolean(impact?.impactedRepositories.length),
+          stepId,
+        ),
+        createWorkflowFact('HIGH_IMPACT_REPOSITORY_COUNT', highCount, stepId),
+        createWorkflowFact(
+          'CROSS_REPO_CONTRACT_RISK',
+          Boolean(impact?.risks.some((r) => r.severity === 'high' || r.severity === 'medium')),
+          stepId,
+        ),
+      ];
+    }
+    case Step.TRACE_SYSTEM_FLOW: {
+      const flow = useMultiRepoStore.getState().lastFlow;
+      return [createWorkflowFact('SYSTEM_FLOW_INCOMPLETE', Boolean(flow?.gaps.length), stepId)];
+    }
+    case Step.FIND_API_CONSUMERS: {
+      const consumers = useMultiRepoStore.getState().lastConsumers;
+      return [
+        createWorkflowFact(
+          'KNOWN_API_CONSUMER_FOUND',
+          Boolean(consumers?.consumers.length),
+          stepId,
+        ),
+      ];
+    }
+    case Step.FIND_EVENT_CONSUMERS: {
+      const consumers = useMultiRepoStore.getState().lastConsumers;
+      return [
+        createWorkflowFact(
+          'KNOWN_EVENT_CONSUMER_FOUND',
+          Boolean(consumers?.consumers.length),
+          stepId,
+        ),
+      ];
+    }
     default:
       return [];
   }
@@ -421,11 +473,18 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
         })) ?? undefined)
       : undefined;
 
+    const multiRepo = useMultiRepoStore.getState();
+    if (multiRepo.systems.length === 0) {
+      await multiRepo.loadSystems();
+    }
+    const multiRepoSystem = useMultiRepoStore.getState().planningSummary() ?? undefined;
+
     const planningContext = buildPlanningContext({
       goal: agentGoal,
       binding,
       available: availableForPlanning(sessions, binding),
       ...(projectMemory ? { projectMemory } : {}),
+      ...(multiRepoSystem ? { multiRepoSystem } : {}),
     });
     const planningContextText = formatPlanningContextForPrompt(planningContext);
     const flags = flagsFromSessions(sessions);
@@ -562,6 +621,21 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       pendingAgentGoal: agentGoal,
       lastError: null,
     });
+
+    void (async () => {
+      await reliabilityStart({
+        workflowId: session.id,
+        goal: session.goal,
+        binding: session.contextBinding,
+      });
+      await reliabilityEvent('PLANNING_COMPLETED', {
+        message: 'Planner produced a validated plan',
+      });
+      await reliabilityCheckpoint('PLANNING_COMPLETE', 'Planning Complete', {
+        stepCount: enrichedPlan.steps.length,
+      });
+    })();
+
     return true;
   },
 
@@ -651,7 +725,12 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
 
     if (!nextStep) {
       if (allStepsTerminal(working.plan, working.stepResults)) {
-        set({ session: finishWithOutcome(working) });
+        const finished = finishWithOutcome(working);
+        set({ session: finished });
+        void reliabilityComplete(
+          finished.status === 'COMPLETED' ? 'completed' : 'failed',
+          finished.artifacts,
+        );
       } else {
         set({ session: working });
       }
@@ -746,6 +825,25 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
 
     if ('needsUserInput' in handlerResult && handlerResult.needsUserInput) {
       get().pauseForUserInput(nextStep.id, handlerResult.options, handlerResult.prompt);
+      return;
+    }
+
+    if ('showPanel' in handlerResult && handlerResult.showPanel === 'multi-repo') {
+      useMultiRepoStore.getState().setPanelOpen(true);
+      set({ openPanelHint: 'multi-repo' });
+    }
+
+    const artifactKind =
+      'artifactKind' in handlerResult && handlerResult.artifactKind
+        ? handlerResult.artifactKind
+        : undefined;
+    if (artifactKind) {
+      get().markStepSucceeded(nextStep.id, handlerResult.summary, {
+        id: createId(artifactKind),
+        kind: artifactKind,
+        summary: handlerResult.summary,
+        createdAt: nowIso(),
+      });
       return;
     }
 
@@ -854,6 +952,8 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       openPanelHint: null,
       userInput: null,
     });
+    void reliabilityEvent('WORKFLOW_CANCELLED', { message: 'Workflow cancelled' });
+    void reliabilityComplete('cancelled', session.artifacts);
   },
 
   retryStep: () => {
@@ -934,6 +1034,16 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
         provenanceStatus: 'CURRENT',
         binding: artifact.binding ?? session.contextBinding,
       });
+      if (artifact.kind === 'generated-patch' || artifact.kind === 'prepared-patch') {
+        void reliabilityCheckpoint('PATCH_GENERATED', 'Patch Generated', {
+          artifactId: artifact.id,
+          kind: artifact.kind,
+        });
+        void reliabilityEvent('PATCH_GENERATED', {
+          artifactId: artifact.id,
+          message: artifact.kind,
+        });
+      }
     }
     const stepFacts = factsForSucceededStep(step?.type, stepId);
     const facts = upsertWorkflowFacts(session.facts ?? [], stepFacts);
@@ -983,6 +1093,12 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       pendingAiAction: null,
       lastError: message,
     });
+    void reliabilityFail({
+      code: 'WORKFLOW_STEP_FAILED',
+      message,
+      stage: stepId,
+    });
+    void reliabilityComplete('failed', session.artifacts);
   },
 
   notifyAssistantSuccess: (action, content) => {

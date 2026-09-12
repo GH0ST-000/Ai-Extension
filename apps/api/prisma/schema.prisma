@@ -32,6 +32,10 @@ model User {
   githubConnection GitHubConnection?
   jiraConnection   JiraConnection?
   projectMemories  ProjectMemory[]
+  projectSystems   ProjectSystem[]
+  repositoryRelationships RepositoryRelationship[]
+  workflowExecutions WorkflowExecution[]
+  promptSnapshots  PromptSnapshot[]
 
   @@map("users")
 }
@@ -113,4 +117,190 @@ model ProjectMemory {
   @@index([userId, owner, repository, key], map: "project_memory_user_repo_key_idx")
   @@index([userId, provider, owner, repository, category, key, scopeFingerprint], map: "project_memory_lookup_idx")
   @@map("project_memories")
+}
+
+/**
+ * Day 23 — user-scoped multi-repository system grouping.
+ * No org/team sharing. Relationships are typed edges, not a graph DB.
+ */
+model ProjectSystem {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  primaryProvider   String   @default("github") @map("primary_provider")
+  primaryOwner      String   @map("primary_owner")
+  primaryRepository String   @map("primary_repository")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  repositories      ProjectSystemRepository[]
+  relationships     RepositoryRelationship[]
+
+  @@index([userId])
+  @@map("project_systems")
+}
+
+model ProjectSystemRepository {
+  id         String        @id @default(cuid())
+  systemId   String        @map("system_id")
+  system     ProjectSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  provider   String        @default("github")
+  owner      String
+  repository String
+  role       String        @default("unknown")
+  enabled    Boolean       @default(true)
+  source     String        @default("user_selected")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@unique([systemId, provider, owner, repository])
+  @@index([systemId])
+  @@map("project_system_repositories")
+}
+
+model RepositoryRelationship {
+  id               String        @id @default(cuid())
+  userId           String        @map("user_id")
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  systemId         String        @map("system_id")
+  system           ProjectSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  fromOwner        String        @map("from_owner")
+  fromRepository   String        @map("from_repository")
+  toOwner          String        @map("to_owner")
+  toRepository     String        @map("to_repository")
+  type             String
+  resourceKind     String?       @map("resource_kind")
+  resourceKey      String?       @map("resource_key")
+  confidence       String
+  status           String        @default("active")
+  freshnessJson    Json?         @map("freshness_json")
+  provenanceJson   Json          @map("provenance_json")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  lastValidatedAt  DateTime?     @map("last_validated_at")
+
+  @@index([userId, systemId])
+  @@index([systemId, type, status])
+  @@index([systemId, fromOwner, fromRepository])
+  @@index([systemId, toOwner, toRepository])
+  @@index([systemId, resourceKind, resourceKey])
+  @@map("repository_relationships")
+}
+
+/**
+ * Day 24 — Reliability Engine.
+ * Durable workflow executions, audit events, prompt snapshots, checkpoints, failures.
+ * Does not duplicate extension WorkflowArtifact session storage; stores refs/lineage only.
+ */
+model WorkflowExecution {
+  id                 String   @id
+  userId             String   @map("user_id")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflowId         String   @map("workflow_id")
+  executionNumber    Int      @map("execution_number")
+  trigger            String
+  status             String
+  healthScore        Int      @default(100) @map("health_score")
+  healthBand         String   @default("Excellent") @map("health_band")
+  startedAt          DateTime @map("started_at")
+  completedAt        DateTime? @map("completed_at")
+  durationMs         Int?     @map("duration_ms")
+  parentExecutionId  String?  @map("parent_execution_id")
+  goal               String?
+  contextVersionJson Json     @map("context_version_json")
+  snapshotJson       Json?    @map("snapshot_json")
+  lineageJson        Json?    @map("lineage_json")
+  healthSignalsJson  Json?    @map("health_signals_json")
+  aiRequestsJson     Json?    @map("ai_requests_json")
+  promptSnapshotId   String?  @map("prompt_snapshot_id")
+  promptSnapshot     PromptSnapshot? @relation(fields: [promptSnapshotId], references: [id], onDelete: SetNull)
+  resumeAvailable    Boolean  @default(false) @map("resume_available")
+  replayAvailable    Boolean  @default(true) @map("replay_available")
+  artifactCount      Int      @default(0) @map("artifact_count")
+  failureCount       Int      @default(0) @map("failure_count")
+  retryCount         Int      @default(0) @map("retry_count")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  auditEvents        WorkflowAuditEvent[]
+  checkpoints        ExecutionCheckpoint[]
+  failures           ExecutionFailure[]
+
+  @@unique([userId, workflowId, executionNumber])
+  @@index([userId, startedAt])
+  @@index([userId, workflowId])
+  @@index([userId, status])
+  @@map("workflow_executions")
+}
+
+model WorkflowAuditEvent {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  executionId String   @map("execution_id")
+  execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  workflowId  String   @map("workflow_id")
+  type        String
+  timestamp   DateTime
+  stepId      String?  @map("step_id")
+  artifactId  String?  @map("artifact_id")
+  message     String?
+  metadataJson Json?   @map("metadata_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([executionId, timestamp])
+  @@index([userId, workflowId])
+  @@map("workflow_audit_events")
+}
+
+model PromptSnapshot {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  version     Int
+  hash        String
+  capability  String?
+  action      String?
+  body        String   @db.Text
+  truncated   Boolean  @default(false)
+  redacted    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  executions  WorkflowExecution[]
+
+  @@unique([userId, name, hash])
+  @@index([userId, name, version])
+  @@map("prompt_snapshots")
+}
+
+model ExecutionCheckpoint {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  executionId String   @map("execution_id")
+  execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  kind        String
+  label       String
+  stepId      String?  @map("step_id")
+  stateJson   Json     @map("state_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([executionId, createdAt])
+  @@index([userId, executionId])
+  @@map("execution_checkpoints")
+}
+
+model ExecutionFailure {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  executionId      String   @map("execution_id")
+  execution        WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  category         String
+  retryable        Boolean
+  userMessage      String   @map("user_message")
+  technicalReason  String   @map("technical_reason")
+  stage            String?
+  code             String?
+  metadataJson     Json?    @map("metadata_json")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([executionId, createdAt])
+  @@index([userId, category])
+  @@map("execution_failures")
 }

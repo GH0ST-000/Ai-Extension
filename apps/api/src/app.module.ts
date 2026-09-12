@@ -16,6 +16,8 @@ import { GithubModule } from './github/github.module';
 import { JiraModule } from './jira/jira.module';
 import { OpenApiModule } from './openapi/openapi.module';
 import { ProjectMemoryModule } from './project-memory/project-memory.module';
+import { MultiRepoModule } from './multi-repo/multi-repo.module';
+import { ReliabilityModule } from './reliability/reliability.module';
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { ProjectMemoryModule } from './project-memory/project-memory.module';
     JiraModule,
     OpenApiModule,
     ProjectMemoryModule,
+    MultiRepoModule,
+    ReliabilityModule,
     AiModule,
   ],
 })

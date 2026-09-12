@@ -87,4 +87,20 @@ describe('workflow-engine', () => {
     expect(canSkipStep(p, 'a', {}).ok).toBe(true);
     expect(canSkipStep(p, 'a', { a: { stepId: 'a', status: 'SUCCEEDED' } }).ok).toBe(false);
   });
+
+  it('schedules Day 23 multi-repo read steps after context artifact', () => {
+    const p = plan([
+      step('ctx', Step.BUILD_MULTI_REPO_CONTEXT),
+      step('impact', Step.ANALYZE_CHANGE_IMPACT, ['ctx']),
+      step('flow', Step.TRACE_SYSTEM_FLOW, ['ctx']),
+    ]);
+    const results: Record<string, WorkflowStepResult> = {};
+    expect(findNextRunnableStep(p, results, emptyState).step?.id).toBe('ctx');
+
+    results.ctx = { stepId: 'ctx', status: 'SUCCEEDED' };
+    expect(findNextRunnableStep(p, results, emptyState).step?.id).toBe('impact');
+
+    results.impact = { stepId: 'impact', status: 'SUCCEEDED' };
+    expect(findNextRunnableStep(p, results, emptyState).step?.id).toBe('flow');
+  });
 });

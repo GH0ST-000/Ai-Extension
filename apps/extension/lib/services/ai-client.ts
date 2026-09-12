@@ -124,6 +124,7 @@ export function buildAiRequest(input: {
   targetLanguage?: string | null;
   context?: PageContext | null;
   errorIntelligence?: ErrorIntelligenceContext | null;
+  executionId?: string | null;
 }): ExecuteAiActionRequest {
   return {
     action: input.action,
@@ -132,5 +133,6 @@ export function buildAiRequest(input: {
     targetLanguage: input.targetLanguage ?? null,
     context: input.context ?? null,
     errorIntelligence: input.errorIntelligence ?? null,
+    ...(input.executionId ? { executionId: input.executionId } : {}),
   };
 }

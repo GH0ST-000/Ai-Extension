@@ -120,6 +120,33 @@ describe('formatPlanningContextForPrompt', () => {
     expect(text).toContain('stack: NestJS API + React extension');
     expect(text).toContain('memoryVersion=pmv-1-abc');
   });
+
+  it('includes MULTI_REPO_SYSTEM summaries with selected-repo scope wording', () => {
+    const ctx = buildPlanningContext({
+      goal,
+      binding: {},
+      available: {
+        github: {
+          repository: 'acme/pay',
+          prNumber: 42,
+          headSha: 'abc1234',
+          hasPrReport: false,
+        },
+      },
+      multiRepoSystem: {
+        systemId: 'sys-1',
+        name: 'Payments',
+        enabledRepositories: 2,
+        knownRelationships: ['acme/web -[HTTP_CALLS]-> acme/api'],
+      },
+    });
+    const text = formatPlanningContextForPrompt(ctx);
+    expect(text).toContain('MULTI_REPO_SYSTEM');
+    expect(text).toContain('enabledRepos=2');
+    expect(text).toContain('Known … in selected repositories');
+    expect(text).toContain('acme/web -[HTTP_CALLS]-> acme/api');
+    expect(ctx.assumptions.some((a) => /not organization-wide/i.test(a))).toBe(true);
+  });
 });
 
 describe('inferPlanningConfidence', () => {

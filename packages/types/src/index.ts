@@ -3186,6 +3186,9 @@ export interface RecordAiRequestRequest {
   model: string;
   temperature?: number;
   capability?: string;
+  /** Prompt registry name — preferably `prompt-registry:${AIAction}`. */
+  promptName?: string;
+  action?: string;
   promptBody?: string;
   inputParts?: string[];
   outputText?: string;

@@ -14,6 +14,18 @@ import { isKnownProjectMemoryCategory } from './categories';
 import { isUnsafeMemoryRuleText, userExplicitMayStore } from './policy';
 import { containsSensitiveMemoryContent } from './secrets';
 
+/** Categories allowed when a user manually adds an explicit project rule. */
+export const EXPLICIT_PROJECT_RULE_CATEGORIES = [
+  'PROJECT_CONSTRAINT',
+  'USER_PREFERENCE',
+  'TECHNICAL_DECISION',
+  'CODE_CONVENTION',
+  'REVIEW_CONVENTION',
+  'DEPENDENCY_CONVENTION',
+] as const satisfies ReadonlyArray<ProjectMemoryCategory>;
+
+export type ExplicitProjectRuleCategory = (typeof EXPLICIT_PROJECT_RULE_CATEGORIES)[number];
+
 export type ValidateResult<T> =
   | { ok: true; value: T }
   | {
@@ -223,14 +235,7 @@ export function validateCreateRuleInput(
     };
   }
 
-  const allowedRuleCategories = new Set<ProjectMemoryCategory>([
-    Categories.PROJECT_CONSTRAINT,
-    Categories.USER_PREFERENCE,
-    Categories.TECHNICAL_DECISION,
-    Categories.CODE_CONVENTION,
-    Categories.REVIEW_CONVENTION,
-    Categories.DEPENDENCY_CONVENTION,
-  ]);
+  const allowedRuleCategories = new Set<ProjectMemoryCategory>(EXPLICIT_PROJECT_RULE_CATEGORIES);
   if (!allowedRuleCategories.has(input.category)) {
     return {
       ok: false,

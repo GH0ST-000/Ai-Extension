@@ -30,6 +30,13 @@ export function decideRetry(input: {
   }
 
   if (WRITE_STAGES.has(input.stage)) {
+    if (input.writeConfirmed && input.idempotentSafe) {
+      return {
+        allowed: true,
+        reason: `Idempotent write retry for ${input.stage} (attempt ${attempt + 1}/${RELIABILITY_MAX_RETRY_ATTEMPTS}).`,
+        requiresConfirmation: false,
+      };
+    }
     if (input.writeConfirmed && !input.idempotentSafe) {
       return {
         allowed: false,

@@ -18,6 +18,7 @@ import {
   isWorkflowBindingStale,
   markArtifactsStaleForBindingChange,
   normalizeAgentGoal,
+  shouldSkipStepForResume,
   upsertWorkflowFacts,
   validateDeveloperWorkflowPlan,
   wouldExceedBudget,
@@ -27,6 +28,7 @@ import type {
   DeveloperWorkflowPlan,
   DeveloperWorkflowPlanRevision,
   DeveloperWorkflowSession,
+  ExecutionCheckpointKind,
   WorkflowArtifactRef,
   WorkflowContextBinding,
   WorkflowFact,
@@ -45,12 +47,20 @@ import {
   type EngineeringSessionsInput,
 } from '../engineering/engineering.store';
 import {
+  clearReliabilityResumeSkip,
+  getActiveReliabilityExecutionId,
+  getLastReliabilityExecutionId,
+  getReliabilitySkipCompletedThrough,
+  getResumedCompletedStepIds,
   reliabilityCheckpoint,
   reliabilityComplete,
   reliabilityEvent,
   reliabilityFail,
+  reliabilityReplayFromServer,
+  reliabilityResumeFromServer,
   reliabilityStart,
 } from '../reliability/reliability-hooks';
+import { contextVersionFromBinding } from '../../api/reliability';
 import {
   allStepsTerminal,
   canSkipStep,
@@ -125,6 +135,10 @@ type WorkflowStoreState = {
   detectStaleAndPause: (sessions: EngineeringSessionsInput) => boolean;
   clear: () => void;
   isBindingStale: (sessions: EngineeringSessionsInput) => boolean;
+  /** Resume a failed/stale execution from its latest checkpoint (skips completed stages). */
+  resumeFailedExecution: (executionId?: string) => Promise<boolean>;
+  /** Replay creates a fresh execution; write steps still require confirmation. */
+  replayExecution: (executionId?: string) => Promise<boolean>;
 };
 
 function nowIso(): string {
@@ -369,6 +383,179 @@ function touchSession(
   patch: Partial<DeveloperWorkflowSession>,
 ): DeveloperWorkflowSession {
   return { ...session, ...patch, updatedAt: nowIso() };
+}
+
+function completedStepIdsFromSession(session: DeveloperWorkflowSession): string[] {
+  return Object.values(session.stepResults)
+    .filter((result) => result.status === 'SUCCEEDED' || result.status === 'SKIPPED')
+    .map((result) => result.stepId);
+}
+
+function checkpointStateFromSession(
+  session: DeveloperWorkflowSession,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    workflowId: session.id,
+    goal: session.goal.slice(0, 200),
+    completedStepIds: completedStepIdsFromSession(session),
+    ...(session.currentStepId ? { currentStepId: session.currentStepId } : {}),
+    ...(extra ?? {}),
+  };
+}
+
+function reliabilityContextExtras(binding: WorkflowContextBinding): {
+  memoryVersion?: string;
+  systemContextVersion?: string;
+  openapiHash?: string;
+  jiraUpdatedAt?: string;
+} {
+  const memoryVersion = useProjectMemoryStore.getState().memoryVersion ?? undefined;
+  const multi = useMultiRepoStore.getState();
+  const systemContextVersion = multi.context?.system?.id
+    ? `system:${multi.context.system.id}:repos:${multi.enabledRepoKeys.length}`
+    : undefined;
+  return {
+    ...(memoryVersion ? { memoryVersion } : {}),
+    ...(systemContextVersion ? { systemContextVersion } : {}),
+    ...(binding.api?.documentHash ? { openapiHash: binding.api.documentHash } : {}),
+    ...(binding.jira?.updatedAt ? { jiraUpdatedAt: binding.jira.updatedAt } : {}),
+  };
+}
+
+function emitStepReliabilitySignals(
+  session: DeveloperWorkflowSession,
+  stepType: WorkflowStepType | undefined,
+  stepId: string,
+  artifact?: WorkflowArtifactRef,
+): void {
+  if (!stepType) return;
+  const state = checkpointStateFromSession(session, {
+    stepType,
+    ...(artifact ? { artifactId: artifact.id, artifactKind: artifact.kind } : {}),
+  });
+
+  const emit = (
+    kind: ExecutionCheckpointKind,
+    label: string,
+    eventType?: Parameters<typeof reliabilityEvent>[0],
+  ) => {
+    void reliabilityCheckpoint(kind, label, state, stepId);
+    if (eventType) {
+      void reliabilityEvent(eventType, {
+        stepId,
+        ...(artifact ? { artifactId: artifact.id } : {}),
+        message: label,
+      });
+    } else {
+      void reliabilityEvent('CONTEXT_LOADED', {
+        stepId,
+        message: label,
+        metadata: { checkpoint: kind },
+      });
+    }
+  };
+
+  switch (stepType) {
+    case Step.BUILD_ENGINEERING_CONTEXT:
+      emit('GITHUB_CONTEXT_LOADED', 'GitHub Context Loaded');
+      break;
+    case Step.REVIEW_PULL_REQUEST:
+      emit('PR_PARSED', 'PR Parsed');
+      break;
+    case Step.ANALYZE_API_CONTRACT:
+      emit('OPENAPI_LOADED', 'OpenAPI Loaded');
+      break;
+    case Step.SUMMARIZE_JIRA:
+      emit('JIRA_LOADED', 'Jira Loaded');
+      emit('AI_SUMMARY_COMPLETE', 'AI Summary Complete');
+      break;
+    case Step.EXTRACT_ACCEPTANCE_CRITERIA:
+      emit('JIRA_LOADED', 'Jira Loaded');
+      break;
+    case Step.BUILD_MULTI_REPO_CONTEXT:
+      emit('MULTI_REPO_LOADED', 'Multi-Repo Context Loaded');
+      break;
+    case Step.GENERATE_PATCH:
+    case Step.PREPARE_PATCH:
+    case Step.SUGGEST_FIX:
+      emit('PATCH_GENERATED', 'Patch Generated', 'PATCH_GENERATED');
+      break;
+    case Step.APPLY_PATCH:
+      void reliabilityEvent('PATCH_APPLIED', {
+        stepId,
+        ...(artifact ? { artifactId: artifact.id } : {}),
+        message: 'Patch Applied',
+      });
+      break;
+    default:
+      if (artifact?.kind === 'generated-patch' || artifact?.kind === 'prepared-patch') {
+        emit('PATCH_GENERATED', 'Patch Generated', 'PATCH_GENERATED');
+      }
+      break;
+  }
+
+  const memoryVersion = useProjectMemoryStore.getState().memoryVersion;
+  if (
+    memoryVersion &&
+    (stepType === Step.BUILD_ENGINEERING_CONTEXT || stepType === Step.ANALYZE_ENGINEERING_ALIGNMENT)
+  ) {
+    void reliabilityCheckpoint(
+      'PROJECT_MEMORY_LOADED',
+      'Project Memory Loaded',
+      { ...state, memoryVersion },
+      stepId,
+    );
+  }
+}
+
+function applyResumeSkips(session: DeveloperWorkflowSession): DeveloperWorkflowSession {
+  const skipThrough = getReliabilitySkipCompletedThrough();
+  const resumedIds = getResumedCompletedStepIds();
+  if (!skipThrough && resumedIds.length === 0) {
+    return session;
+  }
+
+  const results = { ...session.stepResults };
+  let changed = false;
+  for (const step of session.plan.steps) {
+    const existing = results[step.id];
+    if (existing && (existing.status === 'SUCCEEDED' || existing.status === 'SKIPPED')) {
+      continue;
+    }
+    if (
+      shouldSkipStepForResume({
+        stepType: step.type,
+        skipCompletedThrough: skipThrough ?? 'PLANNING_COMPLETE',
+        completedStepIds: resumedIds,
+        stepId: step.id,
+      })
+    ) {
+      results[step.id] = {
+        stepId: step.id,
+        status: 'SKIPPED',
+        completedAt: nowIso(),
+        summary: `Skipped on resume (${skipThrough ?? 'checkpoint'})`,
+      };
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return session;
+  }
+
+  clearReliabilityResumeSkip();
+  return touchSession(session, {
+    stepResults: results,
+    plan: markPlanStepsReady(session.plan, results),
+    status: 'RUNNING',
+    execution: {
+      ...session.execution,
+      lastError: undefined,
+      completedAt: undefined,
+    },
+  });
 }
 
 function finishWithOutcome(session: DeveloperWorkflowSession): DeveloperWorkflowSession {
@@ -627,13 +814,51 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
         workflowId: session.id,
         goal: session.goal,
         binding: session.contextBinding,
+        ...reliabilityContextExtras(session.contextBinding),
       });
       await reliabilityEvent('PLANNING_COMPLETED', {
         message: 'Planner produced a validated plan',
       });
-      await reliabilityCheckpoint('PLANNING_COMPLETE', 'Planning Complete', {
-        stepCount: enrichedPlan.steps.length,
-      });
+      await reliabilityCheckpoint(
+        'PLANNING_COMPLETE',
+        'Planning Complete',
+        checkpointStateFromSession(session, { stepCount: enrichedPlan.steps.length }),
+      );
+      if (session.contextBinding.jira?.issueKey) {
+        await reliabilityCheckpoint(
+          'JIRA_LOADED',
+          'Jira Loaded',
+          checkpointStateFromSession(session, {
+            issueKey: session.contextBinding.jira.issueKey,
+          }),
+        );
+      }
+      if (session.contextBinding.github?.repository) {
+        await reliabilityCheckpoint(
+          'GITHUB_CONTEXT_LOADED',
+          'GitHub Context Loaded',
+          checkpointStateFromSession(session, {
+            repository: session.contextBinding.github.repository,
+          }),
+        );
+      }
+      if (session.contextBinding.api?.documentHash) {
+        await reliabilityCheckpoint(
+          'OPENAPI_LOADED',
+          'OpenAPI Loaded',
+          checkpointStateFromSession(session, {
+            openapiHash: session.contextBinding.api.documentHash,
+          }),
+        );
+      }
+      const memoryVersion = useProjectMemoryStore.getState().memoryVersion;
+      if (memoryVersion) {
+        await reliabilityCheckpoint(
+          'PROJECT_MEMORY_LOADED',
+          'Project Memory Loaded',
+          checkpointStateFromSession(session, { memoryVersion }),
+        );
+      }
     })();
 
     return true;
@@ -658,9 +883,18 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
   },
 
   advance: () => {
-    const { session, sessionsSnapshot, pendingAiStepId } = get();
-    if (!session || pendingAiStepId) {
+    const { session: rawSession, sessionsSnapshot, pendingAiStepId } = get();
+    if (!rawSession || pendingAiStepId) {
       return;
+    }
+    const session =
+      rawSession.status === 'FAILED' ||
+      rawSession.status === 'STALE' ||
+      rawSession.status === 'RUNNING'
+        ? applyResumeSkips(rawSession)
+        : rawSession;
+    if (session !== rawSession) {
+      set({ session, lastError: null });
     }
     if (session.status === 'AWAITING_CONFIRMATION' || session.status === 'AWAITING_USER_INPUT') {
       return;
@@ -1034,29 +1268,21 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
         provenanceStatus: 'CURRENT',
         binding: artifact.binding ?? session.contextBinding,
       });
-      if (artifact.kind === 'generated-patch' || artifact.kind === 'prepared-patch') {
-        void reliabilityCheckpoint('PATCH_GENERATED', 'Patch Generated', {
-          artifactId: artifact.id,
-          kind: artifact.kind,
-        });
-        void reliabilityEvent('PATCH_GENERATED', {
-          artifactId: artifact.id,
-          message: artifact.kind,
-        });
-      }
     }
     const stepFacts = factsForSucceededStep(step?.type, stepId);
     const facts = upsertWorkflowFacts(session.facts ?? [], stepFacts);
     const results = { ...session.stepResults, [stepId]: result };
+    const nextSession = touchSession(session, {
+      stepResults: results,
+      artifacts,
+      facts,
+      currentStepId: undefined,
+      plan: markPlanStepsReady(session.plan, results),
+      status: 'RUNNING',
+    });
+    emitStepReliabilitySignals(nextSession, step?.type, stepId, artifact);
     set({
-      session: touchSession(session, {
-        stepResults: results,
-        artifacts,
-        facts,
-        currentStepId: undefined,
-        plan: markPlanStepsReady(session.plan, results),
-        status: 'RUNNING',
-      }),
+      session: nextSession,
       pendingAiStepId: null,
       pendingAiAction: null,
     });
@@ -1119,7 +1345,16 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
     if (!session || session.status !== 'AWAITING_CONFIRMATION' || !session.currentStepId) {
       return;
     }
-    get().markStepSucceeded(session.currentStepId, 'Write confirmed by user');
+    const stepId = session.currentStepId;
+    void reliabilityEvent('GITHUB_WRITE_CONFIRMED', {
+      stepId,
+      message: 'Write confirmed by user',
+    });
+    void reliabilityEvent('GITHUB_WRITE_COMPLETED', {
+      stepId,
+      message: 'Write confirmation recorded (no auto-retry without idempotency)',
+    });
+    get().markStepSucceeded(stepId, 'Write confirmed by user');
     set({ openPanelHint: null });
   },
 
@@ -1271,6 +1506,93 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       get().trustedJiraOverride,
     );
     return isWorkflowBindingStale(session.contextBinding, current).stale;
+  },
+
+  resumeFailedExecution: async (executionId) => {
+    const { session } = get();
+    if (
+      !session ||
+      (session.status !== 'FAILED' &&
+        session.status !== 'STALE' &&
+        session.status !== 'NEEDS_ATTENTION')
+    ) {
+      set({ lastError: 'Resume requires a failed or stale workflow session.' });
+      return false;
+    }
+    const targetId =
+      executionId ?? getActiveReliabilityExecutionId() ?? getLastReliabilityExecutionId();
+    if (!targetId) {
+      set({ lastError: 'No reliability execution available to resume.' });
+      return false;
+    }
+
+    const resumed = await reliabilityResumeFromServer(targetId);
+    if (!resumed) {
+      set({ lastError: 'Unable to resume workflow execution.' });
+      return false;
+    }
+
+    const withSkips = applyResumeSkips(
+      touchSession(session, {
+        status: 'RUNNING',
+        currentStepId: undefined,
+        execution: {
+          ...session.execution,
+          lastError: undefined,
+          completedAt: undefined,
+        },
+      }),
+    );
+    set({ session: withSkips, lastError: null, pendingAiStepId: null, pendingAiAction: null });
+    get().advance();
+    return true;
+  },
+
+  replayExecution: async (executionId) => {
+    const { session } = get();
+    if (!session) {
+      set({ lastError: 'Replay requires an existing workflow session.' });
+      return false;
+    }
+    const targetId =
+      executionId ?? getActiveReliabilityExecutionId() ?? getLastReliabilityExecutionId();
+    if (!targetId) {
+      set({ lastError: 'No reliability execution available to replay.' });
+      return false;
+    }
+
+    const replayed = await reliabilityReplayFromServer(targetId, {
+      ...contextVersionFromBinding(session.contextBinding),
+      ...reliabilityContextExtras(session.contextBinding),
+    });
+    if (!replayed) {
+      set({ lastError: 'Unable to replay workflow execution.' });
+      return false;
+    }
+
+    // Fresh execution of the same plan — reset step results; write steps still pause for confirmation.
+    clearReliabilityResumeSkip();
+    const resetResults: Record<string, WorkflowStepResult> = {};
+    set({
+      session: touchSession(session, {
+        status: 'RUNNING',
+        stepResults: resetResults,
+        currentStepId: undefined,
+        plan: markPlanStepsReady(session.plan, resetResults),
+        execution: {
+          startedAt: nowIso(),
+        },
+      }),
+      lastError: replayed.drift.hasDrift
+        ? `Replay started with context drift: ${replayed.drift.summary}`
+        : null,
+      pendingAiStepId: null,
+      pendingAiAction: null,
+      openPanelHint: null,
+      userInput: null,
+    });
+    get().advance();
+    return true;
   },
 }));
 

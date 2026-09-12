@@ -146,6 +146,7 @@ export {
   validateScope,
   normalizeMemoryKey,
   validateCreateRuleInput,
+  EXPLICIT_PROJECT_RULE_CATEGORIES,
 } from './project-memory';
 export type {
   EvaluateCandidateInput,
@@ -153,6 +154,7 @@ export type {
   SelectRelevantMemoryOptions,
   ValidateResult,
   ValidatedCreateRule,
+  ExplicitProjectRuleCategory,
 } from './project-memory';
 
 export { normalizeRepositoryPath } from './ci-fix/normalize-path';
@@ -274,6 +276,8 @@ export {
   createPromptSnapshot,
   resolveNextPromptVersion,
   buildExecutionSnapshot,
+  stepTypesCompletedThroughCheckpoint,
+  shouldSkipStepForResume,
 } from './reliability';
 
 export const APP_NAME = 'Project X' as const;

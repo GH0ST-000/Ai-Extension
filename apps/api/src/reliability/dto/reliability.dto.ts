@@ -250,6 +250,16 @@ export class RecordAiRequestDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(160)
+  promptName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  action?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(20_000)
   promptBody?: string;
 

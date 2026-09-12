@@ -1,6 +1,7 @@
 import type {
   AppendAuditEventRequest,
   CompleteExecutionRequest,
+  ContextDriftSummary,
   CreateCheckpointRequest,
   ExecutionCheckpoint,
   ExecutionContextVersion,
@@ -9,6 +10,7 @@ import type {
   RecordFailureRequest,
   ReliabilityErrorBody,
   ReliabilityErrorCode,
+  ReplayPreviewResponse,
   ResumeExecutionResponse,
   StartWorkflowExecutionRequest,
   WorkflowExecution,
@@ -158,17 +160,58 @@ export async function resumeReliabilityExecution(
   );
 }
 
+export type ReplayExecutionResult = {
+  execution: WorkflowExecution;
+  drift: ContextDriftSummary;
+  requiresWriteConfirmation: boolean;
+};
+
+export async function previewReliabilityReplay(
+  executionId: string,
+  currentContext?: ExecutionContextVersion,
+): Promise<ReplayPreviewResponse> {
+  return reliabilityFetch<ReplayPreviewResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay/preview`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ ...(currentContext ? { currentContext } : {}) }),
+    },
+  );
+}
+
+export async function replayReliabilityExecution(
+  executionId: string,
+  currentContext?: ExecutionContextVersion,
+): Promise<ReplayExecutionResult> {
+  const preview = await previewReliabilityReplay(executionId, currentContext);
+  const execution = await reliabilityFetch<WorkflowExecution>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ ...(currentContext ? { currentContext } : {}) }),
+    },
+  );
+  return {
+    execution,
+    drift: preview.drift,
+    requiresWriteConfirmation: preview.requiresWriteConfirmation,
+  };
+}
+
 export function contextVersionFromBinding(binding: {
-  github?: { repository?: string; pullRequestNumber?: number; headSha?: string };
-  jira?: { issueKey?: string };
+  github?: { repository?: string; prNumber?: number; pullRequestNumber?: number; headSha?: string };
+  jira?: { issueKey?: string; updatedAt?: string };
+  api?: { documentHash?: string; operationKey?: string };
 }): ExecutionContextVersion {
+  const prNumber = binding.github?.prNumber ?? binding.github?.pullRequestNumber;
   return {
     ...(binding.github?.repository ? { repository: binding.github.repository } : {}),
-    ...(binding.github?.pullRequestNumber != null
-      ? { prNumber: binding.github.pullRequestNumber }
-      : {}),
+    ...(prNumber != null ? { prNumber } : {}),
     ...(binding.github?.headSha ? { prSha: binding.github.headSha } : {}),
     ...(binding.jira?.issueKey ? { jiraIssueKey: binding.jira.issueKey } : {}),
+    ...(binding.jira?.updatedAt ? { jiraUpdatedAt: binding.jira.updatedAt } : {}),
+    ...(binding.api?.documentHash ? { openapiHash: binding.api.documentHash } : {}),
+    ...(binding.api?.operationKey ? { openapiDocId: binding.api.operationKey } : {}),
     plannerVersion: 'day21-planning-engine',
   };
 }

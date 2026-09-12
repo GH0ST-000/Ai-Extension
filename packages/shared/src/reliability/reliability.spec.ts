@@ -24,6 +24,7 @@ import {
   resolveNextPromptVersion,
   resumeFromCheckpoint,
   sanitizeSafeMetadata,
+  shouldSkipStepForResume,
 } from './index';
 
 describe('reliability identity', () => {
@@ -100,6 +101,43 @@ describe('failure classification + retry', () => {
     });
     expect(writeRetry.allowed).toBe(false);
     expect(writeRetry.requiresConfirmation).toBe(true);
+
+    const idempotentWrite = decideRetry({
+      stage: 'GITHUB_WRITE',
+      category: 'NETWORK',
+      attempt: 0,
+      writeConfirmed: true,
+      idempotentSafe: true,
+    });
+    expect(idempotentWrite.allowed).toBe(true);
+    expect(idempotentWrite.requiresConfirmation).toBe(false);
+  });
+});
+
+describe('resume skip mapping', () => {
+  it('skips completed step types through a checkpoint', () => {
+    expect(
+      shouldSkipStepForResume({
+        stepType: 'PREPARE_PATCH',
+        skipCompletedThrough: 'PATCH_GENERATED',
+        stepId: 's1',
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipStepForResume({
+        stepType: 'APPLY_PATCH',
+        skipCompletedThrough: 'PATCH_GENERATED',
+        stepId: 's2',
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipStepForResume({
+        stepType: 'APPLY_PATCH',
+        skipCompletedThrough: 'PLANNING_COMPLETE',
+        completedStepIds: ['s2'],
+        stepId: 's2',
+      }),
+    ).toBe(true);
   });
 });
 

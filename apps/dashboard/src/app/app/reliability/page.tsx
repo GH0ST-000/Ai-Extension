@@ -322,6 +322,35 @@ export default function ReliabilityPage() {
                 />
               </div>
 
+              <div className="rounded-xl border border-line bg-panel/80 p-3">
+                <h3 className="text-sm font-semibold text-ink">Context versions</h3>
+                <dl className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  {(
+                    [
+                      ['repository', detail.contextVersion.repository],
+                      ['pr', detail.contextVersion.prNumber?.toString()],
+                      ['prSha', detail.contextVersion.prSha],
+                      ['jira', detail.contextVersion.jiraIssueKey],
+                      ['jiraUpdated', detail.contextVersion.jiraUpdatedAt],
+                      ['openapi', detail.contextVersion.openapiHash],
+                      ['memory', detail.contextVersion.memoryVersion],
+                      ['system', detail.contextVersion.systemContextVersion],
+                      ['planner', detail.contextVersion.plannerVersion],
+                      ['prompt', detail.contextVersion.promptVersion],
+                      ['model', detail.contextVersion.aiModel],
+                      ['provider', detail.contextVersion.aiProvider],
+                    ] as const
+                  ).map(([key, value]) =>
+                    value ? (
+                      <div key={key} className="flex gap-2">
+                        <dt className="font-medium text-ink">{key}</dt>
+                        <dd className="truncate">{value}</dd>
+                      </div>
+                    ) : null,
+                  )}
+                </dl>
+              </div>
+
               {drift ? (
                 <div className="rounded-xl border border-line bg-panel/80 p-3">
                   <h3 className="text-sm font-semibold text-ink">Context drift</h3>
@@ -335,6 +364,22 @@ export default function ReliabilityPage() {
                   </ul>
                 </div>
               ) : null}
+
+              <div className="rounded-xl border border-line bg-panel/80 p-3">
+                <h3 className="text-sm font-semibold text-ink">Checkpoints</h3>
+                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {detail.checkpoints.map((cp) => (
+                    <li key={cp.id}>
+                      <span className="font-medium text-ink">{cp.kind}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{cp.label}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{new Date(cp.createdAt).toLocaleString()}</span>
+                    </li>
+                  ))}
+                  {detail.checkpoints.length === 0 ? <li>No checkpoints.</li> : null}
+                </ul>
+              </div>
 
               <div className="rounded-xl border border-line bg-panel/80 p-3">
                 <h3 className="text-sm font-semibold text-ink">Timeline</h3>
@@ -354,6 +399,34 @@ export default function ReliabilityPage() {
                     <li className="text-xs text-muted-foreground">No timeline events.</li>
                   ) : null}
                 </ol>
+              </div>
+
+              <div className="rounded-xl border border-line bg-panel/80 p-3">
+                <h3 className="text-sm font-semibold text-ink">AI requests</h3>
+                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {detail.aiRequests.map((req, index) => (
+                    <li key={`${req.inputHash}-${index}`}>
+                      <span className="font-medium text-ink">
+                        {req.provider}/{req.model}
+                      </span>
+                      <span className="mx-1">·</span>
+                      <span>{req.status}</span>
+                      {req.promptVersion ? (
+                        <>
+                          <span className="mx-1">·</span>
+                          <span>prompt v{req.promptVersion}</span>
+                        </>
+                      ) : null}
+                      {req.capability ? (
+                        <>
+                          <span className="mx-1">·</span>
+                          <span>{req.capability}</span>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                  {detail.aiRequests.length === 0 ? <li>No AI request snapshots.</li> : null}
+                </ul>
               </div>
 
               <div className="rounded-xl border border-line bg-panel/80 p-3">

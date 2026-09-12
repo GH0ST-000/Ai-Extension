@@ -64,3 +64,5 @@ export {
 } from './prompt-version';
 
 export { buildExecutionSnapshot } from './snapshot';
+
+export { stepTypesCompletedThroughCheckpoint, shouldSkipStepForResume } from './resume-skip';

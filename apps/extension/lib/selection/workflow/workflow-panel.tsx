@@ -494,6 +494,24 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
           >
             New goal
           </button>
+          {status === 'FAILED' || status === 'NEEDS_ATTENTION' ? (
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => void useWorkflowSessionStore.getState().resumeFailedExecution()}
+                className="flex-1 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-secondary hover:text-primary"
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={() => void useWorkflowSessionStore.getState().replayExecution()}
+                className="flex-1 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-secondary hover:text-primary"
+              >
+                Replay
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

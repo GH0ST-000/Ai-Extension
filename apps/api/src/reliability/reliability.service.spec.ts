@@ -195,7 +195,7 @@ describe('ReliabilityService', () => {
     expect(preview.requiresWriteConfirmation).toBe(true);
   });
 
-  it('rejects auto-retry of confirmed GitHub writes', async () => {
+  it('rejects auto-retry of confirmed GitHub writes without idempotency', async () => {
     prisma.workflowExecution.findFirst.mockResolvedValue(executionRow());
     const result = await service.retryExecution('user-1', 'wex_1', {
       stage: 'GITHUB_WRITE',
@@ -204,6 +204,33 @@ describe('ReliabilityService', () => {
     });
     expect(result.decision.allowed).toBe(false);
     expect(result.decision.requiresConfirmation).toBe(true);
+  });
+
+  it('allows idempotent confirmed write retry', async () => {
+    prisma.workflowExecution.findFirst.mockResolvedValue(executionRow());
+    prisma.workflowExecution.update.mockResolvedValue(executionRow({ retryCount: 1 }));
+    prisma.workflowExecution.count.mockResolvedValue(1);
+    prisma.workflowExecution.create.mockResolvedValue(
+      executionRow({
+        id: 'wex_3',
+        executionNumber: 2,
+        trigger: 'retry',
+        parentExecutionId: 'wex_1',
+      }),
+    );
+    prisma.workflowAuditEvent.count.mockResolvedValue(0);
+    prisma.workflowAuditEvent.create.mockResolvedValue({});
+
+    const result = await service.retryExecution('user-1', 'wex_1', {
+      stage: 'GITHUB_WRITE',
+      category: 'NETWORK',
+      writeConfirmed: true,
+      idempotentSafe: true,
+      attempt: 0,
+    });
+
+    expect(result.decision.allowed).toBe(true);
+    expect(result.execution?.trigger).toBe('retry');
   });
 
   it('allows AI fetch retry and creates child execution', async () => {

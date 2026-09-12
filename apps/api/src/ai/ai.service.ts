@@ -30,6 +30,13 @@ type ResolvedAiRun = {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   executionId?: string;
+  promptName: string;
+  contextVersions: {
+    memoryVersion?: string;
+    systemContextVersion?: string;
+    openapiVersion?: string;
+    jiraVersion?: string;
+  };
 };
 
 @Injectable()
@@ -55,8 +62,11 @@ export class AiService {
       provider: this.modelFactory.getProviderName(),
       model: this.modelFactory.getModelName(),
       capability: String(run.request.action),
+      action: String(run.request.action),
+      promptName: run.promptName,
       promptBody: run.instructions,
       inputParts: [run.request.text],
+      ...run.contextVersions,
     });
 
     try {
@@ -91,9 +101,12 @@ export class AiService {
         provider: this.modelFactory.getProviderName(),
         model: this.modelFactory.getModelName(),
         capability: String(run.request.action),
+        action: String(run.request.action),
+        promptName: run.promptName,
         inputParts: [run.request.text],
         outputText: text,
         durationMs: Date.now() - startedAt,
+        ...run.contextVersions,
       });
 
       return text;
@@ -104,8 +117,11 @@ export class AiService {
         provider: this.modelFactory.getProviderName(),
         model: this.modelFactory.getModelName(),
         capability: String(run.request.action),
+        action: String(run.request.action),
+        promptName: run.promptName,
         inputParts: [run.request.text],
         durationMs: Date.now() - startedAt,
+        ...run.contextVersions,
       });
       throw this.toSafeError(error);
     }
@@ -124,8 +140,11 @@ export class AiService {
       provider: this.modelFactory.getProviderName(),
       model: this.modelFactory.getModelName(),
       capability: String(run.request.action),
+      action: String(run.request.action),
+      promptName: run.promptName,
       promptBody: run.instructions,
       inputParts: [run.request.text],
+      ...run.contextVersions,
     });
 
     try {
@@ -155,9 +174,12 @@ export class AiService {
             provider: this.modelFactory.getProviderName(),
             model: this.modelFactory.getModelName(),
             capability: String(run.request.action),
+            action: String(run.request.action),
+            promptName: run.promptName,
             inputParts: [run.request.text],
             outputText: text,
             durationMs: Date.now() - startedAt,
+            ...run.contextVersions,
           });
         },
         onError: ({ error }) => {
@@ -167,8 +189,11 @@ export class AiService {
             provider: this.modelFactory.getProviderName(),
             model: this.modelFactory.getModelName(),
             capability: String(run.request.action),
+            action: String(run.request.action),
+            promptName: run.promptName,
             inputParts: [run.request.text],
             durationMs: Date.now() - startedAt,
+            ...run.contextVersions,
           });
         },
       });
@@ -193,6 +218,25 @@ export class AiService {
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
     const prompt = this.promptRegistry.build(request);
+    const promptName = this.promptRegistry.registryNameFor(request.action);
+
+    let contextVersions: ResolvedAiRun['contextVersions'] = {};
+    if (input.executionId && this.reliability) {
+      try {
+        const detail = await this.reliability.getExecution(userId, input.executionId);
+        const ctx = detail.contextVersion;
+        contextVersions = {
+          ...(ctx.memoryVersion ? { memoryVersion: ctx.memoryVersion } : {}),
+          ...(ctx.systemContextVersion ? { systemContextVersion: ctx.systemContextVersion } : {}),
+          ...(ctx.openapiHash ? { openapiVersion: ctx.openapiHash } : {}),
+          ...(ctx.jiraUpdatedAt || ctx.jiraIssueKey
+            ? { jiraVersion: ctx.jiraUpdatedAt ?? ctx.jiraIssueKey }
+            : {}),
+        };
+      } catch {
+        // best-effort — AI must not fail if reliability lookup fails
+      }
+    }
 
     return {
       request,
@@ -200,6 +244,8 @@ export class AiService {
       messages: prompt.messages,
       maxOutputTokens: this.clampTokens(settings.maxOutputTokens),
       requestTimeoutMs: ai.requestTimeoutMs,
+      promptName,
+      contextVersions,
       ...(input.executionId ? { executionId: input.executionId } : {}),
     };
   }

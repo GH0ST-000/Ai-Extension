@@ -313,12 +313,40 @@ export class ReliabilityService {
     let promptVersion: string | undefined;
     if (input.promptBody) {
       const snap = await this.upsertPromptSnapshot(userId, {
-        name: RELIABILITY_PROMPT_REGISTRY_NAME,
+        name:
+          input.promptName ??
+          (input.capability
+            ? `prompt-registry:${input.capability}`
+            : RELIABILITY_PROMPT_REGISTRY_NAME),
         rawBody: input.promptBody,
         capability: input.capability,
+        action: input.action ?? input.capability,
       });
       promptHash = snap.hash;
       promptVersion = String(snap.version);
+
+      if (!row.promptSnapshotId) {
+        await this.prisma.workflowExecution.update({
+          where: { id: executionId },
+          data: { promptSnapshotId: snap.id },
+        });
+      }
+
+      const ctx = row.contextVersionJson as ExecutionContextVersion;
+      if (!ctx.promptVersion || !ctx.promptHash) {
+        await this.prisma.workflowExecution.update({
+          where: { id: executionId },
+          data: {
+            contextVersionJson: {
+              ...ctx,
+              promptVersion: ctx.promptVersion ?? promptVersion,
+              promptHash: ctx.promptHash ?? promptHash,
+              aiModel: ctx.aiModel ?? input.model,
+              aiProvider: ctx.aiProvider ?? input.provider,
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
     }
 
     const snapshot: AiRequestAuditSnapshot = {
@@ -522,6 +550,16 @@ export class ReliabilityService {
         data: { promptSnapshotId: original.promptSnapshotId },
       });
     }
+
+    await this.appendEventInternal(userId, started.id, started.workflowId, {
+      type: 'REPLAY_STARTED',
+      message: 'Replay execution created',
+      metadata: {
+        parentExecutionId: original.id,
+        hasDrift: preview.drift.hasDrift,
+        requiresWriteConfirmation: true,
+      },
+    });
 
     await this.appendEventInternal(userId, started.id, started.workflowId, {
       type: 'REPLAY_COMPLETED',

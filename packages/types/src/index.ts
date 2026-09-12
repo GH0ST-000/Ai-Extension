@@ -1950,6 +1950,8 @@ export interface PlanningContext {
   limits: PlanningLimitSummary;
   confidence: AgentPlanConfidence;
   assumptions: string[];
+  /** Day 22 — compact project memory for planner prompts. */
+  projectMemory?: ProjectMemorySummary;
 }
 
 export type WorkflowPlanningQuestionType =
@@ -2132,3 +2134,221 @@ export type WorkflowPlanValidationResult =
       message: string;
       details?: Record<string, unknown>;
     };
+
+/** Day 22 — Developer Memory & Project Context budgets. */
+export const PROJECT_MEMORY_MAX_ITEMS_PER_REPO = 80;
+export const PROJECT_MEMORY_MAX_ACTIVE_USER_RULES = 25;
+export const PROJECT_MEMORY_MAX_VALUE_CHARS = 2_000;
+export const PROJECT_MEMORY_MAX_SUMMARY_CHARS = 400;
+export const PROJECT_MEMORY_MAX_PROVENANCE_ENTRIES = 8;
+export const PROJECT_MEMORY_MAX_LEARN_FILES = 36;
+export const PROJECT_MEMORY_MAX_LEARN_BYTES = 180_000;
+export const PROJECT_MEMORY_MAX_RELEVANT_RULES = 12;
+
+export const ProjectMemoryCategory = {
+  ARCHITECTURE: 'ARCHITECTURE',
+  FRAMEWORK: 'FRAMEWORK',
+  CODE_CONVENTION: 'CODE_CONVENTION',
+  NAMING_CONVENTION: 'NAMING_CONVENTION',
+  ERROR_HANDLING: 'ERROR_HANDLING',
+  API_CONVENTION: 'API_CONVENTION',
+  DATABASE_CONVENTION: 'DATABASE_CONVENTION',
+  TESTING_CONVENTION: 'TESTING_CONVENTION',
+  STATE_MANAGEMENT: 'STATE_MANAGEMENT',
+  SECURITY_CONVENTION: 'SECURITY_CONVENTION',
+  CI_CONVENTION: 'CI_CONVENTION',
+  DEPLOYMENT_CONVENTION: 'DEPLOYMENT_CONVENTION',
+  REVIEW_CONVENTION: 'REVIEW_CONVENTION',
+  PROJECT_CONSTRAINT: 'PROJECT_CONSTRAINT',
+  TECHNICAL_DECISION: 'TECHNICAL_DECISION',
+  USER_PREFERENCE: 'USER_PREFERENCE',
+  SERVICE_RESPONSIBILITY: 'SERVICE_RESPONSIBILITY',
+  DIRECTORY_CONVENTION: 'DIRECTORY_CONVENTION',
+  DEPENDENCY_CONVENTION: 'DEPENDENCY_CONVENTION',
+} as const;
+
+export type ProjectMemoryCategory =
+  (typeof ProjectMemoryCategory)[keyof typeof ProjectMemoryCategory];
+
+export const PROJECT_MEMORY_CATEGORY_VALUES = Object.values(
+  ProjectMemoryCategory,
+) as ProjectMemoryCategory[];
+
+export type ProjectMemoryConfidence = 'high' | 'medium' | 'low';
+
+export type ProjectMemoryStatus = 'active' | 'superseded' | 'disputed' | 'archived';
+
+export type ProjectMemoryScope =
+  | { type: 'repository' }
+  | { type: 'directory'; path: string }
+  | { type: 'service'; name: string }
+  | { type: 'file-pattern'; pattern: string }
+  | { type: 'user-project' };
+
+export type ProjectMemoryProvenanceType =
+  | 'user_explicit'
+  | 'repository_observation'
+  | 'workflow_result'
+  | 'review_result'
+  | 'project_setting';
+
+export interface ProjectMemoryProvenance {
+  type: ProjectMemoryProvenanceType;
+  sourceId?: string;
+  repository?: {
+    owner: string;
+    name: string;
+    headSha?: string;
+  };
+  filePath?: string;
+  observedAt: string;
+  summary: string;
+}
+
+export type ProjectMemoryFreshnessStrategy =
+  'static' | 'config-bound' | 'file-bound' | 'repository-head-sensitive' | 'manual';
+
+export interface ProjectMemoryFreshness {
+  strategy: ProjectMemoryFreshnessStrategy;
+  lastValidatedAt?: string;
+  sourceFingerprint?: string;
+}
+
+/** Structured, JSON-serializable memory value — summary is required. */
+export interface ProjectMemoryValue {
+  summary: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ProjectMemoryProjectRef {
+  provider: 'github';
+  owner: string;
+  repository: string;
+}
+
+/** API-facing memory item — no internal user IDs or secrets. */
+export interface ProjectMemoryItem {
+  id: string;
+  project: ProjectMemoryProjectRef;
+  category: ProjectMemoryCategory;
+  key: string;
+  value: ProjectMemoryValue;
+  confidence: ProjectMemoryConfidence;
+  status: ProjectMemoryStatus;
+  provenance: ProjectMemoryProvenance[];
+  scope: ProjectMemoryScope;
+  freshness?: ProjectMemoryFreshness;
+  supersedesMemoryId?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastConfirmedAt?: string;
+}
+
+export type ProjectMemoryCandidateRecommendation = 'auto_accept' | 'ask_user' | 'do_not_store';
+
+export interface ProjectMemoryEvidence {
+  filePath?: string;
+  summary: string;
+  excerpt?: string;
+  observedAt?: string;
+}
+
+export interface ProjectMemoryCandidate {
+  id: string;
+  category: ProjectMemoryCategory;
+  key: string;
+  proposedValue: ProjectMemoryValue;
+  evidence: ProjectMemoryEvidence[];
+  confidence: ProjectMemoryConfidence;
+  recommendation: ProjectMemoryCandidateRecommendation;
+  reason: string;
+  scope?: ProjectMemoryScope;
+}
+
+export interface ProjectProfile {
+  project: ProjectMemoryProjectRef;
+  architecture: ProjectMemoryItem[];
+  conventions: ProjectMemoryItem[];
+  constraints: ProjectMemoryItem[];
+  tooling: ProjectMemoryItem[];
+  preferences: ProjectMemoryItem[];
+  generatedAt: string;
+  memoryVersion: string;
+}
+
+export interface ProjectMemoryRelevantRule {
+  id?: string;
+  category: ProjectMemoryCategory;
+  key: string;
+  text: string;
+  confidence: ProjectMemoryConfidence;
+}
+
+/** Compact planner-facing memory summary. */
+export interface ProjectMemorySummary {
+  version: string;
+  relevantRules: ProjectMemoryRelevantRule[];
+}
+
+export interface ProjectConstraintContext {
+  noNewDependencies?: boolean;
+  rules: { key: string; text: string }[];
+}
+
+export type ProjectMemoryErrorCode =
+  | 'PROJECT_MEMORY_NOT_INITIALIZED'
+  | 'PROJECT_MEMORY_ACCESS_DENIED'
+  | 'PROJECT_MEMORY_ITEM_NOT_FOUND'
+  | 'PROJECT_MEMORY_VALIDATION_FAILED'
+  | 'PROJECT_MEMORY_LIMIT_REACHED'
+  | 'PROJECT_MEMORY_CONFLICT'
+  | 'PROJECT_MEMORY_CANDIDATE_INVALID'
+  | 'PROJECT_MEMORY_EXTRACTION_FAILED'
+  | 'PROJECT_MEMORY_SOURCE_UNAVAILABLE'
+  | 'PROJECT_MEMORY_STALE'
+  | 'PROJECT_MEMORY_SECRET_DETECTED'
+  | 'PROJECT_MEMORY_REFRESH_FAILED'
+  | 'UNKNOWN';
+
+export interface ProjectMemoryErrorBody {
+  code: ProjectMemoryErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface CreateProjectMemoryRuleRequest {
+  owner: string;
+  repository: string;
+  category: ProjectMemoryCategory;
+  key?: string;
+  text: string;
+  scope?: ProjectMemoryScope;
+}
+
+export interface UpdateProjectMemoryRequest {
+  value?: ProjectMemoryValue;
+  status?: ProjectMemoryStatus;
+  scope?: ProjectMemoryScope;
+  text?: string;
+}
+
+export interface LearnProjectMemoryResponse {
+  memoryVersion: string;
+  profile?: ProjectProfile;
+  accepted: ProjectMemoryItem[];
+  candidates: ProjectMemoryCandidate[];
+  supersededIds?: string[];
+}
+
+export interface ListProjectMemoryResponse {
+  items: ProjectMemoryItem[];
+  memoryVersion: string;
+  total: number;
+}
+
+export interface ConfirmMemoryCandidateRequest {
+  candidateId: string;
+  accept: boolean;
+  owner?: string;
+  repository?: string;
+}

@@ -1,7 +1,29 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { WorkflowStepType as Step } from '@project-x/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AIAction, WorkflowStepType as Step } from '@project-x/types';
 
 import { didApprovePlanMutateGithub, useWorkflowSessionStore } from './workflow.store';
+
+vi.mock('../../project-memory', async () => {
+  const actual = (await vi.importActual('../../project-memory')) as Record<string, unknown>;
+  return {
+    ...actual,
+    useProjectMemoryStore: {
+      getState: () => ({
+        fetchSummary: vi.fn().mockResolvedValue({
+          version: 'pmv-1-test',
+          relevantRules: [
+            {
+              category: 'PROJECT_CONSTRAINT',
+              key: 'no-merge',
+              text: 'Never merge from the agent',
+              confidence: 'high',
+            },
+          ],
+        }),
+      }),
+    },
+  };
+});
 
 const validPlanJson = JSON.stringify({
   id: 'plan-test',
@@ -228,16 +250,41 @@ describe('workflow.store', () => {
     ]);
   });
 
-  it('answerPlanningQuestion sets trusted jira and launches planning', () => {
+  it('answerPlanningQuestion sets trusted jira and launches planning', async () => {
     useWorkflowSessionStore.getState().setGoal('Check whether PAY-321 and PAY-322 are implemented');
     useWorkflowSessionStore.getState().requestPlan({});
     expect(useWorkflowSessionStore.getState().session?.status).toBe('AWAITING_CONTEXT_SELECTION');
 
-    useWorkflowSessionStore.getState().answerPlanningQuestion('PAY-321');
+    await useWorkflowSessionStore.getState().answerPlanningQuestion('PAY-321');
+    // answerPlanningQuestion kicks requestPlan which is async when memory may load.
+    await vi.waitFor(() => {
+      expect(useWorkflowSessionStore.getState().pendingPlanGeneration).toBe(true);
+    });
     const state = useWorkflowSessionStore.getState();
     expect(state.trustedJiraOverride).toBe('PAY-321');
-    expect(state.pendingPlanGeneration).toBe(true);
     expect(state.pendingAiLaunch?.action).toBeTruthy();
     expect(state.session).toBeNull();
+  });
+
+  it('includes project memory in planning prompt when github is bound', async () => {
+    useWorkflowSessionStore.getState().setGoal('Review this PR for alignment');
+    await useWorkflowSessionStore.getState().requestPlan({
+      pageSnapshot: {
+        type: 'github',
+        url: 'https://github.com/acme/api/pull/1',
+        title: 'PR',
+        github: {
+          owner: 'acme',
+          repository: 'api',
+          pullRequestNumber: 1,
+          headBranch: 'feat',
+        },
+      },
+    });
+
+    const launch = useWorkflowSessionStore.getState().pendingAiLaunch;
+    expect(launch?.action).toBe(AIAction.PLAN_DEVELOPER_WORKFLOW);
+    expect(launch?.text).toContain('PROJECT_MEMORY');
+    expect(launch?.text).toContain('Never merge from the agent');
   });
 });

@@ -8,10 +8,12 @@ import type {
   UserSettings,
 } from '@project-x/types';
 import { RESPONSE_STYLES } from '@project-x/types';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { GithubPatGuide } from '../../../components/github-pat-guide';
 import { JiraConnectGuide } from '../../../components/jira-connect-guide';
+import { StudioSelect } from '../../../components/studio-select';
 import {
   ApiError,
   deleteGithubConnection,
@@ -268,22 +270,17 @@ export default function SettingsPage() {
                   How verbose the assistant should be in the floating panel.
                 </p>
               </div>
-              <select
+              <StudioSelect
+                id="response-style"
+                label="Response style"
                 value={draft.responseStyle}
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    responseStyle: event.target.value as ResponseStyle,
-                  })
-                }
-                className="rounded-xl border border-line bg-mist px-3 py-2 text-sm font-semibold text-ink outline-none ring-accent/30 focus:ring-2"
-              >
-                {RESPONSE_STYLES.map((style) => (
-                  <option key={style} value={style}>
-                    {STYLE_LABELS[style]}
-                  </option>
-                ))}
-              </select>
+                options={RESPONSE_STYLES.map((style) => ({
+                  value: style,
+                  label: STYLE_LABELS[style],
+                }))}
+                onChange={(responseStyle) => setDraft({ ...draft, responseStyle })}
+                className="sm:w-44 [&>label]:sr-only [&>button]:mt-0"
+              />
             </div>
 
             <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -548,6 +545,25 @@ export default function SettingsPage() {
             </form>
           </div>
         )}
+      </section>
+
+      <section className="rise-in-delay-2 space-y-3">
+        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Project memory</h2>
+        <div className="rounded-3xl border border-line bg-panel/75 p-6 shadow-panel">
+          <p className="font-display text-xl font-semibold tracking-tight text-ink">
+            Learned repository context
+          </p>
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+            Review architecture chips, active rules, learn candidates, and clear memory for a GitHub
+            repo.
+          </p>
+          <Link
+            href="/app/memory"
+            className="mt-4 inline-flex rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110"
+          >
+            Open Memory
+          </Link>
+        </div>
       </section>
 
       <section className="rise-in-delay-2 space-y-3">

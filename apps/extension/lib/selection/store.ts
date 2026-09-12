@@ -27,6 +27,7 @@ import { useJiraSessionStore } from './jira';
 import { useOpenApiSessionStore } from './openapi';
 import { useEngineeringSessionStore } from './engineering';
 import { useWorkflowSessionStore } from './workflow';
+import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -315,10 +316,21 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         ? redactedSelection.trim().slice(0, MAX_ERROR_TEXT_CHARACTERS)
         : selectedText;
 
+      const memoryBlock = await loadProjectMemoryPromptBlock({
+        action,
+        pageContext,
+        lastReviewContext: get().lastReviewContext,
+        bindingRepository:
+          useWorkflowSessionStore.getState().session?.contextBinding.github?.repository ??
+          useEngineeringSessionStore.getState().binding?.github?.repository ??
+          null,
+      });
+      const textWithMemory = prependProjectMemoryBlock(requestText, memoryBlock);
+
       const finalText = await streamAiAction(
         buildAiRequest({
           action,
-          text: requestText,
+          text: textWithMemory,
           customPrompt: prompt,
           context: pageContext,
           errorIntelligence,

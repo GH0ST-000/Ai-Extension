@@ -22,5 +22,6 @@ import { GithubWriteService } from './github-write.service';
     GithubContentService,
     GithubErrorNormalizer,
   ],
+  exports: [GithubContentService, GithubErrorNormalizer],
 })
 export class GithubModule {}

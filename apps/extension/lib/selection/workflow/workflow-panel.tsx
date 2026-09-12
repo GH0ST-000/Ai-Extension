@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DeveloperWorkflowStep } from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
 
+import { parseOwnerRepo, useProjectMemoryStore } from '../../project-memory';
 import type { EngineeringSessionsInput } from '../engineering/engineering.store';
 import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
 import { useGithubReviewDraftStore } from '../review-draft';
-import { useWorkflowSessionStore } from './workflow.store';
+import { bindingFromSessions, useWorkflowSessionStore } from './workflow.store';
 
 export type WorkflowPanelProps = {
   sessions: EngineeringSessionsInput;
@@ -87,6 +88,32 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
   const outcome = session?.outcome;
   const pendingRevision = session?.pendingRevision;
   const planningQuestion = session?.planningQuestions?.[0];
+
+  const githubRepo = useMemo(() => {
+    const binding = session?.contextBinding ?? bindingFromSessions(props.sessions);
+    return parseOwnerRepo(binding.github?.repository);
+  }, [props.sessions, session?.contextBinding]);
+
+  const memoryVersion = useProjectMemoryStore((s) => s.memoryVersion);
+  const memoryItems = useProjectMemoryStore((s) => s.items);
+  const memoryLearning = useProjectMemoryStore((s) => s.learning);
+  const memoryError = useProjectMemoryStore((s) => s.error);
+  const learnMemory = useProjectMemoryStore((s) => s.learn);
+  const loadMemoryList = useProjectMemoryStore((s) => s.loadList);
+
+  useEffect(() => {
+    if (!githubRepo) {
+      return;
+    }
+    void loadMemoryList(githubRepo.owner, githubRepo.repo);
+  }, [githubRepo, loadMemoryList]);
+
+  const handleLearnMemory = useCallback(() => {
+    if (!githubRepo) {
+      return;
+    }
+    void learnMemory(githubRepo.owner, githubRepo.repo);
+  }, [githubRepo, learnMemory]);
 
   return (
     <div
@@ -464,6 +491,34 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
           >
             New goal
           </button>
+        </div>
+      ) : null}
+
+      {githubRepo ? (
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[10px] text-muted">
+              Memory:{' '}
+              <span className="font-medium text-secondary">
+                {memoryItems.length > 0 && memoryVersion
+                  ? memoryVersion.slice(0, 12)
+                  : 'Not learned'}
+              </span>
+            </p>
+            <button
+              type="button"
+              disabled={memoryLearning}
+              onClick={handleLearnMemory}
+              className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold text-accent hover:bg-hover disabled:opacity-40"
+            >
+              {memoryLearning ? 'Learning…' : 'Learn'}
+            </button>
+          </div>
+          {memoryError ? (
+            <p className="mt-1 text-[10px] text-[#e11d48]" role="alert">
+              {memoryError}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

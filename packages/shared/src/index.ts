@@ -125,6 +125,36 @@ export {
 } from './workflow/goal-constraints';
 export { detectWorkflowContextChanges } from './workflow/context-change';
 
+export {
+  isKnownProjectMemoryCategory,
+  PROJECT_MEMORY_CATEGORY_VALUES,
+  categoryRelevanceForCapability,
+  containsSensitiveMemoryContent,
+  redactForMemoryLog,
+  isUnsafeMemoryRuleText,
+  evaluateCandidateRecommendation,
+  canAutoAcceptDeterministicFact,
+  userExplicitMayStore,
+  effectiveCapabilitiesWithProjectConstraints,
+  projectRulesCannotEnableForbidden,
+  extractDeterministicFactsFromConfigs,
+  computeMemoryVersion,
+  selectRelevantMemory,
+  formatProjectMemoryForPrompt,
+  buildProjectConstraintContext,
+  validateMemoryValue,
+  validateScope,
+  normalizeMemoryKey,
+  validateCreateRuleInput,
+} from './project-memory';
+export type {
+  EvaluateCandidateInput,
+  ExtractConfigFile,
+  SelectRelevantMemoryOptions,
+  ValidateResult,
+  ValidatedCreateRule,
+} from './project-memory';
+
 export { normalizeRepositoryPath } from './ci-fix/normalize-path';
 export {
   extractPathsFromText,

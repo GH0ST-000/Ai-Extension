@@ -31,6 +31,7 @@ model User {
   settings     UserSettings?
   githubConnection GitHubConnection?
   jiraConnection   JiraConnection?
+  projectMemories  ProjectMemory[]
 
   @@map("users")
 }
@@ -79,4 +80,37 @@ model JiraConnection {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("jira_connections")
+}
+
+/**
+ * Day 22 — per-user repository-scoped project memory.
+ * Identity: userId + github owner/repo (normalized). No embeddings / vector store.
+ */
+model ProjectMemory {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           String   @default("github")
+  owner              String
+  repository         String
+  category           String
+  key                String
+  valueJson          Json     @map("value_json")
+  confidence         String
+  status             String   @default("active")
+  scopeJson          Json     @map("scope_json")
+  freshnessJson      Json?    @map("freshness_json")
+  provenanceJson     Json     @map("provenance_json")
+  scopeFingerprint   String   @map("scope_fingerprint")
+  supersedesMemoryId String?  @map("supersedes_memory_id")
+  disputedFingerprint String? @map("disputed_fingerprint")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  lastConfirmedAt    DateTime? @map("last_confirmed_at")
+
+  @@index([userId, owner, repository, status], map: "project_memory_user_repo_status_idx")
+  @@index([userId, owner, repository, category], map: "project_memory_user_repo_category_idx")
+  @@index([userId, owner, repository, key], map: "project_memory_user_repo_key_idx")
+  @@index([userId, provider, owner, repository, category, key, scopeFingerprint], map: "project_memory_lookup_idx")
+  @@map("project_memories")
 }

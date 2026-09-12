@@ -15,6 +15,7 @@ import { SettingsModule } from './settings/settings.module';
 import { GithubModule } from './github/github.module';
 import { JiraModule } from './jira/jira.module';
 import { OpenApiModule } from './openapi/openapi.module';
+import { ProjectMemoryModule } from './project-memory/project-memory.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { OpenApiModule } from './openapi/openapi.module';
     GithubModule,
     JiraModule,
     OpenApiModule,
+    ProjectMemoryModule,
     AiModule,
   ],
 })

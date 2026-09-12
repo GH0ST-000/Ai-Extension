@@ -4,6 +4,7 @@ import type {
   PlanningContext,
   PlanningLimitSummary,
   PlanningPolicySummary,
+  ProjectMemorySummary,
   WorkflowArtifactRef,
   WorkflowArtifactSummary,
   WorkflowContextBinding,
@@ -53,6 +54,7 @@ export type BuildPlanningContextInput = {
   artifacts?: Record<string, WorkflowArtifactRef>;
   confidence?: AgentPlanConfidence;
   assumptions?: string[];
+  projectMemory?: ProjectMemorySummary;
 };
 
 function summarizeArtifacts(
@@ -157,6 +159,7 @@ export function buildPlanningContext(input: BuildPlanningContextInput): Planning
         available: input.available,
       }),
     assumptions: [...new Set(assumptions)].slice(0, 12),
+    ...(input.projectMemory ? { projectMemory: input.projectMemory } : {}),
   };
 }
 
@@ -223,6 +226,19 @@ export function formatPlanningContextForPrompt(ctx: PlanningContext): string {
     '',
     'PREFERENCE: REUSE existing fresh artifacts > FETCH > AI ANALYZE > WRITE. Prefer the smallest useful plan.',
   );
+
+  if (ctx.projectMemory && ctx.projectMemory.relevantRules.length > 0) {
+    lines.push(
+      '',
+      'PROJECT_MEMORY (prior facts/rules — current trusted source evidence wins if they conflict):',
+      `memoryVersion=${ctx.projectMemory.version}`,
+    );
+    for (const rule of ctx.projectMemory.relevantRules.slice(0, 12)) {
+      lines.push(
+        `- [${rule.confidence.toUpperCase()}][${rule.category}] ${rule.key}: ${rule.text}`,
+      );
+    }
+  }
 
   return lines.join('\n');
 }

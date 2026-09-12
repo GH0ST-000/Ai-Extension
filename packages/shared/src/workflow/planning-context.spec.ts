@@ -90,6 +90,36 @@ describe('formatPlanningContextForPrompt', () => {
     expect(text).not.toMatch(/api[_-]?key\s*=/i);
     expect(text).not.toMatch(/authorization:/i);
   });
+
+  it('includes PROJECT_MEMORY rules with key and text', () => {
+    const ctx = buildPlanningContext({
+      goal,
+      binding: {},
+      available: {
+        github: {
+          repository: 'acme/pay',
+          prNumber: 42,
+          headSha: 'abc1234',
+          hasPrReport: false,
+        },
+      },
+      projectMemory: {
+        version: 'pmv-1-abc',
+        relevantRules: [
+          {
+            category: 'ARCHITECTURE',
+            key: 'stack',
+            text: 'NestJS API + React extension',
+            confidence: 'high',
+          },
+        ],
+      },
+    });
+    const text = formatPlanningContextForPrompt(ctx);
+    expect(text).toContain('PROJECT_MEMORY');
+    expect(text).toContain('stack: NestJS API + React extension');
+    expect(text).toContain('memoryVersion=pmv-1-abc');
+  });
 });
 
 describe('inferPlanningConfidence', () => {

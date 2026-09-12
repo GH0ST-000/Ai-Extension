@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import type { GitHubFileVersionsRequest, GitHubFileVersionsResponse } from '@project-x/types';
 import { GITHUB_PATCH_MAX_FILE_BYTES } from '@project-x/types';
 
@@ -132,6 +132,53 @@ export class GithubContentService {
     return { ...versions, pullRequestNumber };
   }
 
+  /**
+   * Fetch a single UTF-8 file at a ref (default branch when ref is omitted/empty).
+   * Returns null when the path is missing (404) or not a file.
+   */
+  async fetchRepositoryFileAtRef(
+    userId: string,
+    ownerRaw: string,
+    repositoryRaw: string,
+    pathRaw: string,
+    ref?: string,
+  ): Promise<string | null> {
+    const owner = ownerRaw.trim();
+    const repository = repositoryRaw.trim();
+    this.assertRepoIdentity(owner, repository);
+
+    const path = normalizeRepositoryPath(pathRaw);
+    if (!path) {
+      return null;
+    }
+
+    const token = await this.requireToken(userId);
+    const refTrimmed = typeof ref === 'string' ? ref.trim() : '';
+    try {
+      return await this.fetchTextFileAtRef({
+        token,
+        owner,
+        repository,
+        path,
+        ...(refTrimmed ? { ref: refTrimmed } : {}),
+      });
+    } catch (err) {
+      // Treat non-file / unsupported paths as missing for read helpers (e.g. learn).
+      if (err instanceof HttpException) {
+        const body = err.getResponse();
+        if (
+          body &&
+          typeof body === 'object' &&
+          'code' in body &&
+          (body as { code?: string }).code === 'PATCH_UNSUPPORTED'
+        ) {
+          return null;
+        }
+      }
+      throw err;
+    }
+  }
+
   private assertRepoIdentity(owner: string, repository: string): void {
     if (!owner || !repository || owner === 'unknown' || repository === 'unknown') {
       throw this.errors.toHttpException('PATCH_INVALID', 'owner and repository are required.');
@@ -183,6 +230,7 @@ export class GithubContentService {
 
   /**
    * Returns UTF-8 file text, or null when the path is missing at ref (404).
+   * When `ref` is omitted, GitHub Contents API uses the repository default branch.
    * Throws for directories, oversized blobs, or non-text encodings.
    */
   private async fetchTextFileAtRef(input: {
@@ -190,12 +238,12 @@ export class GithubContentService {
     owner: string;
     repository: string;
     path: string;
-    ref: string;
+    ref?: string;
   }): Promise<string | null> {
-    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/contents/${input.path
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}?ref=${encodeURIComponent(input.ref)}`;
+    const encodedPath = input.path.split('/').map(encodeURIComponent).join('/');
+    const base = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/contents/${encodedPath}`;
+    const url =
+      input.ref && input.ref.trim() ? `${base}?ref=${encodeURIComponent(input.ref.trim())}` : base;
 
     let response: Response;
     try {

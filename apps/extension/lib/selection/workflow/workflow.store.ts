@@ -51,6 +51,7 @@ import {
   markPlanStepsReady,
   type WorkflowEngineConditionState,
 } from './workflow-engine';
+import { parseOwnerRepo, useProjectMemoryStore } from '../../project-memory';
 import { runWorkflowStepHandler, type WorkflowOpenPanel } from './workflow-handlers';
 import { buildPlannerPrompt, type WorkflowAvailableFlags } from './workflow-planner-prompt';
 
@@ -86,8 +87,8 @@ type WorkflowStoreState = {
 
   setGoal: (goal: string) => void;
   beginPlanGeneration: () => void;
-  requestPlan: (sessions: EngineeringSessionsInput) => void;
-  answerPlanningQuestion: (optionId: string) => void;
+  requestPlan: (sessions: EngineeringSessionsInput) => void | Promise<void>;
+  answerPlanningQuestion: (optionId: string) => void | Promise<void>;
   consumePendingAiLaunch: () => WorkflowPendingAiLaunch | null;
   ingestPlan: (content: string) => boolean;
   approvePlan: () => void;
@@ -362,7 +363,7 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
     set({ pendingPlanGeneration: true, lastError: null });
   },
 
-  requestPlan: (sessions) => {
+  requestPlan: async (sessions) => {
     const goal = get().draftGoal.trim();
     if (!goal) {
       set({ lastError: 'Enter a goal before generating a plan.' });
@@ -413,10 +414,18 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       return;
     }
 
+    const parsedRepo = parseOwnerRepo(binding.github?.repository);
+    const projectMemory = parsedRepo
+      ? ((await useProjectMemoryStore.getState().fetchSummary(parsedRepo.owner, parsedRepo.repo, {
+          capability: 'PLANNING',
+        })) ?? undefined)
+      : undefined;
+
     const planningContext = buildPlanningContext({
       goal: agentGoal,
       binding,
       available: availableForPlanning(sessions, binding),
+      ...(projectMemory ? { projectMemory } : {}),
     });
     const planningContextText = formatPlanningContextForPrompt(planningContext);
     const flags = flagsFromSessions(sessions);
@@ -459,7 +468,7 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
     });
 
     const sessions = sessionsSnapshot ?? {};
-    get().requestPlan(sessions);
+    return get().requestPlan(sessions);
   },
 
   consumePendingAiLaunch: () => {

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const navItems = [
   { href: '/app', label: 'Overview', hint: 'Workspace pulse' },
+  { href: '/app/memory', label: 'Memory', hint: 'Project context' },
   { href: '/app/settings', label: 'Settings', hint: 'Preferences' },
 ] as const;
 

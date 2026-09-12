@@ -1,10 +1,16 @@
 import type {
   AuthTokenResponse,
   AuthUser,
+  CreateProjectMemoryRuleRequest,
   GitHubConnectionStatus,
   JiraConnectionStatus,
+  LearnProjectMemoryResponse,
+  ListProjectMemoryResponse,
   LoginRequest,
+  ProjectMemoryItem,
+  ProjectProfile,
   RegisterRequest,
+  UpdateProjectMemoryRequest,
   UpdateUserSettingsRequest,
   UpsertGitHubConnectionRequest,
   UpsertJiraConnectionRequest,
@@ -174,4 +180,94 @@ export async function deleteJiraConnection(): Promise<void> {
   await apiFetch<void>('/settings/jira', {
     method: 'DELETE',
   });
+}
+
+function projectMemoryPath(owner: string, repo: string, suffix = ''): string {
+  return `/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/memory${suffix}`;
+}
+
+export type CreateProjectMemoryRuleBody = Omit<
+  CreateProjectMemoryRuleRequest,
+  'owner' | 'repository'
+>;
+
+export async function listProjectMemory(
+  owner: string,
+  repo: string,
+): Promise<ListProjectMemoryResponse> {
+  return apiFetch<ListProjectMemoryResponse>(projectMemoryPath(owner, repo));
+}
+
+export async function getProjectMemoryProfile(
+  owner: string,
+  repo: string,
+): Promise<ProjectProfile> {
+  return apiFetch<ProjectProfile>(projectMemoryPath(owner, repo, '/profile'));
+}
+
+export async function createProjectMemoryRule(
+  owner: string,
+  repo: string,
+  body: CreateProjectMemoryRuleBody,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, '/rules'), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProjectMemory(
+  owner: string,
+  repo: string,
+  id: string,
+  body: UpdateProjectMemoryRequest,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, `/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function clearProjectMemory(
+  owner: string,
+  repo: string,
+): Promise<{ archived: number }> {
+  return apiFetch<{ archived: number }>(projectMemoryPath(owner, repo, '/clear'), {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+export async function learnProjectMemory(
+  owner: string,
+  repo: string,
+): Promise<LearnProjectMemoryResponse> {
+  return apiFetch<LearnProjectMemoryResponse>(projectMemoryPath(owner, repo, '/learn'), {
+    method: 'POST',
+  });
+}
+
+export async function confirmMemoryCandidate(
+  owner: string,
+  repo: string,
+  candidateId: string,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, '/candidates/confirm'), {
+    method: 'POST',
+    body: JSON.stringify({ candidateId }),
+  });
+}
+
+export async function rejectMemoryCandidate(
+  owner: string,
+  repo: string,
+  candidateId: string,
+): Promise<{ rejected: true; candidateId: string }> {
+  return apiFetch<{ rejected: true; candidateId: string }>(
+    projectMemoryPath(owner, repo, '/candidates/reject'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ candidateId }),
+    },
+  );
 }

@@ -62,6 +62,24 @@ export class ApiError extends Error {
   }
 }
 
+export type WorkspaceIdGetter = () => string | null | undefined;
+
+let workspaceIdGetter: WorkspaceIdGetter | null = null;
+
+/** Set by WorkspaceProvider so product API calls can attach X-Workspace-Id. */
+export function setWorkspaceIdGetter(getter: WorkspaceIdGetter | null): void {
+  workspaceIdGetter = getter;
+}
+
+export function getWorkspaceIdForRequest(): string | null {
+  const value = workspaceIdGetter?.();
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export type ServiceHealthStatus = 'up' | 'down';
 
 export type TerminusHealthResponse = {
@@ -100,7 +118,10 @@ export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
   return (await response.json()) as TerminusHealthResponse;
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit & { auth?: boolean }): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  init?: RequestInit & { auth?: boolean; workspaceId?: string | null },
+): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type') && init?.body) {
     headers.set('Content-Type', 'application/json');
@@ -111,6 +132,12 @@ async function apiFetch<T>(path: string, init?: RequestInit & { auth?: boolean }
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
+  }
+
+  const workspaceId =
+    init?.workspaceId !== undefined ? init.workspaceId : getWorkspaceIdForRequest();
+  if (workspaceId && !headers.has('X-Workspace-Id')) {
+    headers.set('X-Workspace-Id', workspaceId);
   }
 
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {

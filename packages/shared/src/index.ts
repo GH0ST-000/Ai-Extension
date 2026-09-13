@@ -280,6 +280,82 @@ export {
   shouldSkipStepForResume,
 } from './reliability';
 
+export {
+  permissionsForRole,
+  roleHasPermission,
+  normalizeWorkspaceSlug,
+  isValidWorkspaceSlug,
+  personalWorkspaceName,
+  personalWorkspaceSlug,
+} from './workspace';
+
+export {
+  PRODUCT_PLAN_CATALOG_VERSION,
+  buildProductPlanCatalog,
+  DEFAULT_PRODUCT_PLANS,
+  getProductPlan,
+  isProductPlanId,
+  entitlementsAllowFeature,
+  TECHNICAL_MAX_REPOS_PER_SYSTEM,
+  TECHNICAL_MAX_PROJECT_SYSTEMS,
+  TECHNICAL_MAX_WORKSPACE_MEMBERS,
+  effectiveMaxRepositoriesPerSystem,
+  effectiveMaxProjectSystems,
+  effectiveMaxWorkspaceMembers,
+  usagePeriodKey,
+  usagePeriodResetAt,
+  USAGE_METRICS,
+  isUsageMetric,
+} from './billing';
+
+export {
+  createRequestId,
+  createTraceId,
+  createSpanId,
+  createAiOperationId,
+  normalizeIncomingRequestId,
+  resolveRequestId,
+  hashUserIdForTelemetry,
+  isValidRequestId,
+  REDACTED,
+  DEFAULT_REDACTION_LIMITS,
+  redactSensitiveString,
+  redactForTelemetry,
+  safeTelemetryMetadata,
+  AI_MODEL_PRICING_VERSION,
+  DEFAULT_AI_MODEL_PRICING,
+  normalizeModelLabel,
+  findModelPricing,
+  estimateAiCost,
+  normalizeProviderUsage,
+  GITHUB_OPERATIONS,
+  JIRA_OPERATIONS,
+  PADDLE_OPERATIONS,
+  OPENAPI_OPERATIONS,
+  normalizeGithubOperation,
+  normalizeJiraOperation,
+  normalizePaddleOperation,
+  normalizeOpenApiOperation,
+  httpStatusClass,
+  normalizeRouteTemplate,
+  CLIENT_TELEMETRY_EVENTS,
+  isClientTelemetryEvent,
+  isSafeTelemetryComponent,
+  DEFAULT_SLOW_OPERATION_THRESHOLDS,
+  parseSlowThreshold,
+} from './observability';
+export type {
+  RedactionLimits,
+  RedactResult,
+  GithubOperation,
+  JiraOperation,
+  PaddleOperation,
+  OpenApiOperation,
+  RedisOperationGroup,
+  DbOperationGroup,
+  SlowOperationThresholds,
+} from './observability';
+
 export const APP_NAME = 'Project X' as const;
 
 export const SERVICE_NAMES = {

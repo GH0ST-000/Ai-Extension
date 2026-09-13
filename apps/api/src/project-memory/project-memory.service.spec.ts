@@ -9,6 +9,9 @@ function memoryRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'mem-1',
     userId: 'user-1',
+    workspaceId: 'ws_user-1',
+    createdByUserId: 'user-1',
+    visibility: 'workspace',
     provider: 'github',
     owner: 'acme',
     repository: 'app',
@@ -45,6 +48,12 @@ describe('ProjectMemoryService', () => {
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
+    },
+    workspaceMembership: {
+      findFirst: vi.fn(),
     },
   };
   const redis = {
@@ -88,11 +97,15 @@ describe('ProjectMemoryService', () => {
     redis.set.mockResolvedValue('OK');
     redis.get.mockResolvedValue(null);
     redis.del.mockResolvedValue(1);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    const featureGate = { require: vi.fn(async () => undefined) };
     service = new ProjectMemoryService(
       prisma as never,
       redis as never,
       githubConnections as never,
       githubContent as never,
+      featureGate as never,
     );
   });
 
@@ -167,16 +180,38 @@ describe('ProjectMemoryService', () => {
     expect(prisma.projectMemory.create).not.toHaveBeenCalled();
   });
 
-  it('scopes list queries by userId (user isolation)', async () => {
-    prisma.projectMemory.findMany.mockResolvedValue([memoryRow()]);
-    await service.list('user-1', 'acme', 'app');
+  it('scopes list queries by workspace visibility (cross-tenant IDOR)', async () => {
+    prisma.projectMemory.findMany.mockResolvedValue([]);
+    await service.list('user-2', 'acme', 'app');
     expect(prisma.projectMemory.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          userId: 'user-1',
           owner: 'acme',
           repository: 'app',
           status: 'active',
+          OR: [
+            { workspaceId: 'ws_user-2', visibility: 'workspace' },
+            { workspaceId: 'ws_user-2', visibility: 'user', userId: 'user-2' },
+            { workspaceId: null, userId: 'user-2' },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('stores USER_PREFERENCE with user visibility so other members cannot see it', async () => {
+    await service.createRule('user-1', 'acme', 'app', {
+      category: ProjectMemoryCategory.USER_PREFERENCE,
+      text: 'Prefer concise PR summaries.',
+    });
+
+    expect(prisma.projectMemory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          workspaceId: 'ws_user-1',
+          visibility: 'user',
+          category: ProjectMemoryCategory.USER_PREFERENCE,
         }),
       }),
     );

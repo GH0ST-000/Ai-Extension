@@ -1,5 +1,6 @@
 import type { AuthTokenResponse, LoginRequest, RegisterRequest } from '@project-x/types';
 
+import { clearCurrentWorkspaceId } from '../workspace/current-workspace-id';
 import { clearSession, setSession } from './auth-storage';
 
 function getApiBaseUrl(): string {
@@ -64,4 +65,5 @@ export async function register(input: RegisterRequest): Promise<AuthTokenRespons
 
 export async function signOut(): Promise<void> {
   await clearSession();
+  await clearCurrentWorkspaceId();
 }

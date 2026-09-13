@@ -49,17 +49,98 @@ describe('AiService', () => {
     })),
   } as unknown as SettingsService;
 
+  const prisma = {
+    user: { findUnique: vi.fn().mockResolvedValue(null) },
+    workspaceMembership: { findFirst: vi.fn().mockResolvedValue(null) },
+  };
+
+  const featureGate = {
+    assert: vi.fn().mockResolvedValue(undefined),
+    require: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const usage = {
+    consume: vi.fn().mockResolvedValue({
+      allowed: true,
+      metric: 'ai_action',
+      current: 1,
+      limit: 50,
+      remaining: 49,
+      resetAt: '2026-10-01T00:00:00.000Z',
+      upgradeAvailable: true,
+    }),
+  };
+
+  const aiObservability = {
+    createOperationId: vi.fn(() => 'aiop_test'),
+    observeGenerate: vi.fn(
+      async ({ call }: { call: () => Promise<{ result: string; usageRaw?: unknown }> }) => {
+        const { result, usageRaw } = await call();
+        return {
+          result,
+          observation: {
+            aiOperationId: 'aiop_test',
+            traceId: 'trace_test',
+            usage: {
+              inputTokens: (usageRaw as { inputTokens?: number } | undefined)?.inputTokens,
+              outputTokens: (usageRaw as { outputTokens?: number } | undefined)?.outputTokens,
+              totalTokens: (usageRaw as { totalTokens?: number } | undefined)?.totalTokens,
+              providerReported: true,
+            },
+            cost: { source: 'unavailable' as const },
+            durationMs: 12,
+          },
+        };
+      },
+    ),
+    recordStreamSuccess: vi.fn(() => ({
+      aiOperationId: 'aiop_test',
+      usage: { providerReported: false },
+      cost: { source: 'unavailable' as const },
+      durationMs: 10,
+    })),
+    recordStreamFailure: vi.fn(),
+  };
+
+  const requestContext = {
+    get: vi.fn(() => ({ requestId: 'req_test', traceId: 'trace_test' })),
+    patch: vi.fn(),
+    snapshot: vi.fn(() => ({})),
+  };
+
+  const providerHealth = {
+    recordSignal: vi.fn(),
+  };
+
   let service: AiService;
 
   beforeEach(() => {
     generateTextMock.mockReset();
     streamTextMock.mockReset();
     vi.mocked(settingsService.getForUser).mockClear();
-    service = new AiService(promptRegistry, modelFactory, config, settingsService);
+    featureGate.assert.mockClear();
+    usage.consume.mockClear();
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    service = new AiService(
+      promptRegistry,
+      modelFactory,
+      config,
+      settingsService,
+      prisma as never,
+      featureGate as never,
+      usage as never,
+      aiObservability as never,
+      requestContext as never,
+      providerHealth as never,
+    );
   });
 
   it('delegates generateAction to model factory and prompt registry', async () => {
-    generateTextMock.mockResolvedValue({ text: '  Explained text  ' });
+    generateTextMock.mockResolvedValue({
+      text: '  Explained text  ',
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
 
     const result = await service.generateAction('user-1', {
       action: AIAction.EXPLAIN,

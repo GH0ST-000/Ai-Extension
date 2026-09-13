@@ -18,6 +18,11 @@ import { OpenApiModule } from './openapi/openapi.module';
 import { ProjectMemoryModule } from './project-memory/project-memory.module';
 import { MultiRepoModule } from './multi-repo/multi-repo.module';
 import { ReliabilityModule } from './reliability/reliability.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
+import { EntitlementsModule } from './entitlements/entitlements.module';
+import { UsageModule } from './usage/usage.module';
+import { BillingModule } from './billing/billing.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
@@ -38,6 +43,28 @@ import { ReliabilityModule } from './reliability/reliability.module';
         return {
           pinoHttp: {
             level,
+            // Prefer our X-Request-Id; avoid logging bodies/headers with secrets.
+            genReqId: (req: { headers?: Record<string, unknown> }) => {
+              const raw = req.headers?.['x-request-id'];
+              return typeof raw === 'string' && raw.length > 0
+                ? raw
+                : `req_${Date.now().toString(16)}`;
+            },
+            serializers: {
+              req: (req: { id?: string; method?: string; url?: string }) => ({
+                id: req.id,
+                method: req.method,
+                url: req.url,
+              }),
+              res: (res: { statusCode?: number }) => ({
+                statusCode: res.statusCode,
+              }),
+            },
+            customProps: () => ({
+              service: config.get<string>('service') ?? 'api',
+              release: config.get<string>('release'),
+              environment: config.get<string>('nodeEnv'),
+            }),
             transport: isProduction
               ? undefined
               : {
@@ -61,6 +88,7 @@ import { ReliabilityModule } from './reliability/reliability.module';
         },
       }),
     }),
+    ObservabilityModule,
     PrismaModule,
     RedisModule,
     QueuesModule,
@@ -73,6 +101,10 @@ import { ReliabilityModule } from './reliability/reliability.module';
     ProjectMemoryModule,
     MultiRepoModule,
     ReliabilityModule,
+    EntitlementsModule,
+    UsageModule,
+    BillingModule,
+    WorkspacesModule,
     AiModule,
   ],
 })

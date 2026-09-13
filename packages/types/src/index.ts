@@ -2992,8 +2992,19 @@ export interface AiRequestAuditSnapshot {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    cachedInputTokens?: number;
   };
   durationMs?: number;
+  /** Day 26 — time to first token for streaming requests when measurable. */
+  firstTokenLatencyMs?: number;
+  /** Day 26 — operational cost estimate (not billing authority). */
+  estimatedCostUsd?: number;
+  pricingVersion?: string;
+  retryCount?: number;
+  traceId?: string;
+  /** Application-side AI operation id (aiop_...). */
+  aiOperationId?: string;
+  providerRequestId?: string;
   status: 'started' | 'completed' | 'failed';
 }
 
@@ -3194,6 +3205,13 @@ export interface RecordAiRequestRequest {
   outputText?: string;
   tokenUsage?: AiRequestAuditSnapshot['tokenUsage'];
   durationMs?: number;
+  firstTokenLatencyMs?: number;
+  estimatedCostUsd?: number;
+  pricingVersion?: string;
+  retryCount?: number;
+  traceId?: string;
+  aiOperationId?: string;
+  providerRequestId?: string;
   memoryVersion?: string;
   systemContextVersion?: string;
   openapiVersion?: string;
@@ -3266,3 +3284,6 @@ export interface ReliabilityErrorBody {
 export interface ListWorkflowExecutionsResponse {
   executions: WorkflowExecution[];
 }
+
+export * from './saas';
+export * from './observability';

@@ -8,6 +8,7 @@ function executionRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'wex_1',
     userId: 'user-1',
+    workspaceId: 'ws_user-1',
     workflowId: 'wf_1',
     executionNumber: 1,
     trigger: 'user',
@@ -48,6 +49,12 @@ function executionRow(overrides: Record<string, unknown> = {}) {
 
 describe('ReliabilityService', () => {
   const prisma = {
+    user: {
+      findUnique: vi.fn(),
+    },
+    workspaceMembership: {
+      findFirst: vi.fn(),
+    },
     workflowExecution: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
@@ -78,6 +85,8 @@ describe('ReliabilityService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
     prisma.workflowExecution.count.mockResolvedValue(0);
     prisma.workflowAuditEvent.count.mockResolvedValue(0);
     prisma.workflowAuditEvent.create.mockResolvedValue({});
@@ -88,7 +97,7 @@ describe('ReliabilityService', () => {
     service = new ReliabilityService(prisma as never);
   });
 
-  it('starts an execution with audit event and user isolation fields', async () => {
+  it('starts an execution with audit event and workspace isolation fields', async () => {
     const created = executionRow();
     prisma.workflowExecution.create.mockResolvedValue(created);
 
@@ -102,6 +111,7 @@ describe('ReliabilityService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           userId: 'user-1',
+          workspaceId: 'ws_user-1',
           workflowId: 'wf_1',
           executionNumber: 1,
           status: 'running',
@@ -283,9 +293,16 @@ describe('ReliabilityService', () => {
     expect(resumed.execution.trigger).toBe('resume');
   });
 
-  it('enforces user isolation on missing execution', async () => {
+  it('enforces workspace isolation on missing execution (cross-tenant IDOR)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ lastWorkspaceId: 'ws_user-2' });
+    prisma.workspaceMembership.findFirst.mockResolvedValue({ workspaceId: 'ws_user-2' });
     prisma.workflowExecution.findFirst.mockResolvedValue(null);
     await expect(service.getExecution('user-2', 'wex_1')).rejects.toBeInstanceOf(HttpException);
+    expect(prisma.workflowExecution.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'wex_1', workspaceId: 'ws_user-2' },
+      }),
+    );
   });
 
   it('stores artifact lineage refs', async () => {

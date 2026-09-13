@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { knownInSelectedScope, noOrgWideClaim } from '@project-x/shared';
 
 import { cn } from '~/lib/utils/cn';
+import { EntitlementUpgradeCta } from '~/lib/workspace/entitlement-upgrade-cta';
+import { isEntitlementFailureCode } from '~/lib/workspace/entitlement';
 
 import type { EngineeringSessionsInput } from '../engineering/engineering.store';
 import { githubChangeFromSessions, useMultiRepoStore } from './multi-repo.store';
@@ -29,6 +31,7 @@ export function MultiRepoPanel(props: MultiRepoPanelProps) {
   const scopeNote = useMultiRepoStore((s) => s.scopeNote);
   const loading = useMultiRepoStore((s) => s.loading);
   const error = useMultiRepoStore((s) => s.error);
+  const errorCode = useMultiRepoStore((s) => s.errorCode);
   const panelOpen = useMultiRepoStore((s) => s.panelOpen);
   const loadSystems = useMultiRepoStore((s) => s.loadSystems);
   const selectSystem = useMultiRepoStore((s) => s.selectSystem);
@@ -124,9 +127,15 @@ export function MultiRepoPanel(props: MultiRepoPanelProps) {
         </div>
 
         {error ? (
-          <p className="mt-1.5 text-[11px] text-[#e11d48]" role="alert">
-            {error}
-          </p>
+          isEntitlementFailureCode(errorCode) ? (
+            <div className="mt-1.5" role="alert">
+              <EntitlementUpgradeCta code={errorCode} message={error} compact />
+            </div>
+          ) : (
+            <p className="mt-1.5 text-[11px] text-[#e11d48]" role="alert">
+              {error}
+            </p>
+          )
         ) : null}
 
         {partial || scopeNote ? (

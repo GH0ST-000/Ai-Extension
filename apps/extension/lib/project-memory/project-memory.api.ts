@@ -10,6 +10,7 @@ import type {
   UpdateProjectMemoryRequest,
 } from '@project-x/types';
 
+import { applyWorkspaceHeader } from '../api/workspace';
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from '../services/auth-storage';
 
@@ -83,6 +84,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   headers.set('Authorization', `Bearer ${accessToken}`);
   headers.set('Accept', 'application/json');
+  await applyWorkspaceHeader(headers);
 
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
     ...init,

@@ -5,6 +5,8 @@ import type { AuthUser } from '@project-x/types';
 
 import { AuthClientError, login, register, signOut } from './lib/services/auth-client';
 import { getSession } from './lib/services/auth-storage';
+import { useWorkspaceStore } from './lib/workspace/workspace.store';
+import { WorkspaceSwitcher } from './lib/workspace/workspace-switcher';
 
 type Mode = 'login' | 'register';
 
@@ -67,6 +69,9 @@ function IndexPopup() {
       if (!cancelled) {
         setUser(session?.user ?? null);
         setLoading(false);
+        if (session) {
+          void useWorkspaceStore.getState().bootstrap();
+        }
       }
     }
 
@@ -92,6 +97,7 @@ function IndexPopup() {
           : await login({ email, password });
       setUser(result.user);
       setPassword('');
+      void useWorkspaceStore.getState().bootstrap();
     } catch (err) {
       setError(err instanceof AuthClientError ? err.message : 'Unable to authenticate.');
     } finally {
@@ -101,6 +107,7 @@ function IndexPopup() {
 
   async function onSignOut() {
     await signOut();
+    await useWorkspaceStore.getState().clear();
     setUser(null);
   }
 
@@ -122,6 +129,7 @@ function IndexPopup() {
           {user.name?.trim() ? `${user.name} · ` : ''}
           {user.email}
         </p>
+        <WorkspaceSwitcher />
         <p style={{ ...bodyStyle, marginTop: 10 }}>
           Highlight text on any page to open Ask AI. Tune length and context in the dashboard
           settings.

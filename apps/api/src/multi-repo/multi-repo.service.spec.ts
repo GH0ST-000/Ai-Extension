@@ -15,6 +15,8 @@ function systemRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'sys-1',
     userId: 'user-1',
+    workspaceId: 'ws_user-1',
+    createdByUserId: 'user-1',
     name: 'Payments',
     primaryProvider: 'github',
     primaryOwner: 'acme',
@@ -51,12 +53,22 @@ function systemRow(overrides: Record<string, unknown> = {}) {
 
 describe('MultiRepoService', () => {
   const prisma = {
+    user: {
+      findUnique: vi.fn(),
+    },
+    workspaceMembership: {
+      findFirst: vi.fn(),
+    },
     projectSystem: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      count: vi.fn(),
+    },
+    workspaceSubscription: {
+      findUnique: vi.fn(),
     },
     projectSystemRepository: {
       create: vi.fn(),
@@ -99,6 +111,8 @@ describe('MultiRepoService', () => {
       Response.json({ id: 1, full_name: 'acme/api' }, { status: 200 }),
     ) as typeof fetch;
 
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
     prisma.projectSystem.findFirst.mockResolvedValue(systemRow());
     prisma.projectSystem.findMany.mockResolvedValue([systemRow()]);
     prisma.projectSystem.create.mockImplementation(
@@ -142,12 +156,29 @@ describe('MultiRepoService', () => {
     });
     projectMemory.getProfile.mockRejectedValue(new Error('no memory'));
     githubContent.fetchRepositoryFileAtRef.mockResolvedValue(null);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.projectSystem.count.mockResolvedValue(0);
+    prisma.workspaceSubscription.findUnique.mockResolvedValue({ planId: 'team', status: 'active' });
+
+    const featureGate = { require: vi.fn(async () => undefined) };
+    const entitlements = {
+      getEntitlements: vi.fn(async () => ({
+        multiRepoIntelligence: true,
+        maxProjectSystems: 20,
+        maxRepositoriesPerSystem: 12,
+      })),
+    };
+    const usage = { consume: vi.fn(async () => ({ allowed: true })) };
 
     service = new MultiRepoService(
       prisma as never,
       githubConnections as never,
       githubContent as never,
       projectMemory as never,
+      featureGate as never,
+      entitlements as never,
+      usage as never,
     );
   });
 
@@ -169,6 +200,7 @@ describe('MultiRepoService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           userId: 'user-1',
+          workspaceId: 'ws_user-1',
           primaryOwner: 'acme',
           primaryRepository: 'api',
           repositories: {
@@ -192,7 +224,7 @@ describe('MultiRepoService', () => {
     );
   });
 
-  it('enforces user isolation on getSystem', async () => {
+  it('enforces workspace isolation on getSystem (cross-tenant IDOR)', async () => {
     prisma.projectSystem.findFirst.mockResolvedValue(null);
     try {
       await service.getSystem('user-2', 'sys-1');
@@ -203,7 +235,7 @@ describe('MultiRepoService', () => {
     }
     expect(prisma.projectSystem.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'sys-1', userId: 'user-2' },
+        where: { id: 'sys-1', workspaceId: 'ws_user-2' },
       }),
     );
   });

@@ -57,10 +57,29 @@ import { extractPageContext } from '../../context/extract-page-context';
 import { parseGitHubUrl } from '../../context/adapters/github.adapter';
 import { detectJiraKeysInPrSignals } from '@project-x/shared';
 import { buildJiraIssuePromptText } from '../jira/jira.store';
+import { getSession } from '../../services/auth-storage';
+import { useWorkspaceStore } from '../../workspace/workspace.store';
 
 export function SelectionToolbar() {
   useTextSelection();
   useEscapeToDismiss();
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const session = await getSession();
+      if (cancelled || !session) {
+        return;
+      }
+      const state = useWorkspaceStore.getState();
+      if (!state.bootstrapped && !state.loading) {
+        void state.bootstrap();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const phase = useSelectionToolbarStore((s) => s.phase);
   const anchorRect = useSelectionToolbarStore((s) => s.anchorRect);
@@ -855,6 +874,8 @@ export function SelectionToolbar() {
                 key="error"
                 action={assistant.action}
                 message={assistant.message}
+                code={assistant.code}
+                requestId={assistant.referenceId}
                 onRetry={() => {
                   void retry();
                 }}

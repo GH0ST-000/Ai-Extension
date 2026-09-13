@@ -11,8 +11,16 @@ import { ConfigService } from '@nestjs/config';
 import { generateText, streamText } from 'ai';
 import type { ServerResponse } from 'node:http';
 import type { ApiConfig } from '../config/configuration';
+import { FeatureGate } from '../entitlements/feature-gate';
+import { featureForAiAction, usageMetricForAiAction } from '../entitlements/feature-for-ai-action';
+import { AiObservabilityService } from '../observability/ai-observability.service';
+import { ProviderHealthService } from '../observability/provider-health.service';
+import { RequestContextService } from '../observability/request-context.service';
 import { ReliabilityService } from '../reliability/reliability.service';
 import { SettingsService } from '../settings/settings.service';
+import { UsageService } from '../usage/usage.service';
+import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
+import { PrismaService } from '../prisma/prisma.service';
 import type { ExecuteAiActionDto } from './dto/execute-ai-action.dto';
 import type { AiActionRequest } from './interfaces/ai-prompt-definition.interface';
 import { AiModelFactory } from './models/ai-model.factory';
@@ -48,6 +56,12 @@ export class AiService {
     private readonly modelFactory: AiModelFactory,
     private readonly config: ConfigService<ApiConfig, true>,
     private readonly settingsService: SettingsService,
+    private readonly prisma: PrismaService,
+    private readonly featureGate: FeatureGate,
+    private readonly usage: UsageService,
+    private readonly aiObservability: AiObservabilityService,
+    private readonly requestContext: RequestContextService,
+    private readonly providerHealth: ProviderHealthService,
     @Optional()
     @Inject(forwardRef(() => ReliabilityService))
     private readonly reliability?: ReliabilityService,
@@ -56,71 +70,131 @@ export class AiService {
   async generateAction(userId: string, input: ExecuteAiActionDto): Promise<string> {
     const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
+    const provider = this.modelFactory.getProviderName();
+    const model = this.modelFactory.getModelName();
+    const capability = String(run.request.action);
+    const aiOperationId = this.aiObservability.createOperationId();
+
+    this.requestContext.patch({
+      capability,
+      ...(run.executionId ? { executionId: run.executionId } : {}),
+    });
 
     await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
       status: 'started',
-      provider: this.modelFactory.getProviderName(),
-      model: this.modelFactory.getModelName(),
-      capability: String(run.request.action),
-      action: String(run.request.action),
+      provider,
+      model,
+      capability,
+      action: capability,
       promptName: run.promptName,
       promptBody: run.instructions,
       inputParts: [run.request.text],
+      aiOperationId,
+      traceId: this.requestContext.get()?.traceId,
       ...run.contextVersions,
     });
 
     try {
-      const result = await generateText({
-        model: this.modelFactory.getDefaultModel(),
-        instructions: run.instructions,
-        messages: run.messages,
-        maxOutputTokens: run.maxOutputTokens,
-        timeout: run.requestTimeoutMs,
+      const { result: text, observation } = await this.aiObservability.observeGenerate({
+        provider,
+        model,
+        capability,
+        call: async () => {
+          const result = await generateText({
+            model: this.modelFactory.getDefaultModel(),
+            instructions: run.instructions,
+            messages: run.messages,
+            maxOutputTokens: run.maxOutputTokens,
+            timeout: run.requestTimeoutMs,
+          });
+          const out = result.text.trim();
+          if (!out) {
+            throw new ServiceUnavailableException('Unable to generate a response.');
+          }
+          return {
+            result: out,
+            usageRaw: {
+              inputTokens: result.usage?.inputTokens,
+              outputTokens: result.usage?.outputTokens,
+              totalTokens: result.usage?.totalTokens,
+              cachedInputTokens: result.usage?.inputTokenDetails?.cacheReadTokens,
+            },
+          };
+        },
       });
 
-      const text = result.text.trim();
-      if (!text) {
-        throw new ServiceUnavailableException('Unable to generate a response.');
-      }
+      this.providerHealth.recordSignal('ai', true);
 
       this.logger.log({
         msg: 'ai.generate.success',
         action: run.request.action,
-        provider: this.modelFactory.getProviderName(),
-        model: this.modelFactory.getModelName(),
-        durationMs: Date.now() - startedAt,
+        provider,
+        model,
+        durationMs: observation.durationMs,
         inputLength: run.request.text.length,
         outputLength: text.length,
         maxOutputTokens: run.maxOutputTokens,
         contextType: run.request.context?.type ?? null,
         contextHost: this.safeHost(run.request.context?.url),
+        aiOperationId: observation.aiOperationId,
+        inputTokens: observation.usage.inputTokens,
+        outputTokens: observation.usage.outputTokens,
       });
 
       await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
         status: 'completed',
-        provider: this.modelFactory.getProviderName(),
-        model: this.modelFactory.getModelName(),
-        capability: String(run.request.action),
-        action: String(run.request.action),
+        provider,
+        model,
+        capability,
+        action: capability,
         promptName: run.promptName,
         inputParts: [run.request.text],
         outputText: text,
-        durationMs: Date.now() - startedAt,
+        durationMs: observation.durationMs,
+        aiOperationId: observation.aiOperationId,
+        traceId: observation.traceId,
+        ...(observation.usage.inputTokens != null || observation.usage.outputTokens != null
+          ? {
+              tokenUsage: {
+                ...(observation.usage.inputTokens != null
+                  ? { promptTokens: observation.usage.inputTokens }
+                  : {}),
+                ...(observation.usage.outputTokens != null
+                  ? { completionTokens: observation.usage.outputTokens }
+                  : {}),
+                ...(observation.usage.totalTokens != null
+                  ? { totalTokens: observation.usage.totalTokens }
+                  : {}),
+                ...(observation.usage.cachedInputTokens != null
+                  ? { cachedInputTokens: observation.usage.cachedInputTokens }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(observation.cost.totalCostUsd != null
+          ? { estimatedCostUsd: observation.cost.totalCostUsd }
+          : {}),
+        ...(observation.cost.pricingVersion
+          ? { pricingVersion: observation.cost.pricingVersion }
+          : {}),
         ...run.contextVersions,
       });
 
       return text;
     } catch (error) {
+      this.providerHealth.recordSignal('ai', false);
       this.logFailure('ai.generate.failure', run.request, startedAt, error);
       await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
         status: 'failed',
-        provider: this.modelFactory.getProviderName(),
-        model: this.modelFactory.getModelName(),
-        capability: String(run.request.action),
-        action: String(run.request.action),
+        provider,
+        model,
+        capability,
+        action: capability,
         promptName: run.promptName,
         inputParts: [run.request.text],
         durationMs: Date.now() - startedAt,
+        aiOperationId,
+        traceId: this.requestContext.get()?.traceId,
         ...run.contextVersions,
       });
       throw this.toSafeError(error);
@@ -134,16 +208,28 @@ export class AiService {
   ): Promise<AiTextStreamHandle> {
     const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
+    const provider = this.modelFactory.getProviderName();
+    const model = this.modelFactory.getModelName();
+    const capability = String(run.request.action);
+    const aiOperationId = this.aiObservability.createOperationId();
+    let firstTokenAt: number | undefined;
+
+    this.requestContext.patch({
+      capability,
+      ...(run.executionId ? { executionId: run.executionId } : {}),
+    });
 
     await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
       status: 'started',
-      provider: this.modelFactory.getProviderName(),
-      model: this.modelFactory.getModelName(),
-      capability: String(run.request.action),
-      action: String(run.request.action),
+      provider,
+      model,
+      capability,
+      action: capability,
       promptName: run.promptName,
       promptBody: run.instructions,
       inputParts: [run.request.text],
+      aiOperationId,
+      traceId: this.requestContext.get()?.traceId,
       ...run.contextVersions,
     });
 
@@ -155,49 +241,122 @@ export class AiService {
         maxOutputTokens: run.maxOutputTokens,
         abortSignal,
         timeout: run.requestTimeoutMs,
-        onFinish: ({ text }) => {
+        onChunk: () => {
+          if (firstTokenAt == null) firstTokenAt = Date.now();
+        },
+        onFinish: ({ text, usage }) => {
+          const observation = this.aiObservability.recordStreamSuccess({
+            provider,
+            model,
+            capability,
+            aiOperationId,
+            durationMs: Date.now() - startedAt,
+            ...(firstTokenAt != null ? { firstTokenLatencyMs: firstTokenAt - startedAt } : {}),
+            usageRaw: {
+              inputTokens: usage?.inputTokens,
+              outputTokens: usage?.outputTokens,
+              totalTokens: usage?.totalTokens,
+              cachedInputTokens: usage?.inputTokenDetails?.cacheReadTokens,
+            },
+            aborted: abortSignal?.aborted === true,
+          });
+          this.providerHealth.recordSignal('ai', !abortSignal?.aborted);
+
           this.logger.log({
             msg: 'ai.stream.success',
             action: run.request.action,
-            provider: this.modelFactory.getProviderName(),
-            model: this.modelFactory.getModelName(),
-            durationMs: Date.now() - startedAt,
+            provider,
+            model,
+            durationMs: observation.durationMs,
             inputLength: run.request.text.length,
             outputLength: text.length,
             maxOutputTokens: run.maxOutputTokens,
             cancelled: abortSignal?.aborted === true,
             contextType: run.request.context?.type ?? null,
             contextHost: this.safeHost(run.request.context?.url),
+            firstTokenLatencyMs: observation.firstTokenLatencyMs,
+            inputTokens: observation.usage.inputTokens,
+            outputTokens: observation.usage.outputTokens,
           });
+
           void this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
             status: 'completed',
-            provider: this.modelFactory.getProviderName(),
-            model: this.modelFactory.getModelName(),
-            capability: String(run.request.action),
-            action: String(run.request.action),
+            provider,
+            model,
+            capability,
+            action: capability,
             promptName: run.promptName,
             inputParts: [run.request.text],
             outputText: text,
-            durationMs: Date.now() - startedAt,
+            durationMs: observation.durationMs,
+            aiOperationId: observation.aiOperationId,
+            traceId: observation.traceId,
+            ...(observation.firstTokenLatencyMs != null
+              ? { firstTokenLatencyMs: observation.firstTokenLatencyMs }
+              : {}),
+            ...(observation.usage.inputTokens != null || observation.usage.outputTokens != null
+              ? {
+                  tokenUsage: {
+                    ...(observation.usage.inputTokens != null
+                      ? { promptTokens: observation.usage.inputTokens }
+                      : {}),
+                    ...(observation.usage.outputTokens != null
+                      ? { completionTokens: observation.usage.outputTokens }
+                      : {}),
+                    ...(observation.usage.totalTokens != null
+                      ? { totalTokens: observation.usage.totalTokens }
+                      : {}),
+                    ...(observation.usage.cachedInputTokens != null
+                      ? { cachedInputTokens: observation.usage.cachedInputTokens }
+                      : {}),
+                  },
+                }
+              : {}),
+            ...(observation.cost.totalCostUsd != null
+              ? { estimatedCostUsd: observation.cost.totalCostUsd }
+              : {}),
+            ...(observation.cost.pricingVersion
+              ? { pricingVersion: observation.cost.pricingVersion }
+              : {}),
             ...run.contextVersions,
           });
         },
         onError: ({ error }) => {
+          this.providerHealth.recordSignal('ai', false);
+          this.aiObservability.recordStreamFailure({
+            provider,
+            model,
+            capability,
+            aiOperationId,
+            durationMs: Date.now() - startedAt,
+            error,
+          });
           this.logFailure('ai.stream.failure', run.request, startedAt, error);
           void this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
             status: 'failed',
-            provider: this.modelFactory.getProviderName(),
-            model: this.modelFactory.getModelName(),
-            capability: String(run.request.action),
-            action: String(run.request.action),
+            provider,
+            model,
+            capability,
+            action: capability,
             promptName: run.promptName,
             inputParts: [run.request.text],
             durationMs: Date.now() - startedAt,
+            aiOperationId,
+            traceId: this.requestContext.get()?.traceId,
             ...run.contextVersions,
           });
         },
       });
     } catch (error) {
+      this.providerHealth.recordSignal('ai', false);
+      this.aiObservability.recordStreamFailure({
+        provider,
+        model,
+        capability,
+        aiOperationId,
+        durationMs: Date.now() - startedAt,
+        error,
+      });
       this.logFailure('ai.stream.start_failure', run.request, startedAt, error);
       throw this.toSafeError(error);
     }
@@ -217,6 +376,16 @@ export class AiService {
     const ai = this.config.get('ai', { infer: true });
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
+
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.featureGate.require(workspaceId, featureForAiAction(request.action));
+    await this.usage.consume({
+      workspaceId,
+      metric: usageMetricForAiAction(request.action),
+      quantity: 1,
+      ...(input.executionId ? { idempotencyKey: `ai:${input.executionId}:${request.action}` } : {}),
+    });
+
     const prompt = this.promptRegistry.build(request);
     const promptName = this.promptRegistry.registryNameFor(request.action);
 

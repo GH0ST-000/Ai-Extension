@@ -13,17 +13,23 @@ import type {
   RepositoryRelationship,
   SystemFlowTrace,
   TraceSystemFlowRequest,
+  WorkspaceErrorCode,
 } from '@project-x/types';
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from '../services/auth-storage';
+import { applyWorkspaceHeader } from './workspace';
 
 export class MultiRepoApiError extends Error {
   readonly statusCode: number;
   readonly unauthorized: boolean;
-  readonly code: MultiRepoErrorCode | null;
+  readonly code: MultiRepoErrorCode | WorkspaceErrorCode | null;
 
-  constructor(message: string, statusCode: number, code: MultiRepoErrorCode | null = null) {
+  constructor(
+    message: string,
+    statusCode: number,
+    code: MultiRepoErrorCode | WorkspaceErrorCode | null = null,
+  ) {
     super(message);
     this.name = 'MultiRepoApiError';
     this.statusCode = statusCode;
@@ -80,11 +86,11 @@ function systemsPath(suffix = ''): string {
 
 async function parseError(
   response: Response,
-): Promise<{ message: string; code: MultiRepoErrorCode | null }> {
+): Promise<{ message: string; code: MultiRepoErrorCode | WorkspaceErrorCode | null }> {
   try {
     const body = (await response.json()) as {
       message?: string | string[] | MultiRepoErrorBody;
-      code?: MultiRepoErrorCode;
+      code?: MultiRepoErrorCode | WorkspaceErrorCode;
     };
     if (typeof body.code === 'string' && typeof body.message === 'string') {
       return { message: body.message, code: body.code };
@@ -119,6 +125,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   headers.set('Authorization', `Bearer ${accessToken}`);
   headers.set('Accept', 'application/json');
+  await applyWorkspaceHeader(headers);
 
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
     ...init,

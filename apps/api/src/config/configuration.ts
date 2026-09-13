@@ -1,4 +1,4 @@
-import { apiEnvSchema, type ApiEnv } from '@project-x/config';
+import { apiEnvSchema, assertProductionSecurity, type ApiEnv } from '@project-x/config';
 
 export interface ApiConfig {
   nodeEnv: ApiEnv['NODE_ENV'];
@@ -9,6 +9,8 @@ export interface ApiConfig {
   appBaseUrl: string;
   release: string;
   service: string;
+  jsonBodyLimitBytes: number;
+  maxPageSize: number;
   redis: {
     host: string;
     port: number;
@@ -22,6 +24,7 @@ export interface ApiConfig {
     requestTimeoutMs: number;
     maxInputCharacters: number;
     corsOrigins: string[];
+    corsContentScriptOrigins: string[];
   };
   jwt: {
     secret: string;
@@ -49,6 +52,7 @@ export interface ApiConfig {
     traceSampleRate: number;
     metricsScrapeToken: string;
     internalToken: string;
+    healthDetailsToken: string;
     slowHttpMs: number;
     slowAiMs: number;
     slowProviderMs: number;
@@ -79,6 +83,12 @@ function resolveRelease(env: ApiEnv): string {
 
 export default (): ApiConfig => {
   const env = apiEnvSchema.parse(process.env);
+  assertProductionSecurity(env);
+
+  const encryptionKey =
+    env.NODE_ENV === 'production'
+      ? (env.TOKEN_ENCRYPTION_KEY?.trim() as string)
+      : env.TOKEN_ENCRYPTION_KEY?.trim() || env.JWT_SECRET;
 
   return {
     nodeEnv: env.NODE_ENV,
@@ -89,6 +99,8 @@ export default (): ApiConfig => {
     appBaseUrl: env.APP_BASE_URL,
     release: resolveRelease(env),
     service: env.APP_SERVICE || 'api',
+    jsonBodyLimitBytes: env.API_JSON_BODY_LIMIT_BYTES,
+    maxPageSize: env.API_MAX_PAGE_SIZE,
     redis: {
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
@@ -102,13 +114,14 @@ export default (): ApiConfig => {
       requestTimeoutMs: env.AI_REQUEST_TIMEOUT_MS,
       maxInputCharacters: env.AI_MAX_INPUT_CHARACTERS,
       corsOrigins: parseCorsOrigins(env.AI_CORS_ORIGINS),
+      corsContentScriptOrigins: parseCorsOrigins(env.AI_CORS_CONTENT_SCRIPT_ORIGINS),
     },
     jwt: {
       secret: env.JWT_SECRET,
       expiresIn: env.JWT_EXPIRES_IN,
     },
     secrets: {
-      encryptionKey: env.TOKEN_ENCRYPTION_KEY?.trim() || env.JWT_SECRET,
+      encryptionKey,
     },
     paddle: {
       environment: env.PADDLE_ENVIRONMENT,
@@ -128,6 +141,7 @@ export default (): ApiConfig => {
       traceSampleRate: env.OBSERVABILITY_TRACE_SAMPLE_RATE,
       metricsScrapeToken: env.METRICS_SCRAPE_TOKEN ?? '',
       internalToken: env.INTERNAL_OBSERVABILITY_TOKEN ?? '',
+      healthDetailsToken: env.HEALTH_DETAILS_TOKEN ?? '',
       slowHttpMs: env.SLOW_HTTP_MS,
       slowAiMs: env.SLOW_AI_MS,
       slowProviderMs: env.SLOW_PROVIDER_MS,

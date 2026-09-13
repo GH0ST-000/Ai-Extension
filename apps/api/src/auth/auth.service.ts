@@ -38,7 +38,7 @@ export class AuthService {
             create: {},
           },
         },
-        select: { id: true, email: true, name: true },
+        select: { id: true, email: true, name: true, sessionVersion: true },
       });
 
       const workspaceId = `ws_${created.id}`;
@@ -104,16 +104,33 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
+      sessionVersion: user.sessionVersion,
     });
+  }
+
+  /**
+   * Invalidate all outstanding JWTs for this user by bumping sessionVersion.
+   * Clients must also clear local token storage.
+   */
+  async logout(userId: string): Promise<{ ok: true }> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { sessionVersion: { increment: 1 } },
+    });
+    return { ok: true };
   }
 
   private toAuthResponse(user: {
     id: string;
     email: string;
     name: string | null;
+    sessionVersion: number;
   }): AuthTokenResponse {
     const expiresIn = this.config.get('jwt.expiresIn', { infer: true });
-    const accessToken = this.jwt.sign({ sub: user.id, email: user.email }, { expiresIn });
+    const accessToken = this.jwt.sign(
+      { sub: user.id, email: user.email, sv: user.sessionVersion },
+      { expiresIn },
+    );
 
     return {
       accessToken,

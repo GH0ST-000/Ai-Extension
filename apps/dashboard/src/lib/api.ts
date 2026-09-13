@@ -15,6 +15,7 @@ import type {
   MultiRepoChangeImpactAnalysis,
   MultiRepoEvidence,
   MultiRepoRequirementCoverage,
+  OnboardingView,
   ProjectMemoryItem,
   ProjectProfile,
   ProjectSystem,
@@ -25,6 +26,7 @@ import type {
   RepositoryRelationship,
   SystemFlowTrace,
   TraceSystemFlowRequest,
+  UpdateOnboardingPreferencesRequest,
   UpdateProjectMemoryRequest,
   UpdateProjectSystemRequest,
   UpdateSystemRepositoryRequest,
@@ -105,7 +107,7 @@ async function parseErrorMessage(response: Response): Promise<string> {
 }
 
 export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
-  const response = await fetch(`${getApiBaseUrl()}/api/health`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/health/live`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -115,7 +117,12 @@ export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
     throw new ApiError(await parseErrorMessage(response), response.status);
   }
 
-  return (await response.json()) as TerminusHealthResponse;
+  const live = (await response.json()) as { status?: string };
+  return {
+    status: live.status === 'ok' ? 'ok' : 'error',
+    info: { api: { status: live.status === 'ok' ? 'up' : 'down' } },
+    details: { api: { status: live.status === 'ok' ? 'up' : 'down' } },
+  };
 }
 
 export async function apiFetch<T>(
@@ -180,8 +187,20 @@ export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
   return result;
 }
 
-export async function fetchMe(): Promise<AuthUser> {
-  const result = await apiFetch<{ user: AuthUser }>('/auth/me');
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST' });
+  } catch {
+    // Always clear local session even if revocation fails (network / already invalid).
+  } finally {
+    clearSession();
+  }
+}
+
+export async function fetchMe(init?: { signal?: AbortSignal }): Promise<AuthUser> {
+  const result = await apiFetch<{ user: AuthUser }>('/auth/me', {
+    signal: init?.signal,
+  });
   return result.user;
 }
 
@@ -194,6 +213,27 @@ export async function updateSettings(input: UpdateUserSettingsRequest): Promise<
     method: 'PATCH',
     body: JSON.stringify(input),
   });
+}
+
+export async function fetchOnboarding(): Promise<OnboardingView> {
+  return apiFetch<OnboardingView>('/settings/onboarding');
+}
+
+export async function updateOnboarding(
+  input: UpdateOnboardingPreferencesRequest,
+): Promise<OnboardingView> {
+  return apiFetch<OnboardingView>('/settings/onboarding', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function markWelcomeSeen(): Promise<OnboardingView> {
+  return updateOnboarding({ welcomeSeen: true });
+}
+
+export async function dismissOnboarding(): Promise<OnboardingView> {
+  return updateOnboarding({ dismiss: true });
 }
 
 export async function getGithubConnection(): Promise<GitHubConnectionStatus> {

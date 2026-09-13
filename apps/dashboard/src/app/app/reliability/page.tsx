@@ -213,10 +213,13 @@ export default function ReliabilityPage() {
           ) : null}
 
           {executions.length === 0 && !loading ? (
-            <p className="text-sm text-muted-foreground">
-              No executions yet. Run a developer workflow from the extension to create an audit
-              trail.
-            </p>
+            <div className="rounded-2xl border border-dashed border-line px-4 py-6">
+              <p className="text-sm font-semibold text-ink">No workflows yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Run your first developer workflow from a GitHub pull request, Jira issue, or
+                supported API contract in the extension.
+              </p>
+            </div>
           ) : null}
 
           <ul className="space-y-2">

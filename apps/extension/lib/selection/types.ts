@@ -34,6 +34,7 @@ export type AssistantView =
       message: string;
       code?: WorkspaceErrorCode | null;
       referenceId?: string | null;
+      unauthorized?: boolean;
     };
 
 export type SelectionSnapshot = {

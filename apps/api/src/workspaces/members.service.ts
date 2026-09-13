@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { WorkspaceMembership } from '@project-x/types';
+import type { WorkspaceMembership, WorkspaceRole } from '@project-x/types';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceAuthorizationService } from './workspace-authorization.service';
@@ -35,11 +35,19 @@ export class WorkspaceMembersService {
     membershipId: string,
     input: ChangeWorkspaceMemberRoleDto,
   ): Promise<WorkspaceMembership> {
-    await this.authorization.assertAccess({
+    const actor = await this.authorization.assertAccess({
       userId: actorUserId,
       workspaceId,
       permission: 'members:manage',
     });
+
+    // DTO already forbids 'owner'; defense-in-depth.
+    if (input.role === ('owner' as WorkspaceRole)) {
+      throw workspaceException(
+        'WORKSPACE_ACCESS_DENIED',
+        'Ownership can only be transferred via the ownership transfer endpoint.',
+      );
+    }
 
     const membership = await this.prisma.workspaceMembership.findFirst({
       where: { id: membershipId, workspaceId, status: 'active' },
@@ -48,8 +56,20 @@ export class WorkspaceMembersService {
       throw workspaceException('WORKSPACE_MEMBER_NOT_FOUND', 'Membership not found.');
     }
 
+    // Only OWNER may change roles involving an OWNER (demote) or touch owner seats.
     if (membership.role === 'owner') {
+      if (actor.role !== 'owner') {
+        throw workspaceException(
+          'WORKSPACE_ACCESS_DENIED',
+          'Only an owner can change another owner’s role.',
+        );
+      }
       await this.authorization.assertNotSoleOwner(workspaceId, membershipId);
+    }
+
+    // ADMIN cannot promote themselves or others beyond admin (owner already blocked).
+    if (actor.role === 'admin' && membership.userId === actorUserId) {
+      throw workspaceException('WORKSPACE_ACCESS_DENIED', 'Admins cannot change their own role.');
     }
 
     const updated = await this.prisma.workspaceMembership.update({
@@ -66,7 +86,7 @@ export class WorkspaceMembersService {
     actorUserId: string,
     membershipId: string,
   ): Promise<void> {
-    await this.authorization.assertAccess({
+    const actor = await this.authorization.assertAccess({
       userId: actorUserId,
       workspaceId,
       permission: 'members:manage',
@@ -79,10 +99,13 @@ export class WorkspaceMembersService {
       throw workspaceException('WORKSPACE_MEMBER_NOT_FOUND', 'Membership not found.');
     }
 
-    // Members may remove themselves without members:manage — handled via same path when actor matches.
-    if (membership.userId === actorUserId && membership.role === 'owner') {
-      await this.authorization.assertNotSoleOwner(workspaceId, membershipId);
-    } else if (membership.role === 'owner') {
+    if (membership.role === 'owner') {
+      if (actor.role !== 'owner') {
+        throw workspaceException(
+          'WORKSPACE_ACCESS_DENIED',
+          'Only an owner can remove another owner.',
+        );
+      }
       await this.authorization.assertNotSoleOwner(workspaceId, membershipId);
     }
 

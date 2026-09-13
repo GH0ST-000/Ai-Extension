@@ -21,12 +21,12 @@ import {
   getGithubConnection,
   getJiraConnection,
   getSettings,
+  logout,
   updateSettings,
   upsertGithubConnection,
   upsertJiraConnection,
 } from '../../../lib/api';
-import { clearSession, getStoredUser } from '../../../lib/auth-storage';
-
+import { getStoredUser } from '../../../lib/auth-storage';
 const STYLE_LABELS: Record<ResponseStyle, string> = {
   CONCISE: 'Concise',
   BALANCED: 'Balanced',
@@ -202,8 +202,8 @@ export default function SettingsPage() {
     }
   }
 
-  function signOut() {
-    clearSession();
+  async function signOut() {
+    await logout();
     router.replace('/login');
   }
 

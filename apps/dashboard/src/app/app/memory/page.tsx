@@ -468,8 +468,12 @@ function MemoryPageContent() {
             Loading memory…
           </div>
         ) : emptyLearned ? (
-          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
-            Project X has not learned this repository yet.
+          <div className="rounded-3xl border border-dashed border-line bg-panel/75 px-5 py-8 shadow-panel">
+            <p className="font-display text-lg font-semibold text-ink">No project context yet</p>
+            <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+              Project X can remember repository conventions and rules to make future reviews more
+              relevant. Learn project context when you are ready.
+            </p>
           </div>
         ) : grouped.length > 0 ? (
           <div className="space-y-4">

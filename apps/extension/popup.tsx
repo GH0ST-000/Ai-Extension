@@ -1,10 +1,22 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 
-import { APP_NAME } from '@project-x/shared';
-import type { AuthUser } from '@project-x/types';
+import {
+  APP_NAME,
+  formatGitHubConnectionLabel,
+  GITHUB_WRITE_CONFIRMATION_NOTE,
+  GITHUB_WHY_CONNECT,
+} from '@project-x/shared';
+import type { AuthUser, GitHubConnectionStatus, OnboardingView } from '@project-x/types';
 
+import {
+  dismissOnboarding,
+  fetchOnboarding,
+  markWelcomeSeen,
+} from './lib/onboarding/onboarding-api';
 import { AuthClientError, login, register, signOut } from './lib/services/auth-client';
 import { getSession } from './lib/services/auth-storage';
+import { getGithubConnection } from './lib/services/github-api';
+import { getDashboardBaseUrl, getDashboardBillingUrl } from './lib/workspace/dashboard-url';
 import { useWorkspaceStore } from './lib/workspace/workspace.store';
 import { WorkspaceSwitcher } from './lib/workspace/workspace-switcher';
 
@@ -44,9 +56,26 @@ function BrandHeader() {
             color: '#64748b',
           }}
         >
-          Studio
+          Extension
         </p>
       </div>
+    </div>
+  );
+}
+
+function StatusRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 12,
+        fontSize: 12,
+        lineHeight: 1.4,
+      }}
+    >
+      <span style={{ color: '#64748b', fontWeight: 600 }}>{label}</span>
+      <span style={{ color: '#0f172a', fontWeight: 600, textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
@@ -60,18 +89,46 @@ function IndexPopup() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [github, setGithub] = useState<GitHubConnectionStatus | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingView | null>(null);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  const workspace = useWorkspaceStore((state) => state.current);
+  const workspaceLoading = useWorkspaceStore((state) => state.loading);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       const session = await getSession();
-      if (!cancelled) {
-        setUser(session?.user ?? null);
-        setLoading(false);
-        if (session) {
-          void useWorkspaceStore.getState().bootstrap();
+      if (cancelled) return;
+
+      setUser(session?.user ?? null);
+      setLoading(false);
+
+      if (!session) {
+        setShowWelcome(true);
+        return;
+      }
+
+      void useWorkspaceStore.getState().bootstrap();
+      try {
+        const [githubStatus, onboardingView] = await Promise.all([
+          getGithubConnection().catch(() => ({ connected: false }) as GitHubConnectionStatus),
+          fetchOnboarding().catch(() => null),
+        ]);
+        if (cancelled) return;
+        setGithub(githubStatus);
+        setOnboarding(onboardingView);
+        if (
+          onboardingView &&
+          (onboardingView.status === 'not_started' ||
+            (!onboardingView.preferences.welcomeSeen && !onboardingView.steps.firstActionCompleted))
+        ) {
+          setShowWelcome(true);
         }
+      } catch {
+        // Ignore — status rows degrade gracefully
       }
     }
 
@@ -97,7 +154,15 @@ function IndexPopup() {
           : await login({ email, password });
       setUser(result.user);
       setPassword('');
+      setShowWelcome(false);
       void useWorkspaceStore.getState().bootstrap();
+      const [githubStatus, onboardingView] = await Promise.all([
+        getGithubConnection().catch(() => ({ connected: false }) as GitHubConnectionStatus),
+        fetchOnboarding().catch(() => null),
+      ]);
+      setGithub(githubStatus);
+      setOnboarding(onboardingView);
+      await markWelcomeSeen();
     } catch (err) {
       setError(err instanceof AuthClientError ? err.message : 'Unable to authenticate.');
     } finally {
@@ -109,6 +174,39 @@ function IndexPopup() {
     await signOut();
     await useWorkspaceStore.getState().clear();
     setUser(null);
+    setGithub(null);
+    setOnboarding(null);
+    setShowWelcome(true);
+  }
+
+  async function onGetStarted() {
+    setShowWelcome(false);
+    await markWelcomeSeen();
+    if (onboarding) {
+      setOnboarding({
+        ...onboarding,
+        preferences: { ...onboarding.preferences, welcomeSeen: true },
+        status: onboarding.status === 'not_started' ? 'in_progress' : onboarding.status,
+      });
+    }
+  }
+
+  async function onDismissSetup() {
+    await dismissOnboarding();
+    setOnboarding((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: 'dismissed',
+            nextStep: null,
+            recommendedAction: null,
+            preferences: {
+              ...prev.preferences,
+              dismissedAt: new Date().toISOString(),
+            },
+          }
+        : prev,
+    );
   }
 
   if (loading) {
@@ -120,23 +218,180 @@ function IndexPopup() {
     );
   }
 
-  if (user) {
+  if (!user && showWelcome) {
     return (
       <div style={shellStyle}>
         <BrandHeader />
-        <h1 style={titleStyle}>Signed in</h1>
+        <h1 style={titleStyle}>Understand and act where you work</h1>
+        <p style={bodyStyle}>
+          Select text on any page for quick AI actions, or connect GitHub for PR reviews, CI
+          analysis, and confirmed writes.
+        </p>
+        <p style={{ ...bodyStyle, marginTop: 10, fontSize: 12 }}>
+          {GITHUB_WRITE_CONFIRMATION_NOTE}
+        </p>
+        <button
+          type="button"
+          style={{ ...primaryButtonStyle, marginTop: 14 }}
+          onClick={onGetStarted}
+        >
+          Get Started
+        </button>
+        <button
+          type="button"
+          style={linkButtonStyle}
+          onClick={() => {
+            setShowWelcome(false);
+          }}
+        >
+          Try with selected text after sign-in
+        </button>
+      </div>
+    );
+  }
+
+  if (user) {
+    const planLabel = workspace?.plan.id
+      ? workspace.plan.name ||
+        workspace.plan.id.charAt(0).toUpperCase() + workspace.plan.id.slice(1)
+      : workspaceLoading
+        ? '…'
+        : 'Free';
+    const githubLabel = formatGitHubConnectionLabel({
+      connected: Boolean(github?.connected),
+      githubLogin: github?.githubLogin,
+    });
+    const showChecklist =
+      onboarding &&
+      onboarding.status !== 'completed' &&
+      onboarding.status !== 'dismissed' &&
+      onboarding.recommendedAction;
+
+    return (
+      <div style={shellStyle}>
+        <BrandHeader />
+        <h1 style={titleStyle}>Ready</h1>
         <p style={bodyStyle}>
           {user.name?.trim() ? `${user.name} · ` : ''}
           {user.email}
         </p>
         <WorkspaceSwitcher />
-        <p style={{ ...bodyStyle, marginTop: 10 }}>
-          Highlight text on any page to open Ask AI. Tune length and context in the dashboard
-          settings.
-        </p>
-        <button type="button" style={secondaryButtonStyle} onClick={() => void onSignOut()}>
-          Sign out
-        </button>
+
+        <div
+          style={{
+            marginTop: 12,
+            display: 'grid',
+            gap: 8,
+            padding: 10,
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            background: '#f8fafc',
+          }}
+        >
+          <StatusRow
+            label="Workspace"
+            value={workspace?.workspace.name ?? (workspaceLoading ? 'Loading…' : '—')}
+          />
+          <StatusRow label="GitHub" value={githubLabel} />
+          <StatusRow label="Plan" value={planLabel} />
+        </div>
+
+        {showChecklist && onboarding.recommendedAction ? (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              borderRadius: 12,
+              border: '1px solid #99f6e4',
+              background: '#f0fdfa',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#0f766e' }}>
+              {onboarding.recommendedAction.title}
+            </p>
+            <p style={{ ...bodyStyle, marginTop: 6, fontSize: 12 }}>
+              {onboarding.recommendedAction.body}
+            </p>
+            {onboarding.recommendedAction.ctaHref ? (
+              <a
+                href={onboarding.recommendedAction.ctaHref}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...linkButtonStyle, display: 'inline-block', marginTop: 8 }}
+              >
+                {onboarding.recommendedAction.ctaLabel}
+              </a>
+            ) : (
+              <p style={{ ...bodyStyle, marginTop: 8, fontSize: 12, fontWeight: 600 }}>
+                {onboarding.recommendedAction.ctaLabel}
+              </p>
+            )}
+            <button
+              type="button"
+              style={{ ...linkButtonStyle, marginTop: 8 }}
+              onClick={() => void onDismissSetup()}
+            >
+              Dismiss setup
+            </button>
+          </div>
+        ) : null}
+
+        {!github?.connected ? (
+          <p style={{ ...bodyStyle, marginTop: 12, fontSize: 12 }}>{GITHUB_WHY_CONNECT}</p>
+        ) : (
+          <p style={{ ...bodyStyle, marginTop: 12, fontSize: 12 }}>
+            Highlight text for Ask AI, or open a pull request to Review PR.
+          </p>
+        )}
+
+        <div style={{ display: 'grid', gap: 8, marginTop: 14 }}>
+          <a
+            href={`${getDashboardBaseUrl()}/app`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              ...secondaryButtonStyle,
+              marginTop: 0,
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            Open dashboard
+          </a>
+          <a
+            href={`${getDashboardBaseUrl()}/app/settings`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              ...secondaryButtonStyle,
+              marginTop: 0,
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            Settings & connections
+          </a>
+          <a
+            href={getDashboardBillingUrl()}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              ...secondaryButtonStyle,
+              marginTop: 0,
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            Plan & usage
+          </a>
+          <button
+            type="button"
+            style={{ ...secondaryButtonStyle, marginTop: 0 }}
+            onClick={() => void onSignOut()}
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     );
   }
@@ -190,7 +445,7 @@ function IndexPopup() {
         {error ? <p style={errorStyle}>{error}</p> : null}
 
         <button type="submit" style={primaryButtonStyle} disabled={pending}>
-          {pending ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Register'}
+          {pending ? 'Signing in…' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>
       </form>
 

@@ -387,3 +387,33 @@ export function getErrorMessage(error: unknown): string {
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
+
+export {
+  defaultOnboardingPreferences,
+  deriveOnboardingSteps,
+  resolveOnboardingStatus,
+  resolveNextOnboardingStep,
+  buildRecommendedAction,
+  buildOnboardingView,
+  firstValueTypeForAiAction,
+  mapToUserFacingError,
+  workflowStatusLabel,
+  GITHUB_TRUST_SUMMARY,
+  GITHUB_WHY_CONNECT,
+  GITHUB_READS,
+  GITHUB_WRITES,
+  GITHUB_WRITE_CONFIRMATION_NOTE,
+  GITHUB_PERMISSION_DETAILS,
+  formatGitHubConnectionLabel,
+  formatSafeDiagnostics,
+  copyTextToClipboard,
+} from './ux';
+export type { BuildOnboardingViewInput } from './ux';
+
+export {
+  safeInternalPath,
+  isDangerousUrlScheme,
+  sanitizeExternalHttpsUrl,
+  PROMPT_INJECTION_GUARD,
+  PROMPT_INJECTION_FIXTURES,
+} from './security';

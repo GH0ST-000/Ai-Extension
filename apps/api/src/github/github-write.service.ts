@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import type {
   PostPullRequestCommentRequest,
   PostPullRequestCommentResponse,
@@ -12,8 +13,10 @@ import type {
 
 import { RedisService } from '../redis/redis.service';
 import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubErrorNormalizer } from './github-error-normalizer';
 
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24; // 24h
+const LOCK_TTL_SECONDS = 30;
 
 type GitHubCommentResponse = {
   id?: number;
@@ -27,6 +30,7 @@ export class GithubWriteService {
   constructor(
     private readonly githubConnections: GithubConnectionService,
     private readonly redis: RedisService,
+    private readonly errors: GithubErrorNormalizer,
   ) {}
 
   async postPullRequestComment(
@@ -48,36 +52,86 @@ export class GithubWriteService {
       );
     }
 
-    const cacheKey = `gh:pr-comment:${userId}:${idempotencyKey}`;
-    const cached = await this.readIdempotentResult(cacheKey);
-    if (cached) {
-      return { ...cached, deduplicated: true };
+    if (Buffer.byteLength(body, 'utf8') > 65_536) {
+      throw new BadRequestException('Comment body exceeds the maximum allowed size.');
     }
 
-    const token = await this.githubConnections.getDecryptedToken(userId);
-    if (!token) {
-      throw new ForbiddenException(
-        'Connect a GitHub token in dashboard Settings before posting comments.',
+    const fingerprint = createHash('sha256')
+      .update(
+        JSON.stringify({
+          owner,
+          repository,
+          pullRequestNumber: input.pullRequestNumber,
+          body,
+        }),
+      )
+      .digest('hex');
+
+    const cacheKey = `gh:pr-comment:${userId}:${idempotencyKey}`;
+    const lockKey = `${cacheKey}:lock`;
+
+    const cached = await this.readIdempotentResult(cacheKey);
+    if (cached) {
+      if (cached.fingerprint !== fingerprint) {
+        throw this.errors.toHttpException(
+          'IDEMPOTENCY_CONFLICT',
+          'This idempotencyKey was already used with a different comment payload.',
+        );
+      }
+      return { ...cached.result, deduplicated: true };
+    }
+
+    const lockAcquired = await this.acquireLock(lockKey, fingerprint);
+    if (!lockAcquired) {
+      const raced = await this.readIdempotentResult(cacheKey);
+      if (raced && raced.fingerprint === fingerprint) {
+        return { ...raced.result, deduplicated: true };
+      }
+      throw this.errors.toHttpException(
+        'WRITE_OUTCOME_UNKNOWN',
+        'A comment may already be posting for this request. Check GitHub before retrying.',
       );
     }
 
-    await this.assertPullRequestOpen({
-      token,
-      owner,
-      repository,
-      pullRequestNumber: input.pullRequestNumber,
-    });
+    try {
+      const afterLock = await this.readIdempotentResult(cacheKey);
+      if (afterLock) {
+        if (afterLock.fingerprint !== fingerprint) {
+          throw this.errors.toHttpException(
+            'IDEMPOTENCY_CONFLICT',
+            'This idempotencyKey was already used with a different comment payload.',
+          );
+        }
+        return { ...afterLock.result, deduplicated: true };
+      }
 
-    const result = await this.createIssueComment({
-      token,
-      owner,
-      repository,
-      pullRequestNumber: input.pullRequestNumber,
-      body,
-    });
+      const token = await this.githubConnections.getDecryptedToken(userId);
+      if (!token) {
+        throw new ForbiddenException(
+          'Connect a GitHub token in dashboard Settings before posting comments.',
+        );
+      }
 
-    await this.storeIdempotentResult(cacheKey, result);
-    return { ...result, deduplicated: false };
+      await this.assertPullRequestOpen({
+        token,
+        owner,
+        repository,
+        pullRequestNumber: input.pullRequestNumber,
+      });
+
+      const result = await this.createIssueComment({
+        token,
+        owner,
+        repository,
+        pullRequestNumber: input.pullRequestNumber,
+        body,
+      });
+
+      await this.storeIdempotentResult(cacheKey, fingerprint, result);
+      return { ...result, deduplicated: false };
+    } finally {
+      await this.releaseLock(lockKey);
+    }
   }
 
   private async assertPullRequestOpen(input: {
@@ -160,10 +214,21 @@ export class GithubWriteService {
         body: JSON.stringify({ body: input.body }),
       });
     } catch {
-      throw new ServiceUnavailableException('Unable to reach GitHub to post the comment.');
+      throw this.errors.toHttpException(
+        'WRITE_OUTCOME_UNKNOWN',
+        'The comment request did not complete cleanly. Check GitHub before retrying.',
+      );
     }
 
-    const payload = (await response.json().catch(() => ({}))) as GitHubCommentResponse;
+    let payload: GitHubCommentResponse;
+    try {
+      payload = (await response.json()) as GitHubCommentResponse;
+    } catch {
+      throw this.errors.toHttpException(
+        'WRITE_OUTCOME_UNKNOWN',
+        'GitHub returned an unreadable comment response. Check GitHub before retrying.',
+      );
+    }
 
     if (response.status === 401) {
       throw new UnauthorizedException(
@@ -191,7 +256,10 @@ export class GithubWriteService {
     }
 
     if (typeof payload.id !== 'number' || typeof payload.html_url !== 'string') {
-      throw new ServiceUnavailableException('Unexpected GitHub comment response.');
+      throw this.errors.toHttpException(
+        'WRITE_OUTCOME_UNKNOWN',
+        'Unexpected GitHub comment response. Check GitHub before retrying.',
+      );
     }
 
     return {
@@ -207,43 +275,82 @@ export class GithubWriteService {
     }
   }
 
-  private async readIdempotentResult(
-    cacheKey: string,
-  ): Promise<Omit<PostPullRequestCommentResponse, 'deduplicated'> | null> {
+  private async acquireLock(lockKey: string, fingerprint: string): Promise<boolean> {
+    try {
+      await this.ensureRedis();
+      const result = await this.redis.set(lockKey, fingerprint, 'EX', LOCK_TTL_SECONDS, 'NX');
+      return result === 'OK';
+    } catch {
+      // Fail closed for concurrent write safety when Redis is down.
+      throw this.errors.toHttpException(
+        'GITHUB_UNAVAILABLE',
+        'Unable to coordinate write safety. Please try again shortly.',
+      );
+    }
+  }
+
+  private async releaseLock(lockKey: string): Promise<void> {
+    try {
+      await this.ensureRedis();
+      await this.redis.del(lockKey);
+    } catch {
+      // TTL will expire the lock.
+    }
+  }
+
+  private async readIdempotentResult(cacheKey: string): Promise<{
+    fingerprint: string;
+    result: Omit<PostPullRequestCommentResponse, 'deduplicated'>;
+  } | null> {
     try {
       await this.ensureRedis();
       const raw = await this.redis.get(cacheKey);
       if (!raw) {
         return null;
       }
-      const parsed = JSON.parse(raw) as Partial<PostPullRequestCommentResponse>;
+      const parsed = JSON.parse(raw) as {
+        fingerprint?: string;
+        success?: boolean;
+        commentId?: number;
+        commentUrl?: string;
+      };
       if (
+        typeof parsed.fingerprint === 'string' &&
         parsed.success === true &&
         typeof parsed.commentId === 'number' &&
         typeof parsed.commentUrl === 'string'
       ) {
         return {
-          success: true,
-          commentId: parsed.commentId,
-          commentUrl: parsed.commentUrl,
+          fingerprint: parsed.fingerprint,
+          result: {
+            success: true,
+            commentId: parsed.commentId,
+            commentUrl: parsed.commentUrl,
+          },
         };
       }
       return null;
     } catch {
-      // Idempotency is best-effort — never block posting if Redis is down.
       return null;
     }
   }
 
   private async storeIdempotentResult(
     cacheKey: string,
+    fingerprint: string,
     result: Omit<PostPullRequestCommentResponse, 'deduplicated'>,
   ): Promise<void> {
     try {
       await this.ensureRedis();
-      await this.redis.set(cacheKey, JSON.stringify(result), 'EX', IDEMPOTENCY_TTL_SECONDS, 'NX');
+      await this.redis.set(
+        cacheKey,
+        JSON.stringify({ fingerprint, ...result }),
+        'EX',
+        IDEMPOTENCY_TTL_SECONDS,
+        'NX',
+      );
     } catch {
-      // Best-effort only.
+      // Best-effort only after successful write.
     }
   }
 }

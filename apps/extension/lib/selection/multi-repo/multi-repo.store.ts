@@ -42,6 +42,7 @@ type MultiRepoStoreState = {
   scopeNote: string | null;
   loading: boolean;
   error: string | null;
+  errorCode: string | null;
   panelOpen: boolean;
 
   setPanelOpen: (open: boolean) => void;
@@ -85,6 +86,10 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof MultiRepoApiError ? err.message : fallback;
 }
 
+function errorCodeOf(err: unknown): string | null {
+  return err instanceof MultiRepoApiError ? err.code : null;
+}
+
 function buildScopeNote(context: MultiRepoArchitectureContext | null): string {
   const parts = [knownInSelectedScope('resources'), noOrgWideClaim()];
   if (!context) {
@@ -115,6 +120,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   scopeNote: null,
   loading: false,
   error: null,
+  errorCode: null,
   panelOpen: false,
 
   setPanelOpen: (open) => set({ panelOpen: open }),
@@ -135,6 +141,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       lastCoverage: null,
       lastConsumers: null,
       error: null,
+      errorCode: null,
       scopeNote: systemId ? knownInSelectedScope('resources') : null,
     });
   },
@@ -149,7 +156,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   },
 
   loadSystems: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, errorCode: null });
     try {
       const systems = await listSystems();
       const selectedSystemId = get().selectedSystemId;
@@ -168,6 +175,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to load systems.'),
+        errorCode: errorCodeOf(err),
         systems: [],
       });
       return [];
@@ -177,10 +185,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   buildContext: async (systemId) => {
     const id = systemId ?? get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const context = await getSystemContext(id);
       set({
@@ -194,6 +202,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to build multi-repo context.'),
+        errorCode: errorCodeOf(err),
         context: null,
       });
       return null;
@@ -203,10 +212,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   refreshSelected: async () => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return false;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const refresh = await refreshSystem(id);
       const context = await getSystemContext(id);
@@ -223,6 +232,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to refresh system context.'),
+        errorCode: errorCodeOf(err),
       });
       return false;
     }
@@ -231,10 +241,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   analyzeImpact: async (input) => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const lastImpact = await analyzeChangeImpact({
         systemId: id,
@@ -261,6 +271,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to analyze change impact.'),
+        errorCode: errorCodeOf(err),
       });
       return null;
     }
@@ -269,10 +280,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   traceFlow: async (trigger) => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const lastFlow = await traceSystemFlow({
         systemId: id,
@@ -297,6 +308,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to trace system flow.'),
+        errorCode: errorCodeOf(err),
       });
       return null;
     }
@@ -305,10 +317,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   compareReq: async (issueKey, criteria) => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const lastCoverage = await compareRequirement({
         systemId: id,
@@ -325,6 +337,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to compare requirement across repos.'),
+        errorCode: errorCodeOf(err),
       });
       return null;
     }
@@ -333,10 +346,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   findApi: async (input) => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const lastConsumers = await findApiConsumers(id, input);
       set({
@@ -349,6 +362,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to find API consumers.'),
+        errorCode: errorCodeOf(err),
       });
       return null;
     }
@@ -357,10 +371,10 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
   findEvents: async (input) => {
     const id = get().selectedSystemId;
     if (!id) {
-      set({ error: 'Select a system first.' });
+      set({ error: 'Select a system first.', errorCode: null });
       return null;
     }
-    set({ loading: true, error: null, panelOpen: true });
+    set({ loading: true, error: null, errorCode: null, panelOpen: true });
     try {
       const lastConsumers = await findEventConsumers(id, input);
       set({
@@ -373,6 +387,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       set({
         loading: false,
         error: errorMessage(err, 'Unable to find event consumers.'),
+        errorCode: errorCodeOf(err),
       });
       return null;
     }
@@ -414,6 +429,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       lastCoverage: null,
       lastConsumers: null,
       error: null,
+      errorCode: null,
     }),
 
   clear: () =>
@@ -429,6 +445,7 @@ export const useMultiRepoStore = create<MultiRepoStoreState>((set, get) => ({
       scopeNote: null,
       loading: false,
       error: null,
+      errorCode: null,
       panelOpen: false,
     }),
 }));

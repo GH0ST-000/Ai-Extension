@@ -1,4 +1,4 @@
-import type { AIAction } from '@project-x/types';
+import type { AIAction, WorkspaceErrorCode } from '@project-x/types';
 
 export type SelectionRect = {
   x: number;
@@ -28,7 +28,13 @@ export type AssistantView =
   | { status: 'loading'; action: AIAction }
   | { status: 'streaming'; action: AIAction; content: string }
   | { status: 'success'; action: AIAction; content: string }
-  | { status: 'error'; action: AIAction; message: string };
+  | {
+      status: 'error';
+      action: AIAction;
+      message: string;
+      code?: WorkspaceErrorCode | null;
+      referenceId?: string | null;
+    };
 
 export type SelectionSnapshot = {
   text: string;

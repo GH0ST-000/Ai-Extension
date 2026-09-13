@@ -2,6 +2,7 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { personalWorkspaceName, personalWorkspaceSlug } from '@project-x/shared';
 
 import type { AuthTokenResponse } from '@project-x/types';
 
@@ -25,16 +26,63 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        name: input.name?.trim() || null,
-        settings: {
-          create: {},
+    const name = input.name?.trim() || null;
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          name,
+          settings: {
+            create: {},
+          },
         },
-      },
-      select: { id: true, email: true, name: true },
+        select: { id: true, email: true, name: true },
+      });
+
+      const workspaceId = `ws_${created.id}`;
+      let slug = personalWorkspaceSlug(created.id);
+      let attempt = 0;
+      while (await tx.workspace.findUnique({ where: { slug } })) {
+        attempt += 1;
+        slug = `${personalWorkspaceSlug(created.id)}-${attempt}`;
+      }
+
+      await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: personalWorkspaceName(created.name, created.email),
+          slug,
+          status: 'active',
+          createdByUserId: created.id,
+        },
+      });
+      await tx.workspaceMembership.create({
+        data: {
+          id: `wsm_${created.id}`,
+          workspaceId,
+          userId: created.id,
+          role: 'owner',
+          status: 'active',
+          joinedAt: new Date(),
+        },
+      });
+      await tx.workspaceSubscription.create({
+        data: {
+          id: `wss_${created.id}`,
+          workspaceId,
+          provider: 'paddle',
+          planId: 'free',
+          status: 'none',
+        },
+      });
+      await tx.user.update({
+        where: { id: created.id },
+        data: { lastWorkspaceId: workspaceId },
+      });
+
+      return created;
     });
 
     return this.toAuthResponse(user);

@@ -1,13 +1,17 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger as NestLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import type { ApiConfig } from './config/configuration';
+import { ERROR_TRACKER, type ErrorTracker } from './observability/error-tracker';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
 
   app.useLogger(app.get(Logger));
   app.useGlobalPipes(
@@ -26,6 +30,9 @@ async function bootstrap(): Promise<void> {
   const port = config.get('port', { infer: true });
   const nodeEnv = config.get('nodeEnv', { infer: true });
   const configuredOrigins = config.get('ai.corsOrigins', { infer: true });
+  const release = config.get('release', { infer: true });
+  const service = config.get('service', { infer: true });
+  const obs = config.get('observability', { infer: true });
 
   const defaultDevOrigins = [
     'http://localhost:3000',
@@ -58,7 +65,54 @@ async function bootstrap(): Promise<void> {
       callback(null, allowed);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Workspace-Id',
+      'X-Request-Id',
+      'Paddle-Signature',
+    ],
+    exposedHeaders: ['X-Request-Id'],
+  });
+
+  const bootstrapLogger = new NestLogger('Bootstrap');
+  bootstrapLogger.log({
+    msg: 'service.started',
+    event: 'service.started',
+    service,
+    environment: nodeEnv,
+    release,
+    nodeVersion: process.version,
+    paddleConfigured: Boolean(obs && config.get('paddle.webhookSecret', { infer: true })),
+    sentryConfigured: Boolean(obs.sentryDsn),
+    metricsTokenConfigured: Boolean(obs.metricsScrapeToken),
+  });
+
+  const errorTracker = app.get<ErrorTracker>(ERROR_TRACKER);
+
+  const shutdown = async (signal: string) => {
+    bootstrapLogger.log({
+      msg: 'service.shutdown.start',
+      event: 'service.shutdown.start',
+      signal,
+    });
+    try {
+      await errorTracker.flush(2000);
+    } catch {
+      // bounded flush — never hang forever
+    }
+    await app.close();
+    bootstrapLogger.log({
+      msg: 'service.shutdown.complete',
+      event: 'service.shutdown.complete',
+    });
+  };
+
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT');
   });
 
   await app.listen(port, host);

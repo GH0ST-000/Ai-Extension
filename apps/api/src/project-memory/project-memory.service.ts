@@ -34,6 +34,8 @@ import { randomUUID } from 'crypto';
 
 import { GithubContentService } from '../github/github-content.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
+import { FeatureGate } from '../entitlements/feature-gate';
 import { RedisService } from '../redis/redis.service';
 import { GithubConnectionService } from '../settings/github-connection.service';
 import { projectMemoryException } from './project-memory.errors';
@@ -108,6 +110,7 @@ export class ProjectMemoryService {
     private readonly redis: RedisService,
     private readonly githubConnections: GithubConnectionService,
     private readonly githubContent: GithubContentService,
+    private readonly featureGate: FeatureGate,
   ) {}
 
   async list(
@@ -116,15 +119,22 @@ export class ProjectMemoryService {
     repositoryRaw: string,
     status?: ProjectMemoryStatus,
   ): Promise<ListProjectMemoryResponse> {
+    await this.assertMemoryFeature(userId);
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
     await this.assertRepositoryAccess(userId, owner, repository);
 
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const rows = await this.prisma.projectMemory.findMany({
       where: {
-        userId,
         owner,
         repository,
         status: status ?? 'active',
+        OR: [
+          { workspaceId, visibility: 'workspace' },
+          { workspaceId, visibility: 'user', userId },
+          // legacy rows without workspaceId during transition
+          { workspaceId: null, userId },
+        ],
       },
       orderBy: [{ category: 'asc' }, { key: 'asc' }, { updatedAt: 'desc' }],
     });
@@ -142,6 +152,7 @@ export class ProjectMemoryService {
     ownerRaw: string,
     repositoryRaw: string,
   ): Promise<ProjectProfile> {
+    await this.assertMemoryFeature(userId);
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
     await this.assertRepositoryAccess(userId, owner, repository);
 
@@ -156,6 +167,7 @@ export class ProjectMemoryService {
     capability?: string,
     pathsCsv?: string,
   ): Promise<ProjectMemorySummary> {
+    await this.assertMemoryFeature(userId);
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
     await this.assertRepositoryAccess(userId, owner, repository);
 
@@ -199,6 +211,7 @@ export class ProjectMemoryService {
     },
   ): Promise<ProjectMemoryItem> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
+    await this.assertMemoryFeature(userId);
     await this.assertRepositoryAccess(userId, owner, repository);
 
     const validated = validateCreateRuleInput({
@@ -257,6 +270,7 @@ export class ProjectMemoryService {
     },
   ): Promise<ProjectMemoryItem> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
+    await this.assertMemoryFeature(userId);
     await this.assertRepositoryAccess(userId, owner, repository);
 
     const existing = await this.prisma.projectMemory.findFirst({
@@ -357,6 +371,7 @@ export class ProjectMemoryService {
     }
 
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
+    await this.assertMemoryFeature(userId);
     await this.assertRepositoryAccess(userId, owner, repository);
 
     const result = await this.prisma.projectMemory.updateMany({
@@ -378,6 +393,7 @@ export class ProjectMemoryService {
     repositoryRaw: string,
   ): Promise<LearnProjectMemoryResponse> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
+    await this.assertMemoryFeature(userId);
     await this.assertRepositoryAccess(userId, owner, repository);
 
     const files = await this.fetchHighSignalFiles(userId, owner, repository);
@@ -599,13 +615,29 @@ export class ProjectMemoryService {
     return token;
   }
 
+  private async assertMemoryFeature(userId: string): Promise<string> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.featureGate.require(workspaceId, 'PROJECT_MEMORY');
+    return workspaceId;
+  }
+
   private async loadActiveItems(
     userId: string,
     owner: string,
     repository: string,
   ): Promise<ProjectMemoryItem[]> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const rows = await this.prisma.projectMemory.findMany({
-      where: { userId, owner, repository, status: 'active' },
+      where: {
+        owner,
+        repository,
+        status: 'active',
+        OR: [
+          { workspaceId, visibility: 'workspace' },
+          { workspaceId, visibility: 'user', userId },
+          { workspaceId: null, userId },
+        ],
+      },
       orderBy: [{ category: 'asc' }, { key: 'asc' }],
     });
     return rows.map(toProjectMemoryItem);
@@ -711,15 +743,24 @@ export class ProjectMemoryService {
     const fp = scopeFingerprint(input.scope);
     const valueSummary = input.value.summary.trim();
 
+    const workspaceIdForLookup = await resolveWorkspaceIdForUser(this.prisma, input.userId);
     const existing = await this.prisma.projectMemory.findFirst({
       where: {
-        userId: input.userId,
         owner: input.owner,
         repository: input.repository,
         category: input.category,
         key: input.key,
         scopeFingerprint: fp,
         status: 'active',
+        OR: [
+          {
+            workspaceId: workspaceIdForLookup,
+            ...(input.category === 'USER_PREFERENCE'
+              ? { visibility: 'user', userId: input.userId }
+              : { visibility: 'workspace' }),
+          },
+          { workspaceId: null, userId: input.userId },
+        ],
       },
     });
 
@@ -757,9 +798,14 @@ export class ProjectMemoryService {
 
       await this.assertUnderItemLimit(input.userId, input.owner, input.repository);
 
+      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
+      const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
       return this.prisma.projectMemory.create({
         data: {
           userId: input.userId,
+          workspaceId,
+          createdByUserId: input.userId,
+          visibility,
           owner: input.owner,
           repository: input.repository,
           category: input.category,
@@ -779,9 +825,14 @@ export class ProjectMemoryService {
 
     await this.assertUnderItemLimit(input.userId, input.owner, input.repository);
 
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
+    const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
     return this.prisma.projectMemory.create({
       data: {
         userId: input.userId,
+        workspaceId,
+        createdByUserId: input.userId,
+        visibility,
         owner: input.owner,
         repository: input.repository,
         category: input.category,

@@ -19,6 +19,7 @@ import type {
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from '../services/auth-storage';
+import { applyWorkspaceHeader } from './workspace';
 
 export class ReliabilityApiError extends Error {
   readonly statusCode: number;
@@ -52,13 +53,16 @@ async function reliabilityFetch<T>(path: string, init?: RequestInit): Promise<T>
     throw new ReliabilityApiError(USER_FACING_AUTH_ERROR, 401);
   }
 
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('Authorization', `Bearer ${token}`);
+  await applyWorkspaceHeader(headers);
+
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (response.status === 401) {

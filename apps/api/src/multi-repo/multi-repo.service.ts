@@ -34,6 +34,8 @@ import {
   toRepositoryIdentity,
   truncateToBudget,
   validateAnalysisRepositorySelection,
+  effectiveMaxProjectSystems,
+  effectiveMaxRepositoriesPerSystem,
 } from '@project-x/shared';
 import type {
   AddSystemRepositoryRequest,
@@ -69,6 +71,10 @@ import type {
 
 import { GithubContentService } from '../github/github-content.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
+import { FeatureGate } from '../entitlements/feature-gate';
+import { EntitlementService } from '../entitlements/entitlements.service';
+import { UsageService } from '../usage/usage.service';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
 import { GithubConnectionService } from '../settings/github-connection.service';
 import { multiRepoException } from './multi-repo.errors';
@@ -159,11 +165,15 @@ export class MultiRepoService {
     private readonly githubConnections: GithubConnectionService,
     private readonly githubContent: GithubContentService,
     private readonly projectMemory: ProjectMemoryService,
+    private readonly featureGate: FeatureGate,
+    private readonly entitlements: EntitlementService,
+    private readonly usage: UsageService,
   ) {}
 
   async listSystems(userId: string): Promise<ProjectSystem[]> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const rows = await this.prisma.projectSystem.findMany({
-      where: { userId },
+      where: { workspaceId },
       include: { repositories: { orderBy: { createdAt: 'asc' } } },
       orderBy: { updatedAt: 'desc' },
     });
@@ -171,6 +181,17 @@ export class MultiRepoService {
   }
 
   async createSystem(userId: string, input: CreateProjectSystemRequest): Promise<ProjectSystem> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
+    const ents = await this.entitlements.getEntitlements(workspaceId);
+    const maxSystems = effectiveMaxProjectSystems(ents.maxProjectSystems);
+    const existingCount = await this.prisma.projectSystem.count({ where: { workspaceId } });
+    if (existingCount >= maxSystems) {
+      throw multiRepoException(
+        'SYSTEM_REPOSITORY_LIMIT_REACHED',
+        `Your current plan supports up to ${maxSystems} project systems.`,
+      );
+    }
     const primary = normalizeOwnerRepo(input.primaryOwner, input.primaryRepository);
     await this.assertRepositoryAccess(userId, primary.owner, primary.repository);
 
@@ -197,10 +218,11 @@ export class MultiRepoService {
       }
     }
 
-    if (byKey.size > MULTI_REPO_MAX_REPOS_PER_SYSTEM) {
+    const maxRepos = effectiveMaxRepositoriesPerSystem(ents.maxRepositoriesPerSystem);
+    if (byKey.size > Math.min(MULTI_REPO_MAX_REPOS_PER_SYSTEM, maxRepos)) {
       throw multiRepoException(
         'SYSTEM_REPOSITORY_LIMIT_REACHED',
-        `A system may include at most ${MULTI_REPO_MAX_REPOS_PER_SYSTEM} repositories.`,
+        `A system may include at most ${Math.min(MULTI_REPO_MAX_REPOS_PER_SYSTEM, maxRepos)} repositories.`,
       );
     }
 
@@ -212,6 +234,8 @@ export class MultiRepoService {
     const created = await this.prisma.projectSystem.create({
       data: {
         userId,
+        workspaceId,
+        createdByUserId: userId,
         name: input.name.trim(),
         primaryProvider: 'github',
         primaryOwner: primary.owner,
@@ -475,6 +499,13 @@ export class MultiRepoService {
     userId: string,
     systemId: string,
   ): Promise<DiscoverRelationshipsResponse> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
+    await this.usage.consume({
+      workspaceId,
+      metric: 'multi_repo_analysis',
+      quantity: 1,
+    });
     const discovery = await this.runDiscovery(userId, systemId);
     return {
       systemId,
@@ -587,6 +618,13 @@ export class MultiRepoService {
     userId: string,
     input: AnalyzeChangeImpactRequest,
   ): Promise<MultiRepoChangeImpactAnalysis> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
+    await this.usage.consume({
+      workspaceId,
+      metric: 'multi_repo_analysis',
+      quantity: 1,
+    });
     const system = await this.requireSystem(userId, input.systemId);
     const primary = normalizeOwnerRepo(input.owner, input.repository);
     const primaryIdentity = toRepositoryIdentity(primary.owner, primary.repository);
@@ -1119,12 +1157,16 @@ export class MultiRepoService {
   }
 
   private async requireSystem(userId: string, systemId: string): Promise<SystemWithRepos> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const row = await this.prisma.projectSystem.findFirst({
-      where: { id: systemId, userId },
+      where: { id: systemId, workspaceId },
       include: { repositories: { orderBy: { createdAt: 'asc' } } },
     });
     if (!row) {
-      throw multiRepoException('SYSTEM_CONTEXT_NOT_CONFIGURED', 'System not found for this user.');
+      throw multiRepoException(
+        'SYSTEM_CONTEXT_NOT_CONFIGURED',
+        'System not found for this workspace.',
+      );
     }
     return row;
   }
@@ -1558,9 +1600,11 @@ export class MultiRepoService {
     };
 
     if (!existing) {
+      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
       await this.prisma.repositoryRelationship.create({
         data: {
           userId,
+          workspaceId,
           systemId,
           fromOwner: rel.from.owner,
           fromRepository: rel.from.repository,

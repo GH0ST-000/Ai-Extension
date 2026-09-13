@@ -8,6 +8,9 @@ const navItems = [
   { href: '/app/memory', label: 'Memory', hint: 'Project context' },
   { href: '/app/systems', label: 'Systems', hint: 'Multi-repo scope' },
   { href: '/app/reliability', label: 'Reliability', hint: 'Audit & recovery' },
+  { href: '/app/workspace', label: 'Workspace', hint: 'General settings' },
+  { href: '/app/workspace/members', label: 'Members', hint: 'Roles & invites' },
+  { href: '/app/billing', label: 'Billing', hint: 'Plan & usage' },
   { href: '/app/settings', label: 'Settings', hint: 'Preferences' },
 ] as const;
 
@@ -17,7 +20,12 @@ export function DashboardNav() {
   return (
     <nav className="space-y-1" aria-label="Dashboard">
       {navItems.map((item) => {
-        const active = item.href === '/app' ? pathname === '/app' : pathname.startsWith(item.href);
+        const active =
+          item.href === '/app'
+            ? pathname === '/app'
+            : item.href === '/app/workspace'
+              ? pathname === '/app/workspace'
+              : pathname.startsWith(item.href);
 
         return (
           <Link

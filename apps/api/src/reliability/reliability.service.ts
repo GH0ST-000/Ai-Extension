@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   Prisma,
@@ -52,7 +52,10 @@ import type {
   WorkflowExecutionTrigger,
 } from '@project-x/types';
 
+import { MetricsService } from '../observability/metrics.service';
+import { RequestContextService } from '../observability/request-context.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
 import { reliabilityException } from './reliability.errors';
 import { toCheckpoint, toExecutionDetail, toWorkflowExecution } from './reliability.mapper';
 
@@ -64,11 +67,16 @@ type ExecutionLoaded = ExecutionRow & {
 export class ReliabilityService {
   private readonly logger = new Logger(ReliabilityService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly requestContext?: RequestContextService,
+  ) {}
 
   async listExecutions(userId: string): Promise<ListWorkflowExecutionsResponse> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const rows = await this.prisma.workflowExecution.findMany({
-      where: { userId },
+      where: { workspaceId },
       orderBy: { startedAt: 'desc' },
       take: RELIABILITY_MAX_LIST_EXECUTIONS,
       include: { promptSnapshot: true },
@@ -133,9 +141,12 @@ export class ReliabilityService {
       }
     }
 
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+
     const created = await this.prisma.workflowExecution.create({
       data: {
         id,
+        workspaceId,
         userId,
         workflowId: input.workflowId,
         executionNumber,
@@ -174,6 +185,18 @@ export class ReliabilityService {
       executionId: id,
       workflowId: input.workflowId,
       trigger,
+      requestId: this.requestContext?.get()?.requestId,
+      traceId: this.requestContext?.get()?.traceId,
+    });
+
+    this.requestContext?.patch({
+      executionId: id,
+      workflowId: input.workflowId,
+    });
+
+    this.metrics?.recordWorkflowExecution({
+      workflowType: input.workflowCapability ?? 'workflow',
+      status: 'running',
     });
 
     return toWorkflowExecution(created);
@@ -214,6 +237,7 @@ export class ReliabilityService {
     const created = await this.prisma.executionCheckpoint.create({
       data: {
         id: checkpoint.id,
+        workspaceId: row.workspaceId,
         userId,
         executionId,
         kind: checkpoint.kind,
@@ -252,6 +276,7 @@ export class ReliabilityService {
 
     await this.prisma.executionFailure.create({
       data: {
+        workspaceId: row.workspaceId,
         userId,
         executionId,
         category: failure.category,
@@ -365,6 +390,15 @@ export class ReliabilityService {
       ...(outputHash ? { outputHash } : {}),
       ...(input.tokenUsage ? { tokenUsage: input.tokenUsage } : {}),
       ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      ...(input.firstTokenLatencyMs != null
+        ? { firstTokenLatencyMs: input.firstTokenLatencyMs }
+        : {}),
+      ...(input.estimatedCostUsd != null ? { estimatedCostUsd: input.estimatedCostUsd } : {}),
+      ...(input.pricingVersion ? { pricingVersion: input.pricingVersion } : {}),
+      ...(input.retryCount != null ? { retryCount: input.retryCount } : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
+      ...(input.aiOperationId ? { aiOperationId: input.aiOperationId } : {}),
+      ...(input.providerRequestId ? { providerRequestId: input.providerRequestId } : {}),
       status: input.status,
     };
 
@@ -500,6 +534,19 @@ export class ReliabilityService {
       metadata: { healthScore: health.score, band: health.band },
     });
 
+    const durationSeconds = (completedAt.getTime() - row.startedAt.getTime()) / 1000;
+    this.metrics?.recordWorkflowExecution({
+      workflowType:
+        (row.snapshotJson as { workflowCapability?: string } | null)?.workflowCapability ??
+        'workflow',
+      status: input.status,
+      durationSeconds,
+    });
+    if (input.status === 'stale') {
+      this.metrics?.recordWorkflowStale();
+      this.metrics?.recordStaleContext('workflow');
+    }
+
     return toWorkflowExecution(updated);
   }
 
@@ -573,6 +620,8 @@ export class ReliabilityService {
       },
     });
 
+    this.metrics?.recordWorkflowReplay();
+
     return this.getExecution(userId, started.id).then((d) => d);
   }
 
@@ -606,6 +655,7 @@ export class ReliabilityService {
     await this.prisma.executionCheckpoint.create({
       data: {
         id: `cp_${randomUUID().replace(/-/g, '')}`,
+        workspaceId: row.workspaceId,
         userId,
         executionId: started.id,
         kind: resume.checkpoint.kind,
@@ -626,6 +676,8 @@ export class ReliabilityService {
         skipCompletedThrough: resume.skipCompletedThrough,
       },
     });
+
+    this.metrics?.recordWorkflowResume();
 
     return {
       execution: started,
@@ -692,6 +744,8 @@ export class ReliabilityService {
       metadata: { parentExecutionId: row.id, stage: input.stage },
     });
 
+    this.metrics?.recordWorkflowRetry(input.category);
+
     return { decision, execution: child };
   }
 
@@ -735,8 +789,10 @@ export class ReliabilityService {
       return { id: match.id, version: match.version, hash: match.hash };
     }
     const resolved = resolveNextPromptVersion(existing, hash);
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const created = await this.prisma.promptSnapshot.create({
       data: {
+        workspaceId,
         userId,
         name: input.name,
         version: resolved.version,
@@ -766,8 +822,15 @@ export class ReliabilityService {
     }
 
     const metadata = sanitizeSafeMetadata(input.metadata);
+    const execution = await this.prisma.workflowExecution.findFirst({
+      where: { id: executionId, userId },
+      select: { workspaceId: true },
+    });
+    const workspaceId =
+      execution?.workspaceId ?? (await resolveWorkspaceIdForUser(this.prisma, userId));
     await this.prisma.workflowAuditEvent.create({
       data: {
+        workspaceId,
         userId,
         executionId,
         workflowId,
@@ -784,8 +847,9 @@ export class ReliabilityService {
   }
 
   private async requireExecution(userId: string, executionId: string): Promise<ExecutionLoaded> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const row = await this.prisma.workflowExecution.findFirst({
-      where: { id: executionId, userId },
+      where: { id: executionId, workspaceId },
       include: { promptSnapshot: true },
     });
     if (!row) {

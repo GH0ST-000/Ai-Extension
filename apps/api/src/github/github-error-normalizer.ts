@@ -1,9 +1,34 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Optional } from '@nestjs/common';
 import type { GitHubWriteErrorBody, GitHubWriteErrorCode } from '@project-x/types';
+
+import { MetricsService } from '../observability/metrics.service';
+import { ProviderHealthService } from '../observability/provider-health.service';
 
 @Injectable()
 export class GithubErrorNormalizer {
+  constructor(
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly providerHealth?: ProviderHealthService,
+  ) {}
+
   toHttpException(code: GitHubWriteErrorCode, message: string, status?: number): HttpException {
+    if (code === 'WRITE_OUTCOME_UNKNOWN') {
+      this.metrics?.recordWriteOutcomeUnknown('github', 'write');
+      this.metrics?.recordUncertainWrite();
+      this.providerHealth?.recordSignal('github', false);
+    } else if (code === 'RATE_LIMITED') {
+      this.metrics?.recordProviderRequest({
+        provider: 'github',
+        operation: 'other',
+        status: 'rate_limited',
+        durationSeconds: 0,
+        errorCode: 'GITHUB_RATE_LIMITED',
+      });
+      this.providerHealth?.recordSignal('github', false);
+    } else if (code === 'GITHUB_UNAVAILABLE') {
+      this.providerHealth?.recordSignal('github', false);
+    }
+
     const resolvedStatus = status ?? this.defaultStatus(code);
     const body: GitHubWriteErrorBody & { statusCode: number } = {
       code,

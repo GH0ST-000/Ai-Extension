@@ -547,6 +547,42 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <section className="rise-in-delay-1 space-y-3">
+        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Workspace</h2>
+        <div className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">
+          <Link
+            href="/app/workspace"
+            className="flex items-center justify-between gap-3 border-b border-line/80 px-5 py-4 transition hover:bg-mist/60"
+          >
+            <div>
+              <p className="text-sm font-semibold text-ink">General</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">Name, slug, and soft delete.</p>
+            </div>
+            <span className="text-sm font-semibold text-muted-foreground">Open</span>
+          </Link>
+          <Link
+            href="/app/workspace/members"
+            className="flex items-center justify-between gap-3 border-b border-line/80 px-5 py-4 transition hover:bg-mist/60"
+          >
+            <div>
+              <p className="text-sm font-semibold text-ink">Members</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">Invites, roles, and ownership.</p>
+            </div>
+            <span className="text-sm font-semibold text-muted-foreground">Open</span>
+          </Link>
+          <Link
+            href="/app/billing"
+            className="flex items-center justify-between gap-3 px-5 py-4 transition hover:bg-mist/60"
+          >
+            <div>
+              <p className="text-sm font-semibold text-ink">Billing</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">Plan, seats, and usage.</p>
+            </div>
+            <span className="text-sm font-semibold text-muted-foreground">Open</span>
+          </Link>
+        </div>
+      </section>
+
       <section className="rise-in-delay-2 space-y-3">
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Project memory</h2>
         <div className="rounded-3xl border border-line bg-panel/75 p-6 shadow-panel">

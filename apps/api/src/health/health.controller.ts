@@ -29,7 +29,7 @@ export class HealthController {
       status: 'ok',
       timestamp: new Date().toISOString(),
       service: APP_NAME,
-      version: process.env.npm_package_version ?? '0.0.0',
+      version: process.env.APP_RELEASE || process.env.npm_package_version || '0.0.0',
     };
   }
 }

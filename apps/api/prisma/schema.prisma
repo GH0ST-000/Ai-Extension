@@ -36,6 +36,14 @@ model User {
   repositoryRelationships RepositoryRelationship[]
   workflowExecutions WorkflowExecution[]
   promptSnapshots  PromptSnapshot[]
+  lastWorkspaceId  String?   @map("last_workspace_id")
+  lastWorkspace    Workspace? @relation("UserLastWorkspace", fields: [lastWorkspaceId], references: [id], onDelete: SetNull)
+  workspaceMemberships WorkspaceMembership[]
+  workspaceInvitationsSent WorkspaceInvitation[] @relation("WorkspaceInvitationInviter")
+  workspaceInvitationsAccepted WorkspaceInvitation[] @relation("WorkspaceInvitationAccepter")
+  createdWorkspaces Workspace[] @relation("WorkspaceCreator")
+  createdProjectMemories ProjectMemory[] @relation("ProjectMemoryCreator")
+  createdProjectSystems ProjectSystem[] @relation("ProjectSystemCreator")
 
   @@map("users")
 }
@@ -87,13 +95,152 @@ model JiraConnection {
 }
 
 /**
- * Day 22 — per-user repository-scoped project memory.
- * Identity: userId + github owner/repo (normalized). No embeddings / vector store.
+ * Day 25 — workspace tenancy boundary.
+ * status: active | suspended | deleted
+ */
+model Workspace {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  status           String   @default("active")
+  createdByUserId  String?  @map("created_by_user_id")
+  createdByUser    User?    @relation("WorkspaceCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  memberships      WorkspaceMembership[]
+  invitations      WorkspaceInvitation[]
+  subscription     WorkspaceSubscription?
+  usageCounters    WorkspaceUsageCounter[]
+  usageEvents      WorkspaceUsageEvent[]
+  lastWorkspaceUsers User[] @relation("UserLastWorkspace")
+  projectMemories  ProjectMemory[]
+  projectSystems   ProjectSystem[]
+  repositoryRelationships RepositoryRelationship[]
+  workflowExecutions WorkflowExecution[]
+  promptSnapshots  PromptSnapshot[]
+  workflowAuditEvents WorkflowAuditEvent[]
+  executionCheckpoints ExecutionCheckpoint[]
+  executionFailures ExecutionFailure[]
+
+  @@index([status])
+  @@map("workspaces")
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String
+  status      String   @default("active")
+  joinedAt    DateTime? @map("joined_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, userId])
+  @@index([userId, status])
+  @@index([workspaceId, status])
+  @@map("workspace_memberships")
+}
+
+model WorkspaceInvitation {
+  id               String   @id @default(cuid())
+  workspaceId      String   @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email            String
+  role             String
+  tokenHash        String   @unique @map("token_hash")
+  status           String   @default("pending")
+  expiresAt        DateTime @map("expires_at")
+  invitedByUserId  String   @map("invited_by_user_id")
+  invitedByUser    User     @relation("WorkspaceInvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  acceptedByUserId String?  @map("accepted_by_user_id")
+  acceptedByUser   User?    @relation("WorkspaceInvitationAccepter", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@map("workspace_invitations")
+}
+
+model WorkspaceSubscription {
+  id                      String   @id @default(cuid())
+  workspaceId             String   @unique @map("workspace_id")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider                String   @default("paddle")
+  planId                  String   @map("plan_id")
+  status                  String
+  billingCycle            String?  @map("billing_cycle")
+  providerCustomerId      String?  @map("provider_customer_id")
+  providerSubscriptionId  String?  @map("provider_subscription_id")
+  currentPeriodStart      DateTime? @map("current_period_start")
+  currentPeriodEnd        DateTime? @map("current_period_end")
+  cancelAtPeriodEnd       Boolean  @default(false) @map("cancel_at_period_end")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@index([providerSubscriptionId])
+  @@map("workspace_subscriptions")
+}
+
+model BillingWebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String   @map("event_id")
+  eventType   String   @map("event_type")
+  payloadJson Json     @map("payload_json")
+  processedAt DateTime @default(now()) @map("processed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, eventId])
+  @@index([provider, eventType])
+  @@map("billing_webhook_events")
+}
+
+model WorkspaceUsageCounter {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metric      String
+  periodKey   String   @map("period_key")
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, metric, periodKey])
+  @@map("workspace_usage_counters")
+}
+
+model WorkspaceUsageEvent {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metric          String
+  periodKey       String   @map("period_key")
+  idempotencyKey  String   @map("idempotency_key")
+  quantity        Int      @default(1)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, metric, periodKey])
+  @@map("workspace_usage_events")
+}
+
+/**
+ * Day 22 — repository-scoped project memory (workspace-scoped as of Day 25).
+ * Identity: workspaceId + github owner/repo (normalized). No embeddings / vector store.
+ * USER_PREFERENCE rows use visibility='user' and remain actor-private.
  */
 model ProjectMemory {
   id                 String   @id @default(cuid())
   userId             String   @map("user_id")
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId        String?  @map("workspace_id")
+  workspace          Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdByUserId    String?  @map("created_by_user_id")
+  createdByUser      User?    @relation("ProjectMemoryCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  visibility         String   @default("workspace")
   provider           String   @default("github")
   owner              String
   repository         String
@@ -112,6 +259,10 @@ model ProjectMemory {
   updatedAt          DateTime @updatedAt @map("updated_at")
   lastConfirmedAt    DateTime? @map("last_confirmed_at")
 
+  @@index([workspaceId, owner, repository, status], map: "project_memory_ws_repo_status_idx")
+  @@index([workspaceId, owner, repository, category], map: "project_memory_ws_repo_category_idx")
+  @@index([workspaceId, owner, repository, key], map: "project_memory_ws_repo_key_idx")
+  @@index([workspaceId, provider, owner, repository, category, key, scopeFingerprint], map: "project_memory_ws_lookup_idx")
   @@index([userId, owner, repository, status], map: "project_memory_user_repo_status_idx")
   @@index([userId, owner, repository, category], map: "project_memory_user_repo_category_idx")
   @@index([userId, owner, repository, key], map: "project_memory_user_repo_key_idx")
@@ -120,13 +271,17 @@ model ProjectMemory {
 }
 
 /**
- * Day 23 — user-scoped multi-repository system grouping.
- * No org/team sharing. Relationships are typed edges, not a graph DB.
+ * Day 23 — multi-repository system grouping (workspace-scoped as of Day 25).
+ * Relationships are typed edges, not a graph DB.
  */
 model ProjectSystem {
   id                String   @id @default(cuid())
   userId            String   @map("user_id")
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId       String   @map("workspace_id")
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdByUserId   String?  @map("created_by_user_id")
+  createdByUser     User?    @relation("ProjectSystemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   name              String
   primaryProvider   String   @default("github") @map("primary_provider")
   primaryOwner      String   @map("primary_owner")
@@ -137,6 +292,7 @@ model ProjectSystem {
   relationships     RepositoryRelationship[]
 
   @@index([userId])
+  @@index([workspaceId])
   @@map("project_systems")
 }
 
@@ -161,6 +317,8 @@ model RepositoryRelationship {
   id               String        @id @default(cuid())
   userId           String        @map("user_id")
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId      String        @map("workspace_id")
+  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   systemId         String        @map("system_id")
   system           ProjectSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
   fromOwner        String        @map("from_owner")
@@ -179,6 +337,7 @@ model RepositoryRelationship {
   lastValidatedAt  DateTime?     @map("last_validated_at")
 
   @@index([userId, systemId])
+  @@index([workspaceId, systemId])
   @@index([systemId, type, status])
   @@index([systemId, fromOwner, fromRepository])
   @@index([systemId, toOwner, toRepository])
@@ -189,12 +348,14 @@ model RepositoryRelationship {
 /**
  * Day 24 — Reliability Engine.
  * Durable workflow executions, audit events, prompt snapshots, checkpoints, failures.
- * Does not duplicate extension WorkflowArtifact session storage; stores refs/lineage only.
+ * Workspace-scoped as of Day 25; userId remains the actor.
  */
 model WorkflowExecution {
   id                 String   @id
   userId             String   @map("user_id")
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId        String   @map("workspace_id")
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   workflowId         String   @map("workflow_id")
   executionNumber    Int      @map("execution_number")
   trigger            String
@@ -224,7 +385,10 @@ model WorkflowExecution {
   checkpoints        ExecutionCheckpoint[]
   failures           ExecutionFailure[]
 
-  @@unique([userId, workflowId, executionNumber])
+  @@unique([workspaceId, workflowId, executionNumber])
+  @@index([workspaceId, startedAt])
+  @@index([workspaceId, workflowId])
+  @@index([workspaceId, status])
   @@index([userId, startedAt])
   @@index([userId, workflowId])
   @@index([userId, status])
@@ -234,6 +398,8 @@ model WorkflowExecution {
 model WorkflowAuditEvent {
   id          String   @id @default(cuid())
   userId      String   @map("user_id")
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   executionId String   @map("execution_id")
   execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   workflowId  String   @map("workflow_id")
@@ -246,6 +412,7 @@ model WorkflowAuditEvent {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([executionId, timestamp])
+  @@index([workspaceId, workflowId])
   @@index([userId, workflowId])
   @@map("workflow_audit_events")
 }
@@ -254,6 +421,8 @@ model PromptSnapshot {
   id          String   @id @default(cuid())
   userId      String   @map("user_id")
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name        String
   version     Int
   hash        String
@@ -265,7 +434,8 @@ model PromptSnapshot {
   createdAt   DateTime @default(now()) @map("created_at")
   executions  WorkflowExecution[]
 
-  @@unique([userId, name, hash])
+  @@unique([workspaceId, name, hash])
+  @@index([workspaceId, name, version])
   @@index([userId, name, version])
   @@map("prompt_snapshots")
 }
@@ -273,6 +443,8 @@ model PromptSnapshot {
 model ExecutionCheckpoint {
   id          String   @id @default(cuid())
   userId      String   @map("user_id")
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   executionId String   @map("execution_id")
   execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   kind        String
@@ -282,6 +454,7 @@ model ExecutionCheckpoint {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([executionId, createdAt])
+  @@index([workspaceId, executionId])
   @@index([userId, executionId])
   @@map("execution_checkpoints")
 }
@@ -289,6 +462,8 @@ model ExecutionCheckpoint {
 model ExecutionFailure {
   id               String   @id @default(cuid())
   userId           String   @map("user_id")
+  workspaceId      String   @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   executionId      String   @map("execution_id")
   execution        WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   category         String
@@ -301,6 +476,7 @@ model ExecutionFailure {
   createdAt        DateTime @default(now()) @map("created_at")
 
   @@index([executionId, createdAt])
+  @@index([workspaceId, category])
   @@index([userId, category])
   @@map("execution_failures")
 }

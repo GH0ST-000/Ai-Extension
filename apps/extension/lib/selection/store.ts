@@ -396,7 +396,10 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         assistant: {
           status: 'error',
           action,
-          message: USER_FACING_AI_ERROR,
+          message:
+            error instanceof AiClientError && error.code ? error.message : USER_FACING_AI_ERROR,
+          code: error instanceof AiClientError ? error.code : null,
+          referenceId: error instanceof AiClientError ? error.requestId : null,
         },
       });
     }

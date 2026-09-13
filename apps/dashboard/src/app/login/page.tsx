@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { type FormEvent, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, type FormEvent, useState } from 'react';
 
 import { APP_NAME } from '@project-x/shared';
 
@@ -12,8 +12,16 @@ import { ThemeToggle } from '../../components/theme-toggle';
 
 type Mode = 'login' | 'register';
 
-export default function LoginPage() {
+function safeNextPath(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) {
+    return '/app';
+  }
+  return raw;
+}
+
+function LoginPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +44,7 @@ export default function LoginPage() {
       } else {
         await login({ email, password });
       }
-      router.replace('/app');
+      router.replace(safeNextPath(searchParams.get('next')));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to sign in.');
     } finally {
@@ -183,5 +191,19 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+          Loading…
+        </main>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }

@@ -14,11 +14,13 @@ import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
 import { AiService } from './ai.service';
 import { ExecuteAiActionDto } from './dto/execute-ai-action.dto';
 
 @Controller('ai')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
+@RateLimit({ bucket: 'ai', limit: 60, windowSeconds: 60 })
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 

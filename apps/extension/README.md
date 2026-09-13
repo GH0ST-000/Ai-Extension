@@ -2,7 +2,13 @@
 
 Chrome extension for Project X — Plasmo + React + TypeScript.
 
-## Auth (required)
+## Host permissions
+
+Selected-text AI runs on arbitrary developer pages, so the manifest uses broad
+`https://*/*` / `http://*/*` host permissions and `<all_urls>` content scripts.
+See `docs/security/extension-permissions.md` for compensating controls and the
+Day 29 threat-model rationale.
+
 
 Ask AI requires a signed-in account. Use the extension popup to **register** or **sign in** (same credentials as the dashboard). The JWT is stored in `chrome.storage.local` and sent as `Authorization: Bearer …` on every AI request.
 

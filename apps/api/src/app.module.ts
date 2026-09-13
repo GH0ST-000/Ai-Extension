@@ -23,6 +23,7 @@ import { EntitlementsModule } from './entitlements/entitlements.module';
 import { UsageModule } from './usage/usage.module';
 import { BillingModule } from './billing/billing.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { SecurityModule } from './common/security/security.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { ObservabilityModule } from './observability/observability.module';
         },
       }),
     }),
+    SecurityModule,
     ObservabilityModule,
     PrismaModule,
     RedisModule,

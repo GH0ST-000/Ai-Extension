@@ -2,7 +2,13 @@ import { GITHUB_PATCH_MAX_PATH_CHARACTERS } from '@project-x/types';
 
 /** Normalize repository-relative paths (Day 14 / Day 16 shared). */
 export function normalizeRepositoryPath(raw: string): string | null {
-  const trimmed = raw.trim().replace(/\\/g, '/');
+  let decoded = raw.trim();
+  try {
+    decoded = decodeURIComponent(decoded.replace(/\+/g, ' '));
+  } catch {
+    return null;
+  }
+  const trimmed = decoded.replace(/\\/g, '/');
   if (!trimmed || trimmed.length > GITHUB_PATCH_MAX_PATH_CHARACTERS) {
     return null;
   }
@@ -11,6 +17,15 @@ export function normalizeRepositoryPath(raw: string): string | null {
   }
   if (/^[a-zA-Z]:/.test(trimmed)) {
     return null;
+  }
+  if (trimmed.includes('%')) {
+    return null;
+  }
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const code = trimmed.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) {
+      return null;
+    }
   }
 
   const segments = trimmed.split('/');

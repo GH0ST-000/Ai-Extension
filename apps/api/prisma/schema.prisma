@@ -22,13 +22,15 @@ enum ResponseStyle {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
-  passwordHash String        @map("password_hash")
-  name         String?
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  settings     UserSettings?
+  id             String        @id @default(cuid())
+  email          String        @unique
+  passwordHash   String        @map("password_hash")
+  name           String?
+  /** Incremented on logout to invalidate previously issued JWTs. */
+  sessionVersion Int           @default(0) @map("session_version")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  settings       UserSettings?
   githubConnection GitHubConnection?
   jiraConnection   JiraConnection?
   projectMemories  ProjectMemory[]
@@ -55,6 +57,14 @@ model UserSettings {
   maxOutputTokens    Int           @default(600) @map("max_output_tokens")
   responseStyle      ResponseStyle @default(CONCISE) @map("response_style")
   includePageContext Boolean       @default(true) @map("include_page_context")
+  /** Day 28 — onboarding version for future migrations. */
+  onboardingVersion  Int           @default(1) @map("onboarding_version")
+  welcomeSeenAt      DateTime?     @map("welcome_seen_at")
+  onboardingDismissedAt DateTime?  @map("onboarding_dismissed_at")
+  firstValueAt       DateTime?     @map("first_value_at")
+  firstValueType     String?       @map("first_value_type")
+  dismissedHintIds   Json          @default("[]") @map("dismissed_hint_ids")
+  firstWriteEducationSeenAt DateTime? @map("first_write_education_seen_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   @@map("user_settings")

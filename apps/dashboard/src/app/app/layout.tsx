@@ -10,7 +10,7 @@ import { DashboardNav } from '../../components/dashboard-nav';
 import { AuthGate, useAuthUser } from '../../components/auth-gate';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { WorkspaceSwitcher } from '../../components/workspace-switcher';
-import { clearSession } from '../../lib/auth-storage';
+import { logout } from '../../lib/api';
 import { useWorkspace, WorkspaceProvider } from '../../lib/workspace-context';
 
 function DashboardShell({ children }: { children: ReactNode }) {
@@ -18,8 +18,8 @@ function DashboardShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { currentWorkspaceId, workspaceRevision, error: workspaceError } = useWorkspace();
 
-  function signOut() {
-    clearSession();
+  async function signOut() {
+    await logout();
     router.replace('/login');
   }
 

@@ -45,7 +45,16 @@ export class BillingService {
     @Optional() private readonly providerHealth?: ProviderHealthService,
   ) {
     const paddle = this.config.get('paddle', { infer: true });
-    this.provider = new SandboxBillingProvider(paddle.webhookSecret || 'dev-webhook-secret');
+    const nodeEnv = this.config.get('nodeEnv', { infer: true });
+    const webhookSecret = paddle.webhookSecret?.trim() ?? '';
+    if (!webhookSecret) {
+      if (nodeEnv === 'production' || paddle.environment === 'production') {
+        throw new Error('PADDLE_WEBHOOK_SECRET is required for billing webhooks.');
+      }
+    }
+    this.provider = new SandboxBillingProvider(
+      webhookSecret || (nodeEnv === 'test' ? 'test-webhook-secret' : 'dev-webhook-secret'),
+    );
   }
 
   async getBillingView(workspaceId: string): Promise<WorkspaceBillingView> {
@@ -129,12 +138,35 @@ export class BillingService {
         'No billing customer for this workspace.',
       );
     }
+    const paddle = this.config.get('paddle', { infer: true });
     const appBaseUrl = this.config.get('appBaseUrl', { infer: true });
     const url = await this.provider.getPortalLink(
       row.providerCustomerId,
       `${appBaseUrl}/app/billing`,
     );
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    if (
+      !url.startsWith('https://') &&
+      !(url.startsWith('http://') && paddle.environment === 'sandbox')
+    ) {
+      throw workspaceException('BILLING_PROVIDER_UNAVAILABLE', 'Invalid portal URL.');
+    }
+    // Prefer Paddle-hosted portal domains when a full URL is returned.
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      const allowed =
+        host === 'localhost' ||
+        host.endsWith('.paddle.com') ||
+        host.endsWith('.paddle.io') ||
+        host === 'sandbox-api.paddle.com' ||
+        host === 'api.paddle.com';
+      if (!allowed && paddle.environment === 'production') {
+        throw workspaceException('BILLING_PROVIDER_UNAVAILABLE', 'Invalid portal URL.');
+      }
+    } catch (error) {
+      if (error && typeof error === 'object' && 'getStatus' in error) {
+        throw error;
+      }
       throw workspaceException('BILLING_PROVIDER_UNAVAILABLE', 'Invalid portal URL.');
     }
     return { url };

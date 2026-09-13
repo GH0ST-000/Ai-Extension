@@ -24,6 +24,7 @@ import type {
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
 import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
 import {
@@ -41,7 +42,7 @@ import { WorkspaceGuard } from './workspace.guard';
 import { WorkspacesService } from './workspaces.service';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
 export class WorkspacesController {
   constructor(
     private readonly workspaces: WorkspacesService,
@@ -131,6 +132,7 @@ export class WorkspacesController {
   @HttpCode(201)
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('members:invite')
+  @RateLimit({ bucket: 'invite', limit: 20, windowSeconds: 60 })
   invite(
     @CurrentUser() user: AuthRequestUser,
     @Param('workspaceId') workspaceId: string,
@@ -188,6 +190,7 @@ export class WorkspacesController {
   @Post('workspaces/:workspaceId/billing/checkout')
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('billing:manage')
+  @RateLimit({ bucket: 'billing', limit: 10, windowSeconds: 60 })
   createCheckout(
     @CurrentUser() user: AuthRequestUser,
     @Param('workspaceId') workspaceId: string,
@@ -199,6 +202,7 @@ export class WorkspacesController {
   @Post('workspaces/:workspaceId/billing/portal')
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('billing:manage')
+  @RateLimit({ bucket: 'billing', limit: 10, windowSeconds: 60 })
   createPortal(@Param('workspaceId') workspaceId: string): Promise<BillingPortalResponse> {
     return this.billing.createPortal(workspaceId);
   }
@@ -206,6 +210,7 @@ export class WorkspacesController {
   @Post('workspaces/:workspaceId/billing/cancel')
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('billing:manage')
+  @RateLimit({ bucket: 'billing', limit: 10, windowSeconds: 60 })
   cancelSubscription(
     @CurrentUser() user: AuthRequestUser,
     @Param('workspaceId') workspaceId: string,

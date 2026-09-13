@@ -33,6 +33,7 @@ import {
 } from '../utils/format-pr-review-markdown';
 import { extractFixClipboardText } from '../utils/parse-suggest-fix';
 import { ActionMenu } from './action-menu';
+import { ContextualHint } from './contextual-hint';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
 import { FloatingTriggerButton } from './floating-trigger-button';
@@ -660,6 +661,18 @@ export function SelectionToolbar() {
 
             {phase === 'assistant' && assistant.status === 'menu' ? (
               <div key="menu" className="space-y-1">
+                <ContextualHint
+                  hintId="ask-ai-first"
+                  title="Select text → Ask AI"
+                  body="Choose an action. Ranked Smart Actions put the most useful ones first."
+                />
+                {pageSnapshot?.type === 'github' && pageSnapshot.github?.pullRequestNumber ? (
+                  <ContextualHint
+                    hintId="review-pr-first"
+                    title="Review this PR with Project X"
+                    body="Use Review PR for a scoped report. Writes still need your confirmation."
+                  />
+                ) : null}
                 <EngineeringContextBanner sessions={engineeringSessions} />
                 {multiRepoPanelOpen || workflowOpenPanelHint === 'multi-repo' ? (
                   <MultiRepoPanel sessions={engineeringSessions} />
@@ -876,6 +889,7 @@ export function SelectionToolbar() {
                 message={assistant.message}
                 code={assistant.code}
                 requestId={assistant.referenceId}
+                unauthorized={assistant.unauthorized}
                 onRetry={() => {
                   void retry();
                 }}

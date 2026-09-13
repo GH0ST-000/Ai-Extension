@@ -1,0 +1,19 @@
+# Gitleaks configuration — narrow allowlist for intentional fixtures only.
+title = "Project X gitleaks"
+
+[allowlist]
+  description = "Test/CI placeholders — not production secrets"
+  paths = [
+    '''.*\.spec\.ts$''',
+    '''.*\.test\.ts$''',
+    '''.*\.env\.example$''',
+    '''docs/security/.*''',
+  ]
+  regexes = [
+    '''sk-test-ci-placeholder''',
+    '''sk-test-not-real''',
+    '''project-x-dev-jwt-secret-change-me''',
+    '''project-x-dev-token-encryption-key''',
+    '''test-webhook-secret''',
+    '''dev-webhook-secret''',
+  ]

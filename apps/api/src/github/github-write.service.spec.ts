@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import { GithubWriteService } from './github-write.service';
 
@@ -11,15 +12,38 @@ describe('GithubWriteService', () => {
     connect: vi.fn(),
     get: vi.fn(),
     set: vi.fn(),
+    del: vi.fn(),
   };
+  const errors = {
+    toHttpException: vi.fn((code: string, message: string) => {
+      const err = new Error(message) as Error & { code?: string };
+      err.code = code;
+      return err;
+    }),
+  };
+
+  function fingerprintFor(body: string): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          owner: 'acme',
+          repository: 'app',
+          pullRequestNumber: 1,
+          body,
+        }),
+      )
+      .digest('hex');
+  }
 
   beforeEach(() => {
     vi.restoreAllMocks();
     githubConnections.getDecryptedToken.mockReset();
     redis.get.mockReset();
     redis.set.mockReset();
+    redis.del.mockReset();
     redis.connect.mockReset();
     redis.status = 'ready';
+    errors.toHttpException.mockClear();
   });
 
   it('posts a PR comment and stores idempotency result', async () => {
@@ -50,7 +74,11 @@ describe('GithubWriteService', () => {
         }),
     );
 
-    const service = new GithubWriteService(githubConnections as never, redis as never);
+    const service = new GithubWriteService(
+      githubConnections as never,
+      redis as never,
+      errors as never,
+    );
     const result = await service.postPullRequestComment('user-1', {
       owner: 'acme',
       repository: 'app',
@@ -69,20 +97,26 @@ describe('GithubWriteService', () => {
   });
 
   it('returns cached result for the same idempotency key', async () => {
+    const body = 'Hello review';
     redis.get.mockResolvedValue(
       JSON.stringify({
+        fingerprint: fingerprintFor(body),
         success: true,
         commentId: 7,
         commentUrl: 'https://github.com/acme/app/pull/1#issuecomment-7',
       }),
     );
 
-    const service = new GithubWriteService(githubConnections as never, redis as never);
+    const service = new GithubWriteService(
+      githubConnections as never,
+      redis as never,
+      errors as never,
+    );
     const result = await service.postPullRequestComment('user-1', {
       owner: 'acme',
       repository: 'app',
       pullRequestNumber: 1,
-      body: 'Hello review',
+      body,
       idempotencyKey: 'same-key-01',
     });
 

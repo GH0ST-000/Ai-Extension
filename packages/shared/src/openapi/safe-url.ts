@@ -233,6 +233,15 @@ export function validateOpenApiFetchUrl(
     return { ok: false, reason: 'blocked-host' };
   }
 
+  // Reject dword / hex / octal-like IP hostnames that some parsers accept.
+  if (/^\d+$/.test(hostForIp) || /^0x[0-9a-f]+$/i.test(hostForIp) || hostForIp.includes('0x')) {
+    return { ok: false, reason: 'hostname' };
+  }
+  // Incomplete IPv4 forms like 127.1 that some resolvers expand.
+  if (/^\d{1,3}(\.\d{1,3}){0,2}$/.test(hostForIp) && !isIPv4(hostForIp)) {
+    return { ok: false, reason: 'hostname' };
+  }
+
   if (ipVersion(hostForIp) !== 0) {
     if (isPrivateOrReservedIp(hostForIp)) {
       return { ok: false, reason: 'private-ip' };

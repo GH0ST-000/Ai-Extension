@@ -3,6 +3,7 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
 import {
   OpenApiDiffDto,
   OpenApiExampleDto,
@@ -13,11 +14,12 @@ import {
 import { OpenApiDocumentService } from './openapi-document.service';
 
 @Controller('openapi')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
 export class OpenApiController {
   constructor(private readonly documents: OpenApiDocumentService) {}
 
   @Post('parse-url')
+  @RateLimit({ bucket: 'openapi', limit: 20, windowSeconds: 60 })
   parseUrl(@CurrentUser() _user: AuthRequestUser, @Body() body: ParseOpenApiUrlDto) {
     return this.documents.parseFromUrl(body.url);
   }

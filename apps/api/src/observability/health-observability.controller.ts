@@ -11,10 +11,17 @@ import { ProviderHealthService } from './provider-health.service';
 
 @Controller('health')
 export class DependencyHealthController {
-  constructor(private readonly health: ProviderHealthService) {}
+  constructor(
+    private readonly health: ProviderHealthService,
+    private readonly config: ConfigService<ApiConfig, true>,
+  ) {}
 
   @Get('ready')
-  async ready(): Promise<DependencyHealthResponse> {
+  async ready(
+    @Headers('authorization') authorization?: string,
+    @Headers('x-health-token') healthToken?: string,
+  ): Promise<DependencyHealthResponse> {
+    this.assertDetailsAuthorized(authorization, healthToken);
     const result = await this.health.getDependencies();
     // Readiness focuses on critical local deps; external providers may be degraded.
     const criticalOk =
@@ -30,8 +37,37 @@ export class DependencyHealthController {
   }
 
   @Get('dependencies')
-  async dependencies(): Promise<DependencyHealthResponse> {
+  async dependencies(
+    @Headers('authorization') authorization?: string,
+    @Headers('x-health-token') healthToken?: string,
+  ): Promise<DependencyHealthResponse> {
+    this.assertDetailsAuthorized(authorization, healthToken);
     return this.health.getDependencies();
+  }
+
+  private assertDetailsAuthorized(
+    authorization: string | undefined,
+    healthToken: string | undefined,
+  ): void {
+    const expected = this.config.get('observability.healthDetailsToken', { infer: true });
+    const nodeEnv = this.config.get('nodeEnv', { infer: true });
+
+    if (!expected) {
+      if (nodeEnv === 'production') {
+        throw new UnauthorizedException('Health details token required');
+      }
+      return;
+    }
+
+    const provided =
+      healthToken?.trim() ||
+      (authorization?.toLowerCase().startsWith('bearer ')
+        ? authorization.slice(7).trim()
+        : undefined);
+
+    if (!provided || !safeEqualToken(provided, expected)) {
+      throw new UnauthorizedException('Invalid health token');
+    }
   }
 }
 
@@ -82,4 +118,8 @@ function safeEqual(a: string, b: string): boolean {
   const bBuf = Buffer.from(b);
   if (aBuf.length !== bBuf.length) return false;
   return timingSafeEqual(aBuf, bBuf);
+}
+
+function safeEqualToken(a: string, b: string): boolean {
+  return safeEqual(a, b);
 }

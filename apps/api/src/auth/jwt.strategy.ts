@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export type JwtPayload = {
   sub: string;
   email: string;
+  /** Session version — must match User.sessionVersion. */
+  sv?: number;
 };
 
 export type AuthRequestUser = {
@@ -33,13 +35,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: JwtPayload): Promise<AuthRequestUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, sessionVersion: true },
     });
 
     if (!user) {
       throw new UnauthorizedException('Invalid authentication token.');
     }
 
-    return user;
+    const tokenVersion = typeof payload.sv === 'number' ? payload.sv : 0;
+    if (tokenVersion !== user.sessionVersion) {
+      throw new UnauthorizedException('Session has expired. Please sign in again.');
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+    };
   }
 }

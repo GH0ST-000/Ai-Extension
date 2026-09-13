@@ -492,9 +492,12 @@ export default function SystemsPage() {
                 onChange={(value) => setSelectedId(value)}
               />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                No systems yet. Create one with a primary repository you can access.
-              </p>
+              <div className="rounded-2xl border border-dashed border-line px-4 py-5">
+                <p className="text-sm font-semibold text-ink">No project systems yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Create a system with a primary repository to analyze related services and impact.
+                </p>
+              </div>
             )}
 
             {selected ? (

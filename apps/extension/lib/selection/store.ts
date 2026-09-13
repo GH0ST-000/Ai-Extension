@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { firstValueTypeForAiAction } from '@project-x/shared';
 import { AIAction, type PageContext } from '@project-x/types';
 
 import {
@@ -8,6 +9,8 @@ import {
   type ReplacementResult,
 } from '../editing';
 import { extractPageContext } from '../context/extract-page-context';
+import { markFirstValue } from '../onboarding/onboarding-api';
+import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
 import { ERROR_INTELLIGENCE_ACTIONS, USER_FACING_AI_ERROR } from './constants';
 import {
@@ -28,7 +31,6 @@ import { useOpenApiSessionStore } from './openapi';
 import { useEngineeringSessionStore } from './engineering';
 import { useWorkflowSessionStore } from './workflow';
 import { getActiveReliabilityExecutionId } from './reliability/reliability-hooks';
-import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
 
 type SelectionToolbarState = {
   phase: ToolbarPhase;
@@ -375,6 +377,10 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         assistant: { status: 'success', action, content: finalText },
       });
 
+      if (finalText.trim().length > 0) {
+        void markFirstValue(firstValueTypeForAiAction(action));
+      }
+
       if (action === AIAction.SUGGEST_FIX) {
         const applyTarget = get().suggestFixApplyTarget;
         if (applyTarget?.findingId?.startsWith('ci-fix:')) {
@@ -397,9 +403,16 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           status: 'error',
           action,
           message:
-            error instanceof AiClientError && error.code ? error.message : USER_FACING_AI_ERROR,
+            error instanceof AiClientError
+              ? error.unauthorized
+                ? error.message
+                : error.code
+                  ? error.message
+                  : USER_FACING_AI_ERROR
+              : USER_FACING_AI_ERROR,
           code: error instanceof AiClientError ? error.code : null,
           referenceId: error instanceof AiClientError ? error.requestId : null,
+          unauthorized: error instanceof AiClientError ? error.unauthorized : false,
         },
       });
     }

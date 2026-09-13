@@ -5,9 +5,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
 import { UpsertJiraConnectionDto } from '../jira/dto/upsert-jira-connection.dto';
 import { JiraConnectionService } from '../jira/jira-connection.service';
+import { UpdateOnboardingDto } from './dto/update-onboarding.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UpsertGithubConnectionDto } from './dto/upsert-github-connection.dto';
 import { GithubConnectionService } from './github-connection.service';
+import { OnboardingService } from './onboarding.service';
 import { SettingsService } from './settings.service';
 
 @Controller('settings')
@@ -17,6 +19,7 @@ export class SettingsController {
     private readonly settingsService: SettingsService,
     private readonly githubConnectionService: GithubConnectionService,
     private readonly jiraConnectionService: JiraConnectionService,
+    private readonly onboardingService: OnboardingService,
   ) {}
 
   @Get()
@@ -27,6 +30,16 @@ export class SettingsController {
   @Patch()
   update(@CurrentUser() user: AuthRequestUser, @Body() body: UpdateSettingsDto) {
     return this.settingsService.updateForUser(user.id, body);
+  }
+
+  @Get('onboarding')
+  getOnboarding(@CurrentUser() user: AuthRequestUser) {
+    return this.onboardingService.getView(user.id);
+  }
+
+  @Patch('onboarding')
+  updateOnboarding(@CurrentUser() user: AuthRequestUser, @Body() body: UpdateOnboardingDto) {
+    return this.onboardingService.update(user.id, body);
   }
 
   @Get('github')

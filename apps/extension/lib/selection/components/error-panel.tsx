@@ -1,8 +1,14 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import {
+  copyTextToClipboard,
+  formatSafeDiagnostics,
+  mapToUserFacingError,
+} from '@project-x/shared';
 import type { AIAction, WorkspaceErrorCode } from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
+import { getDashboardBaseUrl, getDashboardBillingUrl } from '~/lib/workspace/dashboard-url';
 import { EntitlementUpgradeCta } from '~/lib/workspace/entitlement-upgrade-cta';
 import { isEntitlementFailureCode } from '~/lib/workspace/entitlement';
 
@@ -11,8 +17,9 @@ import { getActionLabel, USER_FACING_AI_ERROR } from '../constants';
 type ErrorPanelProps = {
   action: AIAction;
   message?: string;
-  code?: WorkspaceErrorCode | null;
+  code?: WorkspaceErrorCode | string | null;
   requestId?: string | null;
+  unauthorized?: boolean;
   onRetry: () => void;
   onBack: () => void;
   onClose: () => void;
@@ -24,13 +31,75 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
     message = USER_FACING_AI_ERROR,
     code = null,
     requestId = null,
+    unauthorized = false,
     onRetry,
     onBack,
     onClose,
   },
   ref,
 ) {
-  const entitlement = isEntitlementFailureCode(code);
+  const [copied, setCopied] = useState(false);
+  const entitlement = isEntitlementFailureCode(code as WorkspaceErrorCode | null);
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const mapped = mapToUserFacingError({
+    code,
+    message,
+    referenceId: requestId,
+    unauthorized,
+    offline,
+  });
+
+  async function copyReference() {
+    if (!requestId) return;
+    const ok = await copyTextToClipboard(requestId);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  }
+
+  async function copyDiagnostics() {
+    const text = formatSafeDiagnostics({
+      client: 'extension',
+      integration: 'generic',
+      errorCode: mapped.code,
+      requestReference: requestId ?? undefined,
+      online: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
+    });
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  }
+
+  function runPrimary() {
+    const kind = mapped.primaryAction?.kind;
+    if (kind === 'retry') {
+      onRetry();
+      return;
+    }
+    if (kind === 'view_plans') {
+      window.open(getDashboardBillingUrl(), '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (kind === 'reconnect_github' || kind === 'grant_repo_access' || kind === 'open_settings') {
+      window.open(`${getDashboardBaseUrl()}/app/settings`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (kind === 'sign_in') {
+      // Popup auth — open extension popup is browser-controlled; dashboard login is safe fallback.
+      window.open(`${getDashboardBaseUrl()}/login`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (kind === 'copy_reference') {
+      void copyReference();
+      return;
+    }
+    if (kind === 'refresh') {
+      onRetry();
+    }
+  }
 
   return (
     <motion.div
@@ -45,22 +114,29 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
         event.stopPropagation();
       }}
       className={cn(
-        'pointer-events-auto w-[280px] overflow-hidden rounded-[12px] p-2',
+        'pointer-events-auto w-[300px] overflow-hidden rounded-[12px] p-2',
         'bg-elevated text-primary shadow-menu backdrop-blur-2xl border border-border',
       )}
     >
-      <div className="mb-2 flex items-start justify-between px-1">
-        <div>
+      <div className="mb-2 flex items-start justify-between gap-2 px-1">
+        <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
             {getActionLabel(action)}
           </p>
           {entitlement ? (
             <div className="mt-1">
-              <EntitlementUpgradeCta code={code} message={message} compact />
+              <EntitlementUpgradeCta
+                code={code as WorkspaceErrorCode}
+                message={mapped.message}
+                compact
+              />
             </div>
           ) : (
             <>
-              <p className="mt-1 text-[12.5px] leading-5 text-primary">{message}</p>
+              <p className="mt-1 text-[12.5px] font-semibold leading-5 text-primary">
+                {mapped.title}
+              </p>
+              <p className="mt-1 text-[12px] leading-5 text-secondary">{mapped.message}</p>
               {requestId ? (
                 <p className="mt-1 font-mono text-[10px] text-muted">Reference: {requestId}</p>
               ) : null}
@@ -75,16 +151,32 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
           Close
         </button>
       </div>
-      <div className="flex items-center gap-1 px-1 pb-1">
-        {entitlement ? null : (
+      <div className="flex flex-wrap items-center gap-1 px-1 pb-1">
+        {entitlement ? null : mapped.primaryAction && mapped.primaryAction.kind !== 'none' ? (
           <button
             type="button"
-            onClick={onRetry}
+            onClick={runPrimary}
             className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
           >
-            Retry
+            {mapped.primaryAction.label}
           </button>
-        )}
+        ) : null}
+        {requestId ? (
+          <button
+            type="button"
+            onClick={() => void copyReference()}
+            className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+          >
+            {copied ? 'Copied' : 'Copy reference'}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void copyDiagnostics()}
+          className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+        >
+          Copy diagnostics
+        </button>
         <button
           type="button"
           onClick={onBack}

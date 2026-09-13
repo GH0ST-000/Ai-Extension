@@ -13,6 +13,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:security": "pnpm --filter @project-x/shared test -- security && pnpm --filter @project-x/api test -- security && pnpm --filter @project-x/extension test -- security",
+    "audit:deps": "pnpm audit --audit-level=high",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css}\"",
     "clean": "turbo run clean && rm -rf node_modules",
@@ -46,7 +48,9 @@
       "@types/react": "18.3.18",
       "@types/react-dom": "18.3.5",
       "react": "18.3.1",
-      "react-dom": "18.3.1"
+      "react-dom": "18.3.1",
+      "multer": ">=2.3.0",
+      "@babel/traverse": ">=7.23.2"
     }
   }
 }

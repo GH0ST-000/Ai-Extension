@@ -1,7 +1,7 @@
 import type { AuthTokenResponse, LoginRequest, RegisterRequest } from '@project-x/types';
 
 import { clearCurrentWorkspaceId } from '../workspace/current-workspace-id';
-import { clearSession, setSession } from './auth-storage';
+import { clearSession, getAccessToken, setSession } from './auth-storage';
 
 function getApiBaseUrl(): string {
   const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
@@ -64,6 +64,20 @@ export async function register(input: RegisterRequest): Promise<AuthTokenRespons
 }
 
 export async function signOut(): Promise<void> {
+  const token = await getAccessToken().catch(() => null);
+  if (token) {
+    try {
+      await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch {
+      // Always clear local session.
+    }
+  }
   await clearSession();
   await clearCurrentWorkspaceId();
 }

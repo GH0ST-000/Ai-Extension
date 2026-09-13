@@ -251,8 +251,11 @@ export default function WorkspaceMembersPage() {
             Loading members…
           </div>
         ) : members.length === 0 ? (
-          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
-            No members yet.
+          <div className="rounded-3xl border border-dashed border-line bg-panel/75 px-5 py-8 shadow-panel">
+            <p className="font-display text-lg font-semibold text-ink">No team members yet</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Invite a teammate by email when you are ready to collaborate in this workspace.
+            </p>
           </div>
         ) : (
           <ul className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">

@@ -1,49 +1,52 @@
 import Link from 'next/link';
 
 import { HealthCheckButton } from '../../components/health-check-button';
+import { OnboardingChecklist } from '../../components/onboarding-checklist';
 
 const CAPABILITIES = [
   {
-    label: 'Smart Actions',
-    value: 'Ranked for the selection',
-    copy: 'Code, errors, prose, and short text reorder Explain, Summarize, Code Review, and the rest — instantly, on-device.',
+    label: 'Ask AI',
+    value: 'Selected text, ranked actions',
+    copy: 'Explain, summarize, improve writing, review code, and more — ranked on-device for what you selected.',
   },
   {
     label: 'GitHub',
     value: 'Review with confirmation',
-    copy: 'PR report → curated Review Draft → COMMENT / APPROVE / REQUEST_CHANGES. Your PAT stays encrypted on the API.',
+    copy: 'Review PRs, analyze CI, suggest fixes, and post comments or apply patches only after you confirm.',
   },
   {
     label: 'Jira',
     value: 'Issue intelligence',
-    copy: 'Summarize, acceptance criteria, technical plan, risks — then compare with a PR. Read-only; token stays on the API.',
+    copy: 'Summarize issues, extract acceptance criteria, plan work, and compare with a PR. Read-only.',
   },
   {
-    label: 'OpenAPI',
-    value: 'Contract intelligence',
-    copy: 'Explain endpoints, generate synthetic examples, surface contract risks — never execute the documented API.',
+    label: 'API contracts',
+    value: 'OpenAPI / Swagger',
+    copy: 'Explain endpoints, generate examples, and surface contract risks — never execute the documented API.',
   },
   {
-    label: 'Alignment',
-    value: 'Cross-context analysis',
-    copy: 'Jira + PR + OpenAPI in one bounded Engineering Context, with validated evidence and stale bindings.',
+    label: 'Requirement alignment',
+    value: 'Covered · Partial · Not evident',
+    copy: 'Compare requirements with PR and API context. Evidence stays scoped to what Project X can see.',
   },
   {
-    label: 'Flow',
-    value: 'Safe workflow agent',
-    copy: 'Approve a plan first. Read-only steps may run; every GitHub write still needs Day 12 / 13 / 14 confirmation.',
+    label: 'Developer workflows',
+    value: 'Plan first, then confirm writes',
+    copy: 'Approve a plan before multi-step analysis. GitHub writes still need explicit confirmation.',
   },
 ] as const;
 
 const FLOW_STEPS = [
-  'Highlight text, open a PR, Jira issue, or Swagger/OpenAPI page',
-  'Use Text · GitHub · Jira · API tabs — or Flow for a multi-step plan',
-  'Stream answers — Copy, Replace, Align, or confirm a GitHub write',
+  'Select text, or open a PR, Jira issue, or API docs page',
+  'Choose a relevant action — Ask AI ranks the useful ones first',
+  'Review the result. Writes only happen after you confirm',
 ] as const;
 
 export default function DashboardHomePage() {
   return (
     <div className="space-y-8">
+      <OnboardingChecklist />
+
       <section className="rise-in panel-glass relative overflow-hidden rounded-3xl p-7 shadow-panel md:p-10">
         <div
           className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-accent/20 blur-3xl"
@@ -55,15 +58,14 @@ export default function DashboardHomePage() {
         />
 
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-          Extension studio
+          Project X
         </p>
         <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold tracking-tight text-ink text-balance md:text-5xl">
-          Smart actions, PRs, Jira, OpenAPI, alignment, and a safe Flow agent.
+          Understand, review, and act where you work.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-          Sign in here to tune response length, page context, GitHub, and read-only Jira. The
-          extension uses the same account for Ask AI, ranking, contract intelligence, and safe
-          writes.
+          Use the Chrome extension for Ask AI on any page. Connect GitHub here for PR reviews, CI
+          analysis, and confirmed writes. The extension and dashboard share the same account.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -71,7 +73,13 @@ export default function DashboardHomePage() {
             href="/app/settings"
             className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110"
           >
-            Open settings
+            Connect GitHub
+          </Link>
+          <Link
+            href="/app/billing"
+            className="rounded-xl border border-line bg-panel/80 px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist"
+          >
+            Plan & usage
           </Link>
           <HealthCheckButton />
         </div>
@@ -97,13 +105,15 @@ export default function DashboardHomePage() {
       <section className="rise-in-delay-2 overflow-hidden rounded-3xl border border-ink bg-ink text-inverse">
         <div className="grid md:grid-cols-[1.2fr_0.8fr]">
           <div className="p-7 md:p-9">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Flow</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">
+              First value
+            </p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-balance">
-              Select → tabs → stream → confirm writes.
+              Select text → Ask AI → or open a PR and Review.
             </h2>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-inverse/65">
-              Works on docs, GitHub PRs, Jira issues, and OpenAPI/Swagger. Context stays in the
-              extension; secrets never leave the API.
+              GitHub is optional for selected-text actions. Project X never posts or changes code
+              without your confirmation.
             </p>
           </div>
           <div className="relative border-t border-inverse/10 p-7 md:border-l md:border-t-0 md:p-9">
@@ -119,24 +129,6 @@ export default function DashboardHomePage() {
             </ol>
           </div>
         </div>
-      </section>
-
-      <section className="rise-in-delay-3 rounded-3xl border border-line bg-panel/70 p-6 shadow-panel md:p-7">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Actions available
-        </p>
-        <p className="mt-2 font-display text-xl font-semibold tracking-tight text-ink">
-          Explain · Improve Writing · Summarize · Translate · Explain Code · Code Review · Suggest
-          Fix · Review Entire PR · Understand Error · Find Root Cause · Summarize Issue · Acceptance
-          Criteria · Technical Plan · Risks & Questions · Compare Jira ↔ PR · Explain Endpoint ·
-          Generate Example · Analyze Contract · Analyze API Changes · Engineering Alignment · Plan
-          Workflow · Custom
-        </p>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Shortcuts stay bound to each action even when Smart Actions reorders the menu. GitHub
-          comment and review submit are confirmed writes — not AI actions. OpenAPI never executes
-          the documented API. Flow never auto-runs writes. Jira stays read-only.
-        </p>
       </section>
     </div>
   );

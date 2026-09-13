@@ -3,6 +3,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@ne
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
 import { AnalyzeCiFailureDto } from './dto/analyze-ci-failure.dto';
 import { FetchFileVersionsDto } from './dto/fetch-file-versions.dto';
 import { FetchPullRequestFileVersionsDto } from './dto/fetch-pull-request-file-versions.dto';
@@ -19,7 +20,7 @@ import { GithubReviewService } from './github-review.service';
 import { GithubWriteService } from './github-write.service';
 
 @Controller('github')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
 export class GithubController {
   constructor(
     private readonly githubWriteService: GithubWriteService,
@@ -30,6 +31,7 @@ export class GithubController {
   ) {}
 
   @Post('pull-requests/comments')
+  @RateLimit({ bucket: 'github-write', limit: 30, windowSeconds: 60 })
   postPullRequestComment(
     @CurrentUser() user: AuthRequestUser,
     @Body() body: PostPullRequestCommentDto,
@@ -38,6 +40,7 @@ export class GithubController {
   }
 
   @Post('pull-requests/:owner/:repo/:number/reviews')
+  @RateLimit({ bucket: 'github-write', limit: 30, windowSeconds: 60 })
   submitPullRequestReview(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,
@@ -49,6 +52,7 @@ export class GithubController {
   }
 
   @Post('pull-requests/:owner/:repo/:number/patches/prepare')
+  @RateLimit({ bucket: 'github-write', limit: 30, windowSeconds: 60 })
   preparePullRequestPatch(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,
@@ -60,6 +64,7 @@ export class GithubController {
   }
 
   @Post('pull-requests/:owner/:repo/:number/patches/apply')
+  @RateLimit({ bucket: 'github-write', limit: 20, windowSeconds: 60 })
   applyPullRequestPatch(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,

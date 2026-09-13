@@ -2,6 +2,15 @@
 
 import { useId, useState } from 'react';
 
+import {
+  GITHUB_PERMISSION_DETAILS,
+  GITHUB_READS,
+  GITHUB_TRUST_SUMMARY,
+  GITHUB_WHY_CONNECT,
+  GITHUB_WRITE_CONFIRMATION_NOTE,
+  GITHUB_WRITES,
+} from '@project-x/shared';
+
 const GITHUB_PAT_NEW = 'https://github.com/settings/personal-access-tokens/new';
 
 const STEPS = [
@@ -18,8 +27,9 @@ const STEPS = [
     detail: 'Repository access → Only select repositories → add the repos you need.',
   },
   {
-    title: 'Pull requests permission',
-    detail: 'Repository permissions → Pull requests → Read and write.',
+    title: 'Repository permissions',
+    detail:
+      'Pull requests: Read and write. Contents: Read and write (for Apply Fix). Checks: Read-only (for CI analysis).',
   },
   {
     title: 'Generate & paste',
@@ -29,10 +39,60 @@ const STEPS = [
 
 export function GithubPatGuide() {
   const [open, setOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const panelId = useId();
+  const permissionsId = useId();
 
   return (
-    <div className="mt-3">
+    <div className="mt-3 space-y-3">
+      <p className="text-sm leading-relaxed text-muted-foreground">{GITHUB_WHY_CONNECT}</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">{GITHUB_TRUST_SUMMARY}</p>
+      <p className="rounded-xl border border-line/80 bg-mist/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+        {GITHUB_WRITE_CONFIRMATION_NOTE}
+      </p>
+
+      <button
+        type="button"
+        aria-expanded={permissionsOpen}
+        aria-controls={permissionsId}
+        onClick={() => setPermissionsOpen((value) => !value)}
+        className="text-sm font-semibold text-accent underline-offset-4 hover:underline"
+      >
+        {permissionsOpen ? 'Hide permissions' : 'View permissions'}
+      </button>
+
+      {permissionsOpen ? (
+        <div id={permissionsId} className="rounded-2xl border border-line bg-panel/70 p-4 text-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            What Project X reads
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+            {GITHUB_READS.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            What Project X can write
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+            {GITHUB_WRITES.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Only after explicit confirmation for each write.
+          </p>
+          <div className="mt-4 space-y-2">
+            {GITHUB_PERMISSION_DETAILS.map((item) => (
+              <div key={item.title}>
+                <p className="font-semibold text-ink">{item.title}</p>
+                <p className="text-muted-foreground">{item.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <button
         type="button"
         aria-expanded={open}
@@ -57,7 +117,7 @@ export function GithubPatGuide() {
       {open ? (
         <div
           id={panelId}
-          className="relative mt-3 overflow-hidden rounded-2xl border border-line bg-mist/40 rise-in"
+          className="relative mt-1 overflow-hidden rounded-2xl border border-line bg-mist/40 rise-in"
         >
           <div className="pointer-events-none absolute inset-0" aria-hidden>
             <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-accent/15 blur-2xl" />
@@ -69,8 +129,7 @@ export function GithubPatGuide() {
               5 steps · Fine-grained PAT
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Only permission needed:{' '}
-              <span className="font-semibold text-ink">Pull requests · Read and write</span>
+              Project X stores the token encrypted on the API and never returns it to the browser.
             </p>
           </div>
 
@@ -80,28 +139,23 @@ export function GithubPatGuide() {
                 <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-inverse">
                   {index + 1}
                 </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink">{item.title}</p>
-                  <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                    {item.detail}
-                  </p>
+                <div>
+                  <p className="font-semibold text-ink">{item.title}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">{item.detail}</p>
                 </div>
               </li>
             ))}
           </ol>
 
-          <div className="relative flex flex-wrap items-center gap-3 border-t border-line/70 bg-panel/50 px-4 py-3.5 sm:px-5">
+          <div className="relative border-t border-line/70 px-4 py-3 sm:px-5">
             <a
               href={GITHUB_PAT_NEW}
               target="_blank"
               rel="noreferrer"
-              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110"
+              className="text-sm font-semibold text-accent underline-offset-4 hover:underline"
             >
-              Open GitHub create page
+              Open GitHub token settings
             </a>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Token is validated, encrypted on the API, and never shown again here.
-            </p>
           </div>
         </div>
       ) : null}

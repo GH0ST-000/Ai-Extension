@@ -4,20 +4,13 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, type FormEvent, useState } from 'react';
 
-import { APP_NAME } from '@project-x/shared';
+import { APP_NAME, safeInternalPath } from '@project-x/shared';
 
 import { ApiError, login, register } from '../../lib/api';
 import { BrandMark } from '../../components/brand-mark';
 import { ThemeToggle } from '../../components/theme-toggle';
 
 type Mode = 'login' | 'register';
-
-function safeNextPath(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) {
-    return '/app';
-  }
-  return raw;
-}
 
 function LoginPageContent() {
   const router = useRouter();
@@ -44,7 +37,7 @@ function LoginPageContent() {
       } else {
         await login({ email, password });
       }
-      router.replace(safeNextPath(searchParams.get('next')));
+      router.replace(safeInternalPath(searchParams.get('next')));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to sign in.');
     } finally {

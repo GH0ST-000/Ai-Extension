@@ -220,6 +220,8 @@ export interface UpdateUserSettingsRequest {
   includePageContext?: boolean;
 }
 
+export * from './onboarding';
+
 /** Per-user GitHub connection status — never includes the raw PAT. */
 export interface GitHubConnectionStatus {
   connected: boolean;

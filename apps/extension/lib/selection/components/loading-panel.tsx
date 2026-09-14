@@ -5,6 +5,7 @@ import { cn } from '~/lib/utils/cn';
 
 import { getActionLabel } from '../constants';
 import type { AIAction } from '@project-x/types';
+import { BrandMark } from './brand-mark';
 
 type LoadingPanelProps = {
   action: AIAction;
@@ -21,38 +22,47 @@ export const LoadingPanel = forwardRef<HTMLDivElement, LoadingPanelProps>(functi
       role="status"
       aria-live="polite"
       aria-label={`${getActionLabel(action)} loading`}
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.16 }}
+      initial={{ opacity: 0, scale: 0.96, y: 6 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98, y: 4 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 30 }}
       onMouseDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
       }}
       className={cn(
-        'pointer-events-auto w-[280px] overflow-hidden rounded-[12px] p-2',
-        'bg-elevated text-primary shadow-menu backdrop-blur-2xl border border-border',
+        'pointer-events-auto w-[300px] overflow-hidden rounded-panel p-3',
+        'px-panel-wash text-primary shadow-menu backdrop-blur-2xl border border-border',
       )}
     >
-      <div className="mb-2 flex items-center justify-between px-1">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-            {getActionLabel(action)}
-          </p>
-          <p className="mt-1 text-[12px] text-secondary motion-safe:animate-pulse">Thinking...</p>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="relative">
+            <BrandMark className="h-7 w-7 rounded-[9px]" />
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent px-breathe"
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[12px] font-semibold tracking-tight text-primary">
+              {getActionLabel(action)}
+            </p>
+            <p className="text-[11px] text-muted">Composing a thoughtful answer…</p>
+          </div>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-2 py-1 text-[11px] text-muted hover:bg-hover hover:text-primary"
+          className="rounded-lg px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-primary"
         >
           Close
         </button>
       </div>
-      <div className="space-y-2 px-1 pb-1">
-        <div className="h-2.5 w-11/12 rounded bg-hover motion-reduce:animate-none motion-safe:animate-pulse" />
-        <div className="h-2.5 w-9/12 rounded bg-hover motion-reduce:animate-none motion-safe:animate-pulse" />
-        <div className="h-2.5 w-10/12 rounded bg-hover motion-reduce:animate-none motion-safe:animate-pulse" />
+      <div className="space-y-2 rounded-xl bg-surface/60 p-2.5 ring-1 ring-border">
+        <div className="h-2.5 w-11/12 rounded-full px-shimmer motion-reduce:animate-none" />
+        <div className="h-2.5 w-9/12 rounded-full px-shimmer motion-reduce:animate-none" />
+        <div className="h-2.5 w-10/12 rounded-full px-shimmer motion-reduce:animate-none" />
       </div>
     </motion.div>
   );

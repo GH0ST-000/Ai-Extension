@@ -23,7 +23,9 @@ function applySecurityHeaders(_req: Request, res: Response, next: NextFunction):
     'Permissions-Policy',
     'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   );
-  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  // API is consumed cross-origin by the dashboard and extension content scripts.
+  // `same-site` would surface as a CORS failure on third-party pages (e.g. selection toolbar).
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 }
 

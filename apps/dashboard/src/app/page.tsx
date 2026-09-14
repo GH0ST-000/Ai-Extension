@@ -1,11 +1,26 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { APP_NAME } from '@project-x/shared';
 
 import { BrandGlyph } from '../components/brand-mark';
+import { JsonLd } from '../components/json-ld';
 import { LandingHeader } from '../components/landing-header';
 import { LandingHeroCtas } from '../components/landing-hero-ctas';
 import { LandingProductStage } from '../components/landing-product-stage';
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_TAGLINE,
+  absoluteUrl,
+  buildSocialMetadata,
+} from '../lib/site';
+
+export const metadata: Metadata = {
+  title: { absolute: `${SITE_NAME} — ${SITE_TAGLINE}` },
+  description: SITE_DESCRIPTION,
+  ...buildSocialMetadata({ path: '/' }),
+};
 
 const SIGNALS = [
   {
@@ -39,9 +54,64 @@ const GUARDS = [
   'Tokens stay on the API',
 ] as const;
 
+function landingJsonLd() {
+  const url = absoluteUrl('/');
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${url}#organization`,
+        name: SITE_NAME,
+        url,
+        logo: absoluteUrl('/brand/mark.png'),
+        description: SITE_DESCRIPTION,
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${url}#website`,
+        url,
+        name: SITE_NAME,
+        description: SITE_DESCRIPTION,
+        publisher: { '@id': `${url}#organization` },
+        inLanguage: 'en-US',
+      },
+      {
+        '@type': 'WebApplication',
+        '@id': `${url}#app`,
+        name: SITE_NAME,
+        url,
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Chrome',
+        description: SITE_DESCRIPTION,
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD',
+        },
+        publisher: { '@id': `${url}#organization` },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        name: `${SITE_NAME} Chrome Extension`,
+        applicationCategory: 'BrowserApplication',
+        operatingSystem: 'Chrome',
+        description:
+          'Contextual AI selection toolbar for explanations, GitHub reviews, Jira alignment, and OpenAPI analysis.',
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD',
+        },
+      },
+    ],
+  };
+}
+
 export default function HomePage() {
   return (
     <main className="atmosphere relative min-h-screen overflow-hidden">
+      <JsonLd data={landingJsonLd()} />
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" aria-hidden />
       <div
         className="pointer-events-none absolute left-[-10%] top-[-12%] h-[36rem] w-[36rem] rounded-full bg-accent/20 blur-3xl float-soft"
@@ -53,17 +123,26 @@ export default function HomePage() {
       />
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 py-6 md:px-10 md:py-8">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-inverse"
+        >
+          Skip to content
+        </a>
         <LandingHeader />
 
-        <section className="flex min-h-[62vh] flex-col justify-center py-12 md:min-h-[68vh] md:py-14">
+        <section
+          id="main-content"
+          className="flex min-h-[62vh] flex-col justify-center py-12 md:min-h-[68vh] md:py-14"
+        >
           <div className="rise-in-delay-1 max-w-3xl">
             <BrandGlyph size={56} className="mb-5 rounded-[1.15rem] shadow-soft" />
-            <p className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
+            <h1 className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
               {APP_NAME}
-            </p>
-            <h1 className="max-w-2xl font-display text-2xl font-semibold leading-[1.12] tracking-tight text-ink text-balance md:text-4xl">
-              AI that reads the page with you.
             </h1>
+            <p className="max-w-2xl font-display text-2xl font-semibold leading-[1.12] tracking-tight text-ink text-balance md:text-4xl">
+              {SITE_TAGLINE}
+            </p>
             <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
               One Chrome selection. Five focused tabs. Confirmed GitHub writes only when you say so.
             </p>
@@ -71,13 +150,16 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in pb-4 md:pb-6">
+        <section className="rise-in pb-4 md:pb-6" aria-labelledby="surface-heading">
           <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
                 Extension surface
               </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+              <h2
+                id="surface-heading"
+                className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
+              >
                 Text · GitHub · Jira · API · Flow
               </h2>
             </div>
@@ -88,13 +170,16 @@ export default function HomePage() {
           <LandingProductStage />
         </section>
 
-        <section className="rise-in-delay-1 py-14 md:py-16">
+        <section className="rise-in-delay-1 py-14 md:py-16" aria-labelledby="device-heading">
           <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-14">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
                 Before the cloud
               </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+              <h2
+                id="device-heading"
+                className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
+              >
                 Ranking and redaction stay on the device.
               </h2>
               <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
@@ -123,13 +208,19 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in-delay-2 overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-inverse shadow-panel md:px-10 md:py-12">
+        <section
+          className="rise-in-delay-2 overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-inverse shadow-panel md:px-10 md:py-12"
+          aria-labelledby="align-heading"
+        >
           <div className="grid gap-10 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:gap-12">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
                 Engineering alignment
               </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-balance md:text-3xl">
+              <h2
+                id="align-heading"
+                className="mt-2 font-display text-2xl font-semibold tracking-tight text-balance md:text-3xl"
+              >
                 Three sources. One bounded answer.
               </h2>
               <p className="mt-3 max-w-md text-sm leading-relaxed text-inverse/65 md:text-base">
@@ -168,12 +259,15 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in-delay-3 py-14 md:py-16">
+        <section className="rise-in-delay-3 py-14 md:py-16" aria-labelledby="control-heading">
           <div className="max-w-2xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
               Control plane
             </p>
-            <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+            <h2
+              id="control-heading"
+              className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
+            >
               Autonomy stops where risk starts.
             </h2>
           </div>
@@ -211,7 +305,27 @@ export default function HomePage() {
         </section>
 
         <footer className="border-t border-line/70 py-6 text-sm text-muted-foreground">
-          {APP_NAME} · Chrome extension + studio
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              <span className="font-medium text-ink">{APP_NAME}</span>
+              {' · '}
+              Chrome extension + studio
+            </p>
+            <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
+              <Link href="/" className="transition hover:text-ink">
+                Home
+              </Link>
+              <Link href="/login" className="transition hover:text-ink">
+                Sign in
+              </Link>
+              <Link href="/app" className="transition hover:text-ink">
+                Studio
+              </Link>
+              <a href="/sitemap.xml" className="transition hover:text-ink">
+                Sitemap
+              </a>
+            </nav>
+          </div>
         </footer>
       </div>
     </main>

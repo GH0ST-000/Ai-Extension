@@ -13,6 +13,7 @@ import { EntitlementUpgradeCta } from '~/lib/workspace/entitlement-upgrade-cta';
 import { isEntitlementFailureCode } from '~/lib/workspace/entitlement';
 
 import { getActionLabel, USER_FACING_AI_ERROR } from '../constants';
+import { BrandMark } from './brand-mark';
 
 type ErrorPanelProps = {
   action: AIAction;
@@ -88,7 +89,6 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
       return;
     }
     if (kind === 'sign_in') {
-      // Popup auth — open extension popup is browser-controlled; dashboard login is safe fallback.
       window.open(`${getDashboardBaseUrl()}/login`, '_blank', 'noopener,noreferrer');
       return;
     }
@@ -105,58 +105,59 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
     <motion.div
       ref={ref}
       role="alert"
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.16 }}
+      initial={{ opacity: 0, scale: 0.96, y: 6 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98, y: 4 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 30 }}
       onMouseDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
       }}
       className={cn(
-        'pointer-events-auto w-[300px] overflow-hidden rounded-[12px] p-2',
-        'bg-elevated text-primary shadow-menu backdrop-blur-2xl border border-border',
+        'pointer-events-auto w-[320px] overflow-hidden rounded-panel p-3',
+        'px-panel-wash text-primary shadow-menu backdrop-blur-2xl border border-border',
       )}
     >
-      <div className="mb-2 flex items-start justify-between gap-2 px-1">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-            {getActionLabel(action)}
-          </p>
-          {entitlement ? (
-            <div className="mt-1">
-              <EntitlementUpgradeCta
-                code={code as WorkspaceErrorCode}
-                message={mapped.message}
-                compact
-              />
-            </div>
-          ) : (
-            <>
-              <p className="mt-1 text-[12.5px] font-semibold leading-5 text-primary">
-                {mapped.title}
-              </p>
-              <p className="mt-1 text-[12px] leading-5 text-secondary">{mapped.message}</p>
-              {requestId ? (
-                <p className="mt-1 font-mono text-[10px] text-muted">Reference: {requestId}</p>
-              ) : null}
-            </>
-          )}
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <BrandMark className="mt-0.5 h-7 w-7 rounded-[9px]" />
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-muted">{getActionLabel(action)}</p>
+            {entitlement ? (
+              <div className="mt-1">
+                <EntitlementUpgradeCta
+                  code={code as WorkspaceErrorCode}
+                  message={mapped.message}
+                  compact
+                />
+              </div>
+            ) : (
+              <>
+                <p className="mt-0.5 text-[14px] font-semibold leading-5 tracking-[-0.02em] text-primary">
+                  {mapped.title}
+                </p>
+                <p className="mt-1.5 text-[12.5px] leading-5 text-secondary">{mapped.message}</p>
+                {requestId ? (
+                  <p className="mt-2 font-mono text-[10px] text-muted">Reference: {requestId}</p>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-2 py-1 text-[11px] text-muted hover:bg-hover hover:text-primary"
+          className="rounded-lg px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-primary"
         >
           Close
         </button>
       </div>
-      <div className="flex flex-wrap items-center gap-1 px-1 pb-1">
+      <div className="flex flex-wrap items-center gap-1.5">
         {entitlement ? null : mapped.primaryAction && mapped.primaryAction.kind !== 'none' ? (
           <button
             type="button"
             onClick={runPrimary}
-            className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+            className="rounded-full bg-accent px-3 py-1.5 text-[11.5px] font-semibold text-[#042f2e] transition-opacity hover:opacity-90"
           >
             {mapped.primaryAction.label}
           </button>
@@ -165,7 +166,7 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
           <button
             type="button"
             onClick={() => void copyReference()}
-            className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+            className="rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
           >
             {copied ? 'Copied' : 'Copy reference'}
           </button>
@@ -173,14 +174,14 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
         <button
           type="button"
           onClick={() => void copyDiagnostics()}
-          className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+          className="rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
         >
           Copy diagnostics
         </button>
         <button
           type="button"
           onClick={onBack}
-          className="rounded-md px-2 py-1 text-[11px] font-medium text-secondary hover:bg-hover hover:text-primary"
+          className="rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
         >
           Back
         </button>

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 
 import { cn } from '~/lib/utils/cn';
 
-import { SparkIcon } from './icons';
+import { BrandMark } from './brand-mark';
 
 type FloatingTriggerButtonProps = {
   onOpen: () => void;
@@ -17,7 +17,7 @@ export const FloatingTriggerButton = forwardRef<HTMLButtonElement, FloatingTrigg
         ref={ref}
         type="button"
         aria-label="Ask AI"
-        title="Ask AI"
+        title="Ask AI — Project X"
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -28,30 +28,25 @@ export const FloatingTriggerButton = forwardRef<HTMLButtonElement, FloatingTrigg
           event.preventDefault();
           event.stopPropagation();
         }}
-        initial={{ opacity: 0, scale: 0.92, y: 4 }}
+        initial={{ opacity: 0, scale: 0.88, y: 6 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 2 }}
-        transition={{ type: 'spring', stiffness: 560, damping: 34, mass: 0.45 }}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        exit={{ opacity: 0, scale: 0.94, y: 3 }}
+        transition={{ type: 'spring', stiffness: 520, damping: 32, mass: 0.5 }}
+        whileHover={{ scale: 1.04, y: -1 }}
+        whileTap={{ scale: 0.97 }}
         className={cn(
-          'pointer-events-auto inline-flex h-8 items-center justify-center rounded-full',
-          'bg-elevated text-primary shadow-float backdrop-blur-xl',
+          'pointer-events-auto inline-flex h-9 items-center justify-center rounded-full',
+          'px-panel-wash text-primary shadow-float backdrop-blur-xl',
           'border border-border',
           'outline-none focus-visible:ring-2 focus-visible:ring-accent/50',
-          compact ? 'w-8 px-0' : 'gap-1.5 px-2.5',
+          compact ? 'w-9 px-0' : 'gap-2 pl-1.5 pr-3',
         )}
       >
-        <span
-          className={cn(
-            'flex items-center justify-center text-accent',
-            compact ? 'h-4 w-4' : 'h-4 w-4 rounded-full bg-accent-soft',
-          )}
-        >
-          <SparkIcon className="h-2.5 w-2.5" />
-        </span>
+        <BrandMark className={cn('h-6 w-6 rounded-[8px]', compact && 'h-5 w-5 rounded-[7px]')} />
         {!compact ? (
-          <span className="text-[12px] font-medium leading-none tracking-tight">Ask AI</span>
+          <span className="pr-0.5 text-[12.5px] font-semibold leading-none tracking-[-0.01em]">
+            Ask AI
+          </span>
         ) : null}
       </motion.button>
     );

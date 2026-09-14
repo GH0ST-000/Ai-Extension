@@ -1,10 +1,16 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Figtree, Syne } from 'next/font/google';
 
-import { APP_NAME } from '@project-x/shared';
-
 import { ThemeProvider } from '../components/theme-provider';
+import {
+  SITE_DESCRIPTION,
+  SITE_KEYWORDS,
+  SITE_NAME,
+  SITE_TAGLINE,
+  buildSocialMetadata,
+  getSiteUrl,
+} from '../lib/site';
 import { THEME_STORAGE_KEY } from '../lib/theme';
 
 import './globals.css';
@@ -21,16 +27,68 @@ const body = Figtree({
   display: 'swap',
 });
 
+const siteUrl = getSiteUrl();
+const social = buildSocialMetadata();
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: {
-    default: APP_NAME,
-    template: `%s · ${APP_NAME}`,
+    default: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    template: `%s · ${SITE_NAME}`,
   },
-  description: 'Project X — AI that understands the page you are on.',
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [...SITE_KEYWORDS],
+  authors: [{ name: SITE_NAME, url: siteUrl }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  category: 'technology',
+  referrer: 'origin-when-cross-origin',
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
   icons: {
     icon: [{ url: '/brand/mark.svg', type: 'image/svg+xml' }],
-    apple: [{ url: '/brand/mark.png' }],
+    apple: [{ url: '/brand/mark.png', sizes: '180x180' }],
   },
+  alternates: social.alternates,
+  openGraph: social.openGraph,
+  twitter: social.twitter,
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
+  },
+  appleWebApp: {
+    capable: true,
+    title: SITE_NAME,
+    statusBarStyle: 'default',
+  },
+  ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? {
+        verification: {
+          google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION,
+        },
+      }
+    : {}),
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F4F7FB' },
+    { media: '(prefers-color-scheme: dark)', color: '#0B1220' },
+  ],
+  colorScheme: 'light dark',
 };
 
 const themeBootScript = `

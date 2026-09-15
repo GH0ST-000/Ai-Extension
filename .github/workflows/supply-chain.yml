@@ -39,11 +39,8 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter @project-x/api prisma:generate
 
-      - name: Build api, dashboard, extension
-        run: |
-          pnpm --filter @project-x/api build
-          pnpm --filter @project-x/dashboard build
-          pnpm --filter @project-x/extension build
+      - name: Build workspace (packages + apps)
+        run: pnpm build
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectx?schema=public
           OPENAI_API_KEY: sk-test-ci-placeholder

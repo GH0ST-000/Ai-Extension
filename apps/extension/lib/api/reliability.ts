@@ -19,7 +19,7 @@ import type {
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from '../services/auth-storage';
-import { applyWorkspaceHeader } from './workspace';
+import { extensionApiFetch } from './background-http';
 
 export class ReliabilityApiError extends Error {
   readonly statusCode: number;
@@ -35,14 +35,6 @@ export class ReliabilityApiError extends Error {
   }
 }
 
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
-}
-
 function reliabilityPath(suffix = ''): string {
   return `/reliability${suffix}`;
 }
@@ -53,17 +45,7 @@ async function reliabilityFetch<T>(path: string, init?: RequestInit): Promise<T>
     throw new ReliabilityApiError(USER_FACING_AUTH_ERROR, 401);
   }
 
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Authorization', `Bearer ${token}`);
-  await applyWorkspaceHeader(headers);
-
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers,
-  });
+  const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
     await clearSession();

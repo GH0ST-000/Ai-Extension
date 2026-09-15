@@ -1,11 +1,12 @@
 'use client';
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import type {
   GitHubConnectionStatus,
   JiraConnectionStatus,
   ResponseStyle,
   UserSettings,
+  WorkspaceGitHubAppStatus,
 } from '@project-x/types';
 import { RESPONSE_STYLES } from '@project-x/types';
 import Link from 'next/link';
@@ -27,6 +28,12 @@ import {
   upsertJiraConnection,
 } from '../../../lib/api';
 import { getStoredUser } from '../../../lib/auth-storage';
+import { useWorkspace } from '../../../lib/workspace-context';
+import {
+  disconnectGithubApp,
+  getGithubAppStatus,
+  startGithubAppInstall,
+} from '../../../lib/workspace-api';
 const STYLE_LABELS: Record<ResponseStyle, string> = {
   CONCISE: 'Concise',
   BALANCED: 'Balanced',
@@ -36,9 +43,11 @@ const STYLE_LABELS: Record<ResponseStyle, string> = {
 export default function SettingsPage() {
   const router = useRouter();
   const user = getStoredUser();
+  const { currentWorkspaceId, hasPermission, ready: workspaceReady } = useWorkspace();
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [draft, setDraft] = useState<UserSettings | null>(null);
   const [github, setGithub] = useState<GitHubConnectionStatus | null>(null);
+  const [githubApp, setGithubApp] = useState<WorkspaceGitHubAppStatus | null>(null);
   const [githubToken, setGithubToken] = useState('');
   const [jira, setJira] = useState<JiraConnectionStatus | null>(null);
   const [jiraEmail, setJiraEmail] = useState('');
@@ -47,13 +56,38 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
+  const [githubAppSaving, setGithubAppSaving] = useState(false);
   const [jiraSaving, setJiraSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [githubMessage, setGithubMessage] = useState<string | null>(null);
+  const [githubAppMessage, setGithubAppMessage] = useState<string | null>(null);
   const [jiraMessage, setJiraMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubAppError, setGithubAppError] = useState<string | null>(null);
   const [jiraError, setJiraError] = useState<string | null>(null);
+
+  const canManageIntegrations = hasPermission('integrations:manage');
+
+  const refreshGithubApp = useCallback(async (workspaceId: string) => {
+    const status = await getGithubAppStatus(workspaceId);
+    setGithubApp(status);
+    return status;
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get('githubApp');
+    if (!flag) {
+      return;
+    }
+    if (flag === 'connected') {
+      setGithubAppMessage('GitHub App installed for this workspace.');
+    } else if (flag === 'error') {
+      setGithubAppError('GitHub App install did not complete. Try again from Settings.');
+    }
+    router.replace('/app/settings', { scroll: false });
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +125,31 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!workspaceReady || !currentWorkspaceId) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await refreshGithubApp(currentWorkspaceId);
+        if (cancelled) {
+          return;
+        }
+        setGithubApp(status);
+      } catch (err) {
+        if (!cancelled) {
+          setGithubAppError(
+            err instanceof ApiError ? err.message : 'Unable to load GitHub App status.',
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceReady, currentWorkspaceId, refreshGithubApp]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -154,6 +213,46 @@ export default function SettingsPage() {
       setGithubError(err instanceof ApiError ? err.message : 'Unable to disconnect GitHub.');
     } finally {
       setGithubSaving(false);
+    }
+  }
+
+  async function onInstallGithubApp() {
+    if (!currentWorkspaceId) {
+      setGithubAppError('Select a workspace before installing the GitHub App.');
+      return;
+    }
+    setGithubAppSaving(true);
+    setGithubAppMessage(null);
+    setGithubAppError(null);
+    try {
+      const { installUrl } = await startGithubAppInstall(currentWorkspaceId);
+      window.location.assign(installUrl);
+    } catch (err) {
+      setGithubAppError(
+        err instanceof ApiError ? err.message : 'Unable to start GitHub App install.',
+      );
+      setGithubAppSaving(false);
+    }
+  }
+
+  async function onDisconnectGithubApp() {
+    if (!currentWorkspaceId) {
+      return;
+    }
+    setGithubAppSaving(true);
+    setGithubAppMessage(null);
+    setGithubAppError(null);
+    try {
+      await disconnectGithubApp(currentWorkspaceId);
+      setGithubApp({
+        appConfigured: githubApp?.appConfigured ?? false,
+        connected: false,
+      });
+      setGithubAppMessage('GitHub App disconnected from this workspace.');
+    } catch (err) {
+      setGithubAppError(err instanceof ApiError ? err.message : 'Unable to disconnect GitHub App.');
+    } finally {
+      setGithubAppSaving(false);
     }
   }
 
@@ -224,7 +323,8 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="mt-3 max-w-xl text-base text-muted-foreground">
-          Control response length, tone, page context, GitHub, and read-only Jira Cloud access.
+          Control response length, tone, page context, workspace GitHub App, personal PAT fallback,
+          and read-only Jira Cloud access.
         </p>
       </header>
 
@@ -331,10 +431,123 @@ export default function SettingsPage() {
       </section>
 
       <section className="rise-in-delay-1 space-y-3">
-        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">GitHub</h2>
+        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">GitHub App</h2>
         <p className="max-w-2xl px-1 text-sm text-muted-foreground">
-          Paste your own Personal Access Token. It is validated with GitHub, encrypted on the API,
-          and never returned to the browser or extension. Required for posting PR comments later.
+          Recommended. Install the Project X GitHub App on this workspace for least-privilege,
+          short-lived tokens. Personal PATs below remain a fallback when the App is not installed.
+        </p>
+
+        {!workspaceReady || loading ? (
+          <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-muted-foreground shadow-panel">
+            Loading GitHub App…
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">
+            <div className="flex flex-col gap-2 border-b border-line/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-ink">Workspace installation</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {!githubApp?.appConfigured
+                    ? 'GitHub App is not configured on the API yet.'
+                    : githubApp.connected
+                      ? `Connected${
+                          githubApp.accountLogin ? ` to @${githubApp.accountLogin}` : ''
+                        }${
+                          githubApp.repositorySelection
+                            ? ` · repos: ${githubApp.repositorySelection}`
+                            : ''
+                        }${githubApp.status === 'suspended' ? ' · suspended' : ''}`
+                      : 'Not installed for this workspace'}
+                </p>
+              </div>
+              <span
+                className={[
+                  'self-start rounded-xl border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide sm:self-auto',
+                  githubApp?.connected
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : 'border-line bg-mist text-muted-foreground',
+                ].join(' ')}
+              >
+                {githubApp?.connected
+                  ? githubApp.status === 'suspended'
+                    ? 'Suspended'
+                    : 'Installed'
+                  : 'Not installed'}
+              </span>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <p className="text-sm text-muted-foreground">
+                Permissions requested: Contents (R/W), Pull requests (R/W), Checks (read). Tokens
+                are minted on demand and never stored.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {canManageIntegrations && githubApp?.appConfigured && !githubApp.connected ? (
+                  <button
+                    type="button"
+                    disabled={githubAppSaving || !currentWorkspaceId}
+                    onClick={() => {
+                      void onInstallGithubApp();
+                    }}
+                    className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    {githubAppSaving ? 'Opening GitHub…' : 'Install GitHub App'}
+                  </button>
+                ) : null}
+                {canManageIntegrations && githubApp?.connected ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={githubAppSaving || !currentWorkspaceId}
+                      onClick={() => {
+                        void onInstallGithubApp();
+                      }}
+                      className="rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                    >
+                      {githubAppSaving ? 'Opening…' : 'Manage on GitHub'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={githubAppSaving}
+                      onClick={() => {
+                        void onDisconnectGithubApp();
+                      }}
+                      className="rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                    >
+                      Disconnect App
+                    </button>
+                  </>
+                ) : null}
+                {!canManageIntegrations ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ask a workspace admin to install or disconnect the GitHub App.
+                  </p>
+                ) : null}
+                {!githubApp?.appConfigured ? (
+                  <p className="text-sm text-muted-foreground">
+                    Set <code className="rounded bg-mist px-1 py-0.5 text-xs">GITHUB_APP_*</code> on
+                    the API to enable installs.
+                  </p>
+                ) : null}
+                {githubAppMessage ? (
+                  <p className="text-sm text-accent">{githubAppMessage}</p>
+                ) : null}
+                {githubAppError ? (
+                  <p className="text-sm text-red-600 dark:text-red-400">{githubAppError}</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="rise-in-delay-1 space-y-3">
+        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">
+          GitHub PAT (fallback)
+        </h2>
+        <p className="max-w-2xl px-1 text-sm text-muted-foreground">
+          Optional personal token when the workspace App is not installed. Validated with GitHub,
+          encrypted on the API, and never returned to the browser or extension.
         </p>
 
         {loading ? (

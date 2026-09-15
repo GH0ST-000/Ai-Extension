@@ -84,15 +84,12 @@ async function reportDashboardError(input: {
 }): Promise<void> {
   try {
     const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:3001';
-    const token =
-      typeof window !== 'undefined' ? window.localStorage.getItem('project-x.accessToken') : null;
-    if (!token) return;
 
     await fetch(`${apiBase}/api/telemetry/client-errors`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
         'X-Request-Id': input.referenceId,
       },
       body: JSON.stringify({

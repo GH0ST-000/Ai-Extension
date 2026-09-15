@@ -76,7 +76,7 @@ import { FeatureGate } from '../entitlements/feature-gate';
 import { EntitlementService } from '../entitlements/entitlements.service';
 import { UsageService } from '../usage/usage.service';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { multiRepoException } from './multi-repo.errors';
 import { toProjectSystem, toRepositoryRelationship } from './multi-repo.mapper';
 
@@ -162,7 +162,7 @@ export class MultiRepoService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly githubContent: GithubContentService,
     private readonly projectMemory: ProjectMemoryService,
     private readonly featureGate: FeatureGate,
@@ -1096,7 +1096,7 @@ export class MultiRepoService {
   }
 
   async assertRepositoryAccess(userId: string, owner: string, repository: string): Promise<string> {
-    const token = await this.githubConnections.getDecryptedToken(userId);
+    const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
       throw multiRepoException(
         'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
@@ -1836,7 +1836,7 @@ export class MultiRepoService {
 
     if (input.pullRequestNumber) {
       try {
-        const token = await this.githubConnections.getDecryptedToken(userId);
+        const token = await this.githubAccess.getDecryptedToken(userId);
         if (token) {
           const url = `https://api.github.com/repos/${encodeURIComponent(primary.owner)}/${encodeURIComponent(primary.repository)}/pulls/${input.pullRequestNumber}/files?per_page=50`;
           const response = await fetch(url, {

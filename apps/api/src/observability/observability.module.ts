@@ -15,6 +15,7 @@ import { MetricsController } from './metrics.controller';
 import { MetricsService } from './metrics.service';
 import { ObservabilityExceptionFilter } from './observability-exception.filter';
 import { ProviderHealthService } from './provider-health.service';
+import { SecurityAuditService } from './security-audit.service';
 import { ProviderObservability } from './provider-observability';
 import { RequestContextMiddleware } from './request-context.middleware';
 import { RequestContextService } from './request-context.service';
@@ -36,6 +37,7 @@ import { TracingService } from './tracing.service';
     ProviderObservability,
     AiObservabilityService,
     ProviderHealthService,
+    SecurityAuditService,
     {
       provide: ERROR_TRACKER,
       inject: [ConfigService],
@@ -65,6 +67,7 @@ import { TracingService } from './tracing.service';
     ProviderObservability,
     AiObservabilityService,
     ProviderHealthService,
+    SecurityAuditService,
     ERROR_TRACKER,
   ],
 })

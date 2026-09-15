@@ -1,0 +1,78 @@
+name: Release signing (cosign)
+
+# Keyless Sigstore cosign — no long-lived signing secrets required.
+# OIDC identity is bound to this repository via GitHub Actions `id-token`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      artifact_glob:
+        description: 'Space-separated paths to sign (repo-relative)'
+        required: false
+        default: 'sbom-*.cdx.json'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  sign-release-artifacts:
+    name: Keyless cosign (sign-blob)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.9.2
+        with:
+          cosign-release: v2.4.3
+
+      - name: Prepare checksum manifest (tags/releases)
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          git archive --format=tar.gz --output=source-${{ github.ref_name }}.tar.gz HEAD
+          sha256sum source-${{ github.ref_name }}.tar.gz > release-checksums.txt
+          echo "source-${{ github.ref_name }}.tar.gz" >> files-to-sign.txt
+
+      - name: Manual dispatch — sign listed files
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          : > files-to-sign.txt
+          for f in ${{ inputs.artifact_glob }}; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> release-checksums.txt
+              echo "$f" >> files-to-sign.txt
+            fi
+          done
+          if [ ! -s files-to-sign.txt ]; then
+            echo "No files matched; creating placeholder checksum for workflow validation."
+            echo "workflow-dispatch-stub" | sha256sum > release-checksums.txt
+            echo "release-checksums.txt" >> files-to-sign.txt
+          fi
+
+      - name: Sign checksum manifest (keyless)
+        run: |
+          cosign sign-blob --yes \
+            --output-signature release-checksums.txt.sig \
+            --output-certificate release-checksums.txt.pem \
+            release-checksums.txt
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cosign-signatures-${{ github.run_id }}
+          path: |
+            release-checksums.txt
+            release-checksums.txt.sig
+            release-checksums.txt.pem
+            source-*.tar.gz
+          retention-days: 400

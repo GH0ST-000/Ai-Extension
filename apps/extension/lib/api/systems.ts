@@ -18,7 +18,7 @@ import type {
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from '../services/auth-storage';
-import { applyWorkspaceHeader } from './workspace';
+import { extensionApiFetch } from './background-http';
 
 export class MultiRepoApiError extends Error {
   readonly statusCode: number;
@@ -72,14 +72,6 @@ export type FindConsumersResponse = {
   }>;
 };
 
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
-}
-
 function systemsPath(suffix = ''): string {
   return `/systems${suffix}`;
 }
@@ -119,17 +111,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new MultiRepoApiError(USER_FACING_AUTH_ERROR, 401, 'SYSTEM_CONTEXT_NOT_CONFIGURED');
   }
 
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type') && init?.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Authorization', `Bearer ${accessToken}`);
-  headers.set('Accept', 'application/json');
-  await applyWorkspaceHeader(headers);
-
-  const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
+  const response = await extensionApiFetch(path, {
     ...init,
-    headers,
     signal: init?.signal,
   });
 

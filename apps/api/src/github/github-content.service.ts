@@ -2,7 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import type { GitHubFileVersionsRequest, GitHubFileVersionsResponse } from '@project-x/types';
 import { GITHUB_PATCH_MAX_FILE_BYTES } from '@project-x/types';
 
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { normalizeRepositoryPath } from './patch-path';
 
@@ -29,7 +29,7 @@ type GitHubPullResponse = {
 @Injectable()
 export class GithubContentService {
   constructor(
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly errors: GithubErrorNormalizer,
   ) {}
 
@@ -186,7 +186,7 @@ export class GithubContentService {
   }
 
   private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubConnections.getDecryptedToken(userId);
+    const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
       throw this.errors.toHttpException(
         'NOT_CONNECTED',

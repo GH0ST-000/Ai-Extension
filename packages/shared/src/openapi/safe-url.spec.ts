@@ -76,6 +76,13 @@ describe('validateOpenApiFetchUrl', () => {
     if (!result.ok) expect(result.reason).toBe('credentials');
   });
 
+  it('rejects dotted decimal and partial IPv4 host tricks', () => {
+    for (const raw of ['https://2130706433/openapi.json', 'https://127.1/openapi.json']) {
+      const result = validateOpenApiFetchUrl(raw);
+      expect(result.ok).toBe(false);
+    }
+  });
+
   it('accepts a public https URL', () => {
     const result = validateOpenApiFetchUrl('https://api.example.com/v3/openapi.json');
     expect(result.ok).toBe(true);

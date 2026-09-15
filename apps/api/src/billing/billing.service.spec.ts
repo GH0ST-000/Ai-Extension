@@ -37,8 +37,10 @@ describe('BillingService.handleWebhook', () => {
 
   const config = {
     get: vi.fn((key: string) => {
+      if (key === 'nodeEnv') return 'test';
       if (key === 'paddle') {
         return {
+          apiKey: '',
           webhookSecret: 'test-secret',
           clientToken: '',
           environment: 'sandbox',

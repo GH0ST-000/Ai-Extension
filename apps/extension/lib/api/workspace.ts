@@ -5,8 +5,12 @@ import type {
 } from '@project-x/types';
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, getAccessToken } from '../services/auth-storage';
+import { clearSession } from '../services/auth-storage';
 import { getCurrentWorkspaceId } from '../workspace/current-workspace-id';
+import { extensionApiFetch } from './background-http';
+import { applyWorkspaceHeader } from './workspace-header';
+
+export { applyWorkspaceHeader };
 
 export class WorkspaceApiError extends Error {
   readonly statusCode: number;
@@ -20,14 +24,6 @@ export class WorkspaceApiError extends Error {
     this.unauthorized = statusCode === 401;
     this.code = code;
   }
-}
-
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
 }
 
 async function parseError(
@@ -62,39 +58,8 @@ async function parseError(
   return { message: 'Workspace request failed.', code: null };
 }
 
-/** Attach X-Workspace-Id when a current workspace is known. */
-export async function applyWorkspaceHeader(headers: Headers): Promise<void> {
-  const workspaceId = await getCurrentWorkspaceId();
-  if (workspaceId && !headers.has('X-Workspace-Id')) {
-    headers.set('X-Workspace-Id', workspaceId);
-  }
-}
-
-async function apiFetch<T>(
-  path: string,
-  init?: RequestInit,
-  options?: { skipWorkspaceHeader?: boolean },
-): Promise<T> {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
-    throw new WorkspaceApiError(USER_FACING_AUTH_ERROR, 401, 'WORKSPACE_ACCESS_DENIED');
-  }
-
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type') && init?.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Authorization', `Bearer ${accessToken}`);
-  headers.set('Accept', 'application/json');
-  if (!options?.skipWorkspaceHeader) {
-    await applyWorkspaceHeader(headers);
-  }
-
-  const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
-    ...init,
-    headers,
-    signal: init?.signal,
-  });
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
     await clearSession();
@@ -134,11 +99,11 @@ export async function fetchWorkspaceBootstrap(
   }
 
   const query = preferred ? `?workspaceId=${encodeURIComponent(preferred)}` : '';
-  return apiFetch<WorkspaceBootstrapResponse>(
-    `/workspaces/bootstrap${query}`,
-    { method: 'GET', headers, signal: options?.signal },
-    { skipWorkspaceHeader: true },
-  );
+  return apiFetch<WorkspaceBootstrapResponse>(`/workspaces/bootstrap${query}`, {
+    method: 'GET',
+    headers,
+    signal: options?.signal,
+  });
 }
 
 /** Convenience: workspace list from bootstrap (no separate list round-trip required). */

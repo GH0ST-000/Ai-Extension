@@ -12,7 +12,7 @@ import type {
 } from '@project-x/types';
 
 import { RedisService } from '../redis/redis.service';
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24; // 24h
@@ -28,7 +28,7 @@ type GitHubCommentResponse = {
 @Injectable()
 export class GithubWriteService {
   constructor(
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly redis: RedisService,
     private readonly errors: GithubErrorNormalizer,
   ) {}
@@ -105,7 +105,7 @@ export class GithubWriteService {
         return { ...afterLock.result, deduplicated: true };
       }
 
-      const token = await this.githubConnections.getDecryptedToken(userId);
+      const token = await this.githubAccess.getDecryptedToken(userId);
       if (!token) {
         throw new ForbiddenException(
           'Connect a GitHub token in dashboard Settings before posting comments.',

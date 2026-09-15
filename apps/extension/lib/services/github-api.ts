@@ -18,7 +18,7 @@ import type {
   SubmitPullRequestReviewResponse,
 } from '@project-x/types';
 
-import { applyWorkspaceHeader } from '../api/workspace';
+import { extensionApiFetch } from '../api/background-http';
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { clearSession, getAccessToken } from './auth-storage';
 
@@ -34,14 +34,6 @@ export class GithubApiError extends Error {
     this.unauthorized = statusCode === 401;
     this.code = code;
   }
-}
-
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
 }
 
 async function parseError(
@@ -83,17 +75,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new GithubApiError(USER_FACING_AUTH_ERROR, 401, 'NOT_CONNECTED');
   }
 
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type') && init?.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Authorization', `Bearer ${accessToken}`);
-  headers.set('Accept', 'application/json');
-  await applyWorkspaceHeader(headers);
-
-  const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
+  const response = await extensionApiFetch(path, {
     ...init,
-    headers,
     signal: init?.signal,
   });
 

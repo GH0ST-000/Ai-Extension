@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger as NestLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { json, urlencoded, type Request, type Response, type NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
@@ -57,6 +58,7 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.use(urlencoded({ extended: true, limit: Math.min(jsonBodyLimitBytes, 256_000) }));
+  app.use(cookieParser());
   app.use(applySecurityHeaders);
 
   app.useLogger(app.get(Logger));
@@ -104,6 +106,7 @@ async function bootstrap(): Promise<void> {
       // Production: exact allowlist only — never substring match, never chrome-extension://*
       callback(null, productionAllowlist.has(origin));
     },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',

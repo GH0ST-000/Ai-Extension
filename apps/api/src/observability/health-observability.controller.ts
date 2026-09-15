@@ -1,6 +1,7 @@
-import { Controller, Get, Headers, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Headers, Query, Res, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
+import type { Response } from 'express';
 import type {
   DependencyHealthResponse,
   InternalObservabilityHealthResponse,
@@ -8,6 +9,7 @@ import type {
 
 import type { ApiConfig } from '../config/configuration';
 import { ProviderHealthService } from './provider-health.service';
+import { SecurityAuditService } from './security-audit.service';
 
 @Controller('health')
 export class DependencyHealthController {
@@ -75,6 +77,7 @@ export class DependencyHealthController {
 export class InternalObservabilityController {
   constructor(
     private readonly health: ProviderHealthService,
+    private readonly securityAudit: SecurityAuditService,
     private readonly config: ConfigService<ApiConfig, true>,
   ) {}
 
@@ -85,6 +88,37 @@ export class InternalObservabilityController {
   ): Promise<InternalObservabilityHealthResponse> {
     this.assertAuthorized(authorization, internalToken);
     return this.health.getInternalSummary();
+  }
+
+  @Get('security-events')
+  securityEvents(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('x-internal-token') internalToken: string | undefined,
+    @Query('since') sinceRaw: string | undefined,
+    @Query('limit') limitRaw: string | undefined,
+    @Res({ passthrough: false }) res: Response,
+  ): void {
+    this.assertAuthorized(authorization, internalToken);
+
+    let since: Date | undefined;
+    if (sinceRaw?.trim()) {
+      const parsed = Date.parse(sinceRaw.trim());
+      if (Number.isNaN(parsed)) {
+        res.status(400).json({ message: 'Invalid since timestamp (ISO-8601 expected).' });
+        return;
+      }
+      since = new Date(parsed);
+    }
+
+    const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 1000;
+    if (Number.isNaN(limit)) {
+      res.status(400).json({ message: 'Invalid limit.' });
+      return;
+    }
+
+    const body = this.securityAudit.exportNdjson({ since, limit });
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.status(200).send(body);
   }
 
   private assertAuthorized(

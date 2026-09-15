@@ -5,11 +5,13 @@ import type {
   CreateBillingCheckoutRequest,
   CreateWorkspaceRequest,
   InviteWorkspaceMemberRequest,
+  StartGitHubAppInstallResponse,
   TransferWorkspaceOwnershipRequest,
   UpdateWorkspaceRequest,
   Workspace,
   WorkspaceBillingView,
   WorkspaceBootstrapResponse,
+  WorkspaceGitHubAppStatus,
   WorkspaceInvitation,
   WorkspaceMembership,
   WorkspaceSubscription,
@@ -161,4 +163,26 @@ export async function getUsage(workspaceId: string): Promise<WorkspaceUsageCount
   return apiFetch<WorkspaceUsageCounter[]>(
     workspacesPath(`/${encodeURIComponent(workspaceId)}/usage`),
   );
+}
+
+function githubAppPath(workspaceId: string, suffix = ''): string {
+  return workspacesPath(`/${encodeURIComponent(workspaceId)}/integrations/github-app${suffix}`);
+}
+
+export async function getGithubAppStatus(workspaceId: string): Promise<WorkspaceGitHubAppStatus> {
+  return apiFetch<WorkspaceGitHubAppStatus>(githubAppPath(workspaceId, '/status'));
+}
+
+export async function startGithubAppInstall(
+  workspaceId: string,
+): Promise<StartGitHubAppInstallResponse> {
+  return apiFetch<StartGitHubAppInstallResponse>(githubAppPath(workspaceId, '/install'), {
+    method: 'POST',
+  });
+}
+
+export async function disconnectGithubApp(workspaceId: string): Promise<void> {
+  await apiFetch<void>(githubAppPath(workspaceId), {
+    method: 'DELETE',
+  });
 }

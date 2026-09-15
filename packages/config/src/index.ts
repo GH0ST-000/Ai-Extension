@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+import {
+  databaseUrlUsesTls,
+  isLocalDatabaseHost,
+  isLocalRedisHost,
+  postgresHostFromDatabaseUrl,
+} from './database-url';
+
+export {
+  applyDatabaseSslFlag,
+  databaseUrlUsesTls,
+  isLocalDatabaseHost,
+  isLocalRedisHost,
+  postgresHostFromDatabaseUrl,
+} from './database-url';
+
 export const nodeEnvSchema = z.enum(['development', 'test', 'production']);
 
 export const aiProviderSchema = z.enum(['openai']);
@@ -18,6 +33,25 @@ export const INSECURE_ENCRYPTION_DEFAULTS = new Set([
   'encryption-key',
 ]);
 
+function envBoolean(defaultValue = false) {
+  return z.preprocess((val) => {
+    if (val === undefined || val === null || val === '') {
+      return defaultValue;
+    }
+    if (typeof val === 'boolean') {
+      return val;
+    }
+    const normalized = String(val).trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0') {
+      return false;
+    }
+    return val;
+  }, z.boolean());
+}
+
 export const apiEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema.default('development'),
   API_HOST: z.string().default('0.0.0.0'),
@@ -26,6 +60,10 @@ export const apiEnvSchema = z.object({
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional().default(''),
+  /** Enable TLS when connecting to Redis (managed cloud Redis). */
+  REDIS_TLS: envBoolean(false),
+  /** When true, append sslmode=require to DATABASE_URL if not already set. */
+  DATABASE_SSL: envBoolean(false),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   AI_PROVIDER: aiProviderSchema.default('openai'),
   AI_MODEL: z.string().min(1).default('gpt-4o-mini'),
@@ -41,8 +79,10 @@ export const apiEnvSchema = z.object({
    */
   AI_CORS_CONTENT_SCRIPT_ORIGINS: z.string().optional().default(''),
   JWT_SECRET: z.string().min(16).default('project-x-dev-jwt-secret-change-me'),
-  /** Prefer short-lived access tokens; default 12h for private beta. */
-  JWT_EXPIRES_IN: z.string().min(1).default('12h'),
+  /** Prefer short-lived access tokens (refresh tokens renew the session). */
+  JWT_EXPIRES_IN: z.string().min(1).default('15m'),
+  /** Opaque refresh token lifetime. */
+  JWT_REFRESH_EXPIRES_IN: z.string().min(1).default('7d'),
   /**
    * AES key material for encrypting per-user secrets (e.g. GitHub PAT).
    * Required in production — must not fall back to JWT_SECRET.
@@ -79,9 +119,99 @@ export const apiEnvSchema = z.object({
   API_JSON_BODY_LIMIT_BYTES: z.coerce.number().int().positive().optional().default(1_048_576),
   /** Max pagination page size for list endpoints. */
   API_MAX_PAGE_SIZE: z.coerce.number().int().positive().max(200).optional().default(100),
+  /** GitHub App (workspace installation) — optional in development; all-or-nothing in production when any is set. */
+  GITHUB_APP_ID: z.string().optional().default(''),
+  /** PEM private key; use literal newlines or \\n escapes in env. */
+  GITHUB_APP_PRIVATE_KEY: z.string().optional().default(''),
+  GITHUB_APP_WEBHOOK_SECRET: z.string().optional().default(''),
+  GITHUB_APP_SLUG: z.string().optional().default(''),
+  /** Optional — user-to-server OAuth (both required if either is set). */
+  GITHUB_APP_CLIENT_ID: z.string().optional().default(''),
+  GITHUB_APP_CLIENT_SECRET: z.string().optional().default(''),
+  /** Enterprise SSO — optional; unused until SsoModule is implemented (see docs/security/sso-scim.md). */
+  SSO_ENABLED: envBoolean(false),
+  SAML_ENTRY_POINT: z.string().optional().default(''),
+  SAML_ISSUER: z.string().optional().default(''),
+  SAML_CALLBACK_URL: z.string().optional().default(''),
+  /** IdP signing certificate (PEM). */
+  SAML_IDP_CERT: z.string().optional().default(''),
+  /** SCIM provisioning bearer token (future). */
+  SCIM_BEARER_TOKEN: z.string().optional().default(''),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
+
+const GITHUB_APP_REQUIRED_KEYS = [
+  'GITHUB_APP_ID',
+  'GITHUB_APP_PRIVATE_KEY',
+  'GITHUB_APP_WEBHOOK_SECRET',
+  'GITHUB_APP_SLUG',
+] as const satisfies readonly (keyof ApiEnv)[];
+
+function envFieldSet(env: ApiEnv, key: keyof ApiEnv): boolean {
+  const raw = env[key];
+  return typeof raw === 'string' && raw.trim().length > 0;
+}
+
+/** True when every required GitHub App env var is non-empty. */
+export function isGitHubAppFullyConfigured(env: ApiEnv): boolean {
+  return GITHUB_APP_REQUIRED_KEYS.every((key) => envFieldSet(env, key));
+}
+
+/** True when any GitHub App env var (required or optional OAuth pair) is non-empty. */
+export function isGitHubAppPartiallyConfigured(env: ApiEnv): boolean {
+  if (GITHUB_APP_REQUIRED_KEYS.some((key) => envFieldSet(env, key))) {
+    return true;
+  }
+  return envFieldSet(env, 'GITHUB_APP_CLIENT_ID') || envFieldSet(env, 'GITHUB_APP_CLIENT_SECRET');
+}
+
+export function collectGitHubAppConfigIssues(env: ApiEnv): ProductionSecurityIssue[] {
+  const issues: ProductionSecurityIssue[] = [];
+
+  if (!isGitHubAppPartiallyConfigured(env)) {
+    return issues;
+  }
+
+  for (const key of GITHUB_APP_REQUIRED_KEYS) {
+    if (!envFieldSet(env, key)) {
+      issues.push({
+        code: 'GITHUB_APP_PARTIAL_CONFIG',
+        message: `When GitHub App integration is enabled, ${key} must be set (all of GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_WEBHOOK_SECRET, GITHUB_APP_SLUG are required).`,
+      });
+    }
+  }
+
+  const hasClientId = envFieldSet(env, 'GITHUB_APP_CLIENT_ID');
+  const hasClientSecret = envFieldSet(env, 'GITHUB_APP_CLIENT_SECRET');
+  if (hasClientId !== hasClientSecret) {
+    issues.push({
+      code: 'GITHUB_APP_OAUTH_PAIR',
+      message:
+        'GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET must both be set or both omitted.',
+    });
+  }
+
+  if (env.NODE_ENV === 'production' && isGitHubAppPartiallyConfigured(env)) {
+    if (env.GITHUB_APP_WEBHOOK_SECRET === 'dev-github-app-webhook-secret') {
+      issues.push({
+        code: 'GITHUB_APP_WEBHOOK_SECRET_DEFAULT',
+        message: 'GITHUB_APP_WEBHOOK_SECRET must not use the development default in production.',
+      });
+    }
+    if (
+      env.GITHUB_APP_WEBHOOK_SECRET.trim().length > 0 &&
+      env.GITHUB_APP_WEBHOOK_SECRET.length < 16
+    ) {
+      issues.push({
+        code: 'GITHUB_APP_WEBHOOK_SECRET_WEAK',
+        message: 'GITHUB_APP_WEBHOOK_SECRET must be at least 16 characters in production.',
+      });
+    }
+  }
+
+  return issues;
+}
 
 export const dashboardEnvSchema = z.object({
   NEXT_PUBLIC_API_URL: z.string().url().default('http://localhost:3001'),
@@ -212,14 +342,21 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
     });
   }
 
+  if (env.PADDLE_ENVIRONMENT === 'sandbox') {
+    issues.push({
+      code: 'PADDLE_SANDBOX_IN_PRODUCTION',
+      message: 'PADDLE_ENVIRONMENT=sandbox is forbidden when NODE_ENV=production.',
+    });
+  }
+
+  if (!env.PADDLE_API_KEY || !env.PADDLE_WEBHOOK_SECRET) {
+    issues.push({
+      code: 'PADDLE_PRODUCTION_SECRETS',
+      message: 'PADDLE_API_KEY and PADDLE_WEBHOOK_SECRET are required in production.',
+    });
+  }
+
   if (env.PADDLE_ENVIRONMENT === 'production') {
-    if (!env.PADDLE_API_KEY || !env.PADDLE_WEBHOOK_SECRET) {
-      issues.push({
-        code: 'PADDLE_PRODUCTION_SECRETS',
-        message:
-          'PADDLE_API_KEY and PADDLE_WEBHOOK_SECRET are required when PADDLE_ENVIRONMENT=production.',
-      });
-    }
     if (!env.PADDLE_PRICE_PRO_MONTHLY || !env.PADDLE_PRICE_TEAM_MONTHLY) {
       issues.push({
         code: 'PADDLE_PRODUCTION_PRICES',
@@ -241,12 +378,30 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
     });
   }
 
-  if (env.REDIS_HOST !== 'localhost' && env.REDIS_HOST !== '127.0.0.1' && !env.REDIS_PASSWORD) {
+  if (!isLocalRedisHost(env.REDIS_HOST) && !env.REDIS_PASSWORD) {
     issues.push({
       code: 'REDIS_REMOTE_WITHOUT_PASSWORD',
-      message: 'Remote Redis in production should set REDIS_PASSWORD (or use TLS URL auth).',
+      message: 'Remote Redis in production must set REDIS_PASSWORD (or equivalent auth).',
     });
   }
+
+  if (!isLocalRedisHost(env.REDIS_HOST) && !env.REDIS_TLS) {
+    issues.push({
+      code: 'REDIS_REMOTE_WITHOUT_TLS',
+      message: 'Remote Redis in production must set REDIS_TLS=true (TLS in transit).',
+    });
+  }
+
+  const dbHost = postgresHostFromDatabaseUrl(env.DATABASE_URL);
+  if (!isLocalDatabaseHost(dbHost) && !databaseUrlUsesTls(env.DATABASE_URL, env.DATABASE_SSL)) {
+    issues.push({
+      code: 'DATABASE_REMOTE_WITHOUT_SSL',
+      message:
+        'Remote Postgres in production must use TLS (DATABASE_SSL=true or sslmode=require / verify-* in DATABASE_URL).',
+    });
+  }
+
+  issues.push(...collectGitHubAppConfigIssues(env));
 
   return issues;
 }

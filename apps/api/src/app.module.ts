@@ -13,6 +13,7 @@ import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { SettingsModule } from './settings/settings.module';
 import { GithubModule } from './github/github.module';
+import { GithubAppModule } from './github-app/github-app.module';
 import { JiraModule } from './jira/jira.module';
 import { OpenApiModule } from './openapi/openapi.module';
 import { ProjectMemoryModule } from './project-memory/project-memory.module';
@@ -98,6 +99,7 @@ import { SecurityModule } from './common/security/security.module';
     AuthModule,
     SettingsModule,
     GithubModule,
+    GithubAppModule,
     JiraModule,
     OpenApiModule,
     ProjectMemoryModule,

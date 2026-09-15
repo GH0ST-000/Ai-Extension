@@ -1,5 +1,6 @@
-const ACCESS_TOKEN_KEY = 'project-x.accessToken';
 const USER_KEY = 'project-x.user';
+/** Legacy JWT key — cleared on load so XSS can no longer read access tokens. */
+const LEGACY_ACCESS_TOKEN_KEY = 'project-x.accessToken';
 
 export type StoredAuthUser = {
   id: string;
@@ -8,22 +9,45 @@ export type StoredAuthUser = {
 };
 
 function canUseStorage(): boolean {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+  return typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined';
 }
 
-export function getAccessToken(): string | null {
-  if (!canUseStorage()) {
-    return null;
+function purgeLegacyTokenStorage(): void {
+  if (typeof window === 'undefined') {
+    return;
   }
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  try {
+    window.localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+    window.sessionStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+/** @deprecated Access tokens live in HttpOnly cookies — always null for dashboard JS. */
+export function getAccessToken(): string | null {
+  purgeLegacyTokenStorage();
+  return null;
 }
 
 export function getStoredUser(): StoredAuthUser | null {
   if (!canUseStorage()) {
     return null;
   }
-  const raw = window.localStorage.getItem(USER_KEY);
+  purgeLegacyTokenStorage();
+  const raw = window.sessionStorage.getItem(USER_KEY);
   if (!raw) {
+    // Migrate profile from localStorage if present.
+    try {
+      const legacy = window.localStorage.getItem(USER_KEY);
+      if (legacy) {
+        window.sessionStorage.setItem(USER_KEY, legacy);
+        window.localStorage.removeItem(USER_KEY);
+        return JSON.parse(legacy) as StoredAuthUser;
+      }
+    } catch {
+      // ignore
+    }
     return null;
   }
   try {
@@ -33,15 +57,29 @@ export function getStoredUser(): StoredAuthUser | null {
   }
 }
 
-export function setSession(accessToken: string, user: StoredAuthUser): void {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+export function setSession(user: StoredAuthUser): void {
+  purgeLegacyTokenStorage();
+  window.sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+  try {
+    window.localStorage.removeItem(USER_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export function clearSession(): void {
+  purgeLegacyTokenStorage();
   if (!canUseStorage()) {
     return;
   }
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
+  window.sessionStorage.removeItem(USER_KEY);
+  try {
+    window.localStorage.removeItem(USER_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function hasCachedUser(): boolean {
+  return getStoredUser() !== null;
 }

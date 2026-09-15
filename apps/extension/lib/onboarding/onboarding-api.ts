@@ -4,16 +4,8 @@ import type {
   UpdateOnboardingPreferencesRequest,
 } from '@project-x/types';
 
-import { applyWorkspaceHeader } from '../api/workspace';
+import { extensionApiFetch } from '../api/background-http';
 import { clearSession, getAccessToken } from '../services/auth-storage';
-
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
-}
 
 async function onboardingFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const accessToken = await getAccessToken();
@@ -21,18 +13,7 @@ async function onboardingFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new Error('Sign in required.');
   }
 
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type') && init?.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Authorization', `Bearer ${accessToken}`);
-  headers.set('Accept', 'application/json');
-  await applyWorkspaceHeader(headers);
-
-  const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
-    ...init,
-    headers,
-  });
+  const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
     await clearSession();

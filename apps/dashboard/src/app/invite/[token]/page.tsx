@@ -9,7 +9,7 @@ import { APP_NAME } from '@project-x/shared';
 import { BrandMark } from '../../../components/brand-mark';
 import { ThemeToggle } from '../../../components/theme-toggle';
 import { ApiError } from '../../../lib/api';
-import { getAccessToken } from '../../../lib/auth-storage';
+import { getStoredUser } from '../../../lib/auth-storage';
 import { acceptInvitation } from '../../../lib/workspace-api';
 
 const WORKSPACE_STORAGE_KEY = 'project-x.dashboard.workspaceId';
@@ -44,7 +44,7 @@ export default function AcceptInvitePage() {
         return;
       }
 
-      if (!getAccessToken()) {
+      if (!getStoredUser()) {
         const next = `/invite/${encodeURIComponent(token)}`;
         router.replace(`/login?next=${encodeURIComponent(next)}`);
         return;

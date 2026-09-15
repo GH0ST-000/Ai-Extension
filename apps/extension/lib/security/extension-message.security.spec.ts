@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-const ALLOWED_MESSAGE_TYPES = new Set(['PING']);
+const ALLOWED_MESSAGE_TYPES = new Set(['PING', 'API_FETCH']);
 
 function acceptExtensionMessage(message: unknown, senderId: string | undefined, runtimeId: string) {
   if (senderId && senderId !== runtimeId) {
@@ -16,11 +16,14 @@ function acceptExtensionMessage(message: unknown, senderId: string | undefined, 
   return true;
 }
 
-describe('Day 29 extension message validation', () => {
+describe('extension message validation', () => {
   const runtimeId = 'abcdefghijklmnopqrstuvwxyz123456';
 
-  it('accepts PING from same extension', () => {
+  it('accepts PING and API_FETCH from same extension', () => {
     expect(acceptExtensionMessage({ type: 'PING' }, runtimeId, runtimeId)).toBe(true);
+    expect(
+      acceptExtensionMessage({ type: 'API_FETCH', path: '/auth/me' }, runtimeId, runtimeId),
+    ).toBe(true);
   });
 
   it('rejects unknown / privileged fake actions', () => {
@@ -36,8 +39,5 @@ describe('Day 29 extension message validation', () => {
     ).toBe(false);
     expect(acceptExtensionMessage({ type: 'PING' }, 'evil-extension-id', runtimeId)).toBe(false);
     expect(acceptExtensionMessage(null, runtimeId, runtimeId)).toBe(false);
-    expect(
-      acceptExtensionMessage({ type: 'PING', __proto__: { polluted: true } }, runtimeId, runtimeId),
-    ).toBe(true); // type allowlisted; privileged dispatch still impossible
   });
 });

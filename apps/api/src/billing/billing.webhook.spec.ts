@@ -1,11 +1,13 @@
-import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BillingService } from './billing.service';
+import {
+  buildPaddleWebhookSignatureHeader,
+  PADDLE_WEBHOOK_MAX_AGE_SECONDS,
+} from './paddle-webhook-signature';
 
-function sign(body: string, secret: string): string {
-  const digest = createHmac('sha256', secret).update(body).digest('hex');
-  return `sha256=${digest}`;
+function sign(body: Buffer, secret: string, ts?: number): string {
+  return buildPaddleWebhookSignatureHeader(body, secret, { ts });
 }
 
 describe('BillingService webhook security', () => {
@@ -27,6 +29,7 @@ describe('BillingService webhook security', () => {
 
   const config = {
     get: vi.fn((key: string) => {
+      if (key === 'nodeEnv') return 'test';
       if (key === 'paddle') {
         return {
           apiKey: '',
@@ -99,6 +102,30 @@ describe('BillingService webhook security', () => {
     expect(prisma.workspaceSubscription.upsert).not.toHaveBeenCalled();
   });
 
+  it('rejects replayed webhooks outside the Paddle timestamp window', async () => {
+    const payload = {
+      event_id: 'evt_stale',
+      event_type: 'subscription.updated',
+      data: { workspace_id: 'ws_1', plan_id: 'pro', status: 'active' },
+    };
+    const raw = Buffer.from(JSON.stringify(payload));
+    const staleTs = Math.floor(Date.now() / 1000) - PADDLE_WEBHOOK_MAX_AGE_SECONDS - 60;
+    const signature = sign(raw, 'test-webhook-secret', staleTs);
+
+    await expect(service.handleWebhook(raw, signature)).rejects.toSatisfy((err: unknown) => {
+      const response =
+        err && typeof err === 'object' && 'getResponse' in err
+          ? (err as { getResponse: () => unknown }).getResponse()
+          : null;
+      return (
+        typeof response === 'object' &&
+        response !== null &&
+        (response as { code?: string }).code === 'BILLING_WEBHOOK_INVALID'
+      );
+    });
+    expect(prisma.billingWebhookEvent.create).not.toHaveBeenCalled();
+  });
+
   it('acks duplicate webhook event IDs without re-applying subscription mutations', async () => {
     const payload = {
       event_id: 'evt_dup',
@@ -110,7 +137,7 @@ describe('BillingService webhook security', () => {
       },
     };
     const raw = Buffer.from(JSON.stringify(payload));
-    const signature = sign(raw.toString('utf8'), 'test-webhook-secret');
+    const signature = sign(raw, 'test-webhook-secret');
 
     prisma.billingWebhookEvent.findUnique.mockResolvedValue({
       id: 'existing',

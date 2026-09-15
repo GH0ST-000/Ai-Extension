@@ -1,27 +1,21 @@
-# Extension host permissions (Day 29)
+# Extension host permissions
 
-## Why broad host permissions exist
+## Network vs page access
 
-Selected-text AI and Smart Actions must run on arbitrary developer pages
-(GitHub, Jira, Swagger UI, internal docs, local `http://localhost` apps).
+- **Content script `matches`:** `<all_urls>` — required so the selection toolbar can run on arbitrary developer pages (GitHub, Jira, Swagger, localhost apps).
+- **`host_permissions` (network):** narrowed to the Project X API origin only (`localhost:3001` in development). Production builds must add the real API origin (or grant via `optional_host_permissions`).
 
-Therefore the Plasmo manifest currently declares:
-
-- `host_permissions`: `https://*/*`, `http://*/*`
-- content script `matches`: `<all_urls>` (selection toolbar)
-
-This is intentional for the product surface, not accidental over-privilege.
+Content scripts **do not** call the API directly. All authenticated HTTP (including AI streams) goes through the **background service worker proxy** (`API_FETCH` / `api-stream` port). That removes host-page Origin CORS dependency and keeps tokens out of the page world.
 
 ## Compensating controls
 
-- JWT lives in `chrome.storage.local` (not page JS)
-- Background message allowlist (`PING` only); sender id checked
+- Access/refresh tokens live in `chrome.storage.session` (fallback: `local`), read only from extension contexts
+- Background message allowlist: `PING`, `API_FETCH`; stream port `api-stream`
+- Sender id checked; API proxy refuses URLs outside the configured API origin
 - No `window.postMessage` bridge to page world
 - No remote executable scripts; extension CSP `script-src 'self'`
-- API calls use Bearer tokens; production CORS uses exact origin allowlists
-- Content extraction remains bounded (Day 4 policy)
+- Optional host permissions remain available for future production API hosts without shipping `*://*/*` by default
 
-## Future least-privilege option
+## Production packaging note
 
-Optional permissions / `activeTab` for non-integration pages can be explored post-beta
-without removing GitHub/Jira/OpenAPI coverage.
+Set `PLASMO_PUBLIC_API_URL` to your API and ensure the packaged `host_permissions` include that origin (or prompt the user for optional host permission at runtime).

@@ -49,7 +49,8 @@ Host page (untrusted)
 | Prompt injection | Delimited untrusted blocks; capability allowlist; server-owned destinations/events/model/budget |
 | Write escalation | Prepare → confirm; fingerprint binding; revalidation; no AI-selected destination/event |
 | WRITE_OUTCOME_UNKNOWN replay | No automatic retry on uncertain mutations |
-| SSRF (OpenAPI) | HTTPS-only; private IP / metadata block; DNS check; bounded redirects/size/time |
+| SSRF (OpenAPI) | HTTPS-only; private IP / metadata block; DNS resolve + pinned connect (Host/SNI); bounded redirects/size/time; infra egress allowlist (see network-egress.md) |
+| Data store transit | Remote Postgres/Redis require TLS in production (`DATABASE_SSL` / URL sslmode, `REDIS_TLS`) |
 | XSS | No raw AI HTML; text/Markdown without script; CSP |
 | CORS / CSRF | Exact origin allowlist; Bearer auth (no cookie session CSRF surface); document remaining risks |
 | Webhook spoofing | Raw-body HMAC; timing-safe compare; event idempotency; fail-closed without secret in production |
@@ -59,7 +60,12 @@ Host page (untrusted)
 | Abuse | Rate limits on auth/AI/writes/billing/telemetry/invites |
 | Supply chain | Frozen lockfile; Dependabot; CodeQL; pinned Actions; least workflow permissions |
 | Production misconfig | Startup fail-closed on default secrets, wildcard CORS, missing encryption key |
+| Security incident handling | [incident-response.md](./incident-response.md) runbook (roles, severity, contain, postmortem) |
+| Secret compromise | [encryption-key-rotation.md](./encryption-key-rotation.md); `sessionVersion` bump; `scripts/security/rotate-secrets-runbook.sh` |
+| Detection / SIEM | Pino logs + [siem-export.md](./siem-export.md) (`GET /api/internal/observability/security-events`, fail-closed token) |
+| Enterprise IdP | [sso-scim.md](./sso-scim.md) architecture scaffold only (env placeholders; no live SAML/SCIM) |
+| External assessment | [pen-test-ready.md](./pen-test-ready.md) scope and readiness checklist |
 
 ## Explicit non-goals (Day 29)
 
-SOC 2, pen-test platform, SAML/SCIM/SSO, custom WAF/SIEM, full DLP, Chrome Web Store launch.
+SOC 2 attestation, managed WAF/SIEM platform, full DLP, Chrome Web Store launch. **Scaffolds** for SSO/SCIM, SIEM export, pen-test prep, and incident response exist — see table above — but are not full enterprise programs.

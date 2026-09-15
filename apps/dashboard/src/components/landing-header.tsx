@@ -5,19 +5,18 @@ import { useEffect, useState } from 'react';
 
 import { BrandMark } from './brand-mark';
 import { ThemeToggle } from './theme-toggle';
-import { getAccessToken, getStoredUser, type StoredAuthUser } from '../lib/auth-storage';
+import { getStoredUser, type StoredAuthUser } from '../lib/auth-storage';
 
 export function LandingHeader() {
   const [user, setUser] = useState<StoredAuthUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getAccessToken();
-    setUser(token ? getStoredUser() : null);
+    setUser(getStoredUser());
     setReady(true);
   }, []);
 
-  const signedIn = ready && Boolean(user && getAccessToken());
+  const signedIn = ready && Boolean(user);
 
   return (
     <header className="flex items-center justify-between rise-in">

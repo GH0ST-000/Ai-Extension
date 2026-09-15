@@ -9,6 +9,17 @@ vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
 }));
 
+vi.mock('../common/security/dns-pinned-fetch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../common/security/dns-pinned-fetch')>();
+  return {
+    ...actual,
+    dnsPinnedFetch: vi.fn(async (url: URL, init?: RequestInit) => {
+      const fetchImpl = globalThis.fetch as typeof fetch;
+      return fetchImpl(url.toString(), init);
+    }),
+  };
+});
+
 function errorBody(err: unknown): { code?: string; message?: string } {
   expect(err).toBeInstanceOf(HttpException);
   const exception = err as HttpException;
@@ -94,6 +105,18 @@ describe('OpenApiFetchService', () => {
     await expect(service.fetchDocument('https://api.example.com/openapi.json')).rejects.toSatisfy(
       (err: unknown) => errorBody(err).code === 'API_DOC_TOO_LARGE',
     );
+  });
+
+  it('blocks when DNS resolves to a private address', async () => {
+    const { lookup } = await import('node:dns/promises');
+    vi.mocked(lookup).mockResolvedValueOnce([
+      { address: '10.0.0.8', family: 4 },
+    ] as unknown as Awaited<ReturnType<(typeof import('node:dns/promises'))['lookup']>>);
+
+    await expect(service.fetchDocument('https://api.example.com/openapi.json')).rejects.toSatisfy(
+      (err: unknown) => errorBody(err).code === 'API_DOC_FETCH_BLOCKED',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns content for a successful public fetch', async () => {

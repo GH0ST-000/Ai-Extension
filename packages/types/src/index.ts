@@ -193,8 +193,20 @@ export interface AuthUser {
 }
 
 export interface AuthTokenResponse {
+  /**
+   * Short-lived access JWT. Dashboard uses HttpOnly cookie instead of storing this;
+   * extension may keep it in background/session storage only.
+   */
   accessToken: string;
+  /** Opaque rotating refresh token (also set as HttpOnly cookie for dashboard). */
+  refreshToken: string;
+  /** Access token lifetime in seconds. */
+  expiresIn: number;
   user: AuthUser;
+}
+
+export interface RefreshSessionRequest {
+  refreshToken?: string;
 }
 
 export interface RegisterRequest {
@@ -233,6 +245,26 @@ export interface GitHubConnectionStatus {
 export interface UpsertGitHubConnectionRequest {
   /** Personal Access Token from GitHub settings (fine-grained or classic). */
   token: string;
+}
+
+/** Workspace GitHub App installation — no tokens exposed. */
+export type GitHubAppInstallationStatus = 'active' | 'suspended' | 'removed';
+
+export interface WorkspaceGitHubAppStatus {
+  /** Whether the GitHub App env is configured on the API. */
+  appConfigured: boolean;
+  connected: boolean;
+  installationId?: string | null;
+  accountLogin?: string | null;
+  accountType?: string | null;
+  repositorySelection?: string | null;
+  status?: GitHubAppInstallationStatus | null;
+  updatedAt?: string | null;
+}
+
+export interface StartGitHubAppInstallResponse {
+  installUrl: string;
+  state: string;
 }
 
 /** Day 12 — post a PR issue comment via server-side GitHub PAT. */

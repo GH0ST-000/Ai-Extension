@@ -18,7 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { workspaceException } from '../workspaces/workspace.errors';
 import {
-  SandboxBillingProvider,
+  createBillingProvider,
   type BillingProvider,
   type NormalizedProviderSubscription,
 } from './billing-provider';
@@ -44,17 +44,10 @@ export class BillingService {
     @Optional() private readonly metrics?: MetricsService,
     @Optional() private readonly providerHealth?: ProviderHealthService,
   ) {
-    const paddle = this.config.get('paddle', { infer: true });
-    const nodeEnv = this.config.get('nodeEnv', { infer: true });
-    const webhookSecret = paddle.webhookSecret?.trim() ?? '';
-    if (!webhookSecret) {
-      if (nodeEnv === 'production' || paddle.environment === 'production') {
-        throw new Error('PADDLE_WEBHOOK_SECRET is required for billing webhooks.');
-      }
-    }
-    this.provider = new SandboxBillingProvider(
-      webhookSecret || (nodeEnv === 'test' ? 'test-webhook-secret' : 'dev-webhook-secret'),
-    );
+    this.provider = createBillingProvider({
+      nodeEnv: this.config.get('nodeEnv', { infer: true }),
+      paddle: this.config.get('paddle', { infer: true }),
+    });
   }
 
   async getBillingView(workspaceId: string): Promise<WorkspaceBillingView> {
@@ -143,6 +136,7 @@ export class BillingService {
     const url = await this.provider.getPortalLink(
       row.providerCustomerId,
       `${appBaseUrl}/app/billing`,
+      row.providerSubscriptionId ?? undefined,
     );
     if (
       !url.startsWith('https://') &&

@@ -1,4 +1,10 @@
-import { apiEnvSchema, assertProductionSecurity, type ApiEnv } from '@project-x/config';
+import {
+  apiEnvSchema,
+  applyDatabaseSslFlag,
+  assertProductionSecurity,
+  isGitHubAppFullyConfigured,
+  type ApiEnv,
+} from '@project-x/config';
 
 export interface ApiConfig {
   nodeEnv: ApiEnv['NODE_ENV'];
@@ -15,6 +21,7 @@ export interface ApiConfig {
     host: string;
     port: number;
     password: string;
+    tls: boolean;
   };
   ai: {
     provider: ApiEnv['AI_PROVIDER'];
@@ -29,10 +36,21 @@ export interface ApiConfig {
   jwt: {
     secret: string;
     expiresIn: string;
+    refreshExpiresIn: string;
   };
   secrets: {
     /** Key material for AES-GCM encryption of per-user secrets. */
     encryptionKey: string;
+  };
+  githubApp: {
+    appId: string;
+    privateKeyPem: string;
+    webhookSecret: string;
+    slug: string;
+    clientId: string;
+    clientSecret: string;
+    /** True when all required GitHub App env vars are present. */
+    enabled: boolean;
   };
   paddle: {
     environment: 'sandbox' | 'production';
@@ -70,6 +88,15 @@ function parseCorsOrigins(raw: string | undefined): string[] {
     .filter((origin) => origin.length > 0);
 }
 
+function normalizePemFromEnv(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('\\n')) {
+    return trimmed.replace(/\\n/g, '\n');
+  }
+  return trimmed;
+}
+
 function resolveRelease(env: ApiEnv): string {
   const explicit = env.APP_RELEASE?.trim();
   if (explicit) return explicit;
@@ -94,7 +121,7 @@ export default (): ApiConfig => {
     nodeEnv: env.NODE_ENV,
     host: env.API_HOST,
     port: env.API_PORT,
-    databaseUrl: env.DATABASE_URL,
+    databaseUrl: applyDatabaseSslFlag(env.DATABASE_URL, env.DATABASE_SSL),
     logLevel: env.LOG_LEVEL,
     appBaseUrl: env.APP_BASE_URL,
     release: resolveRelease(env),
@@ -105,6 +132,7 @@ export default (): ApiConfig => {
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD ?? '',
+      tls: env.REDIS_TLS,
     },
     ai: {
       provider: env.AI_PROVIDER,
@@ -119,9 +147,19 @@ export default (): ApiConfig => {
     jwt: {
       secret: env.JWT_SECRET,
       expiresIn: env.JWT_EXPIRES_IN,
+      refreshExpiresIn: env.JWT_REFRESH_EXPIRES_IN,
     },
     secrets: {
       encryptionKey,
+    },
+    githubApp: {
+      appId: env.GITHUB_APP_ID?.trim() ?? '',
+      privateKeyPem: normalizePemFromEnv(env.GITHUB_APP_PRIVATE_KEY ?? ''),
+      webhookSecret: env.GITHUB_APP_WEBHOOK_SECRET?.trim() ?? '',
+      slug: env.GITHUB_APP_SLUG?.trim() ?? '',
+      clientId: env.GITHUB_APP_CLIENT_ID?.trim() ?? '',
+      clientSecret: env.GITHUB_APP_CLIENT_SECRET?.trim() ?? '',
+      enabled: isGitHubAppFullyConfigured(env),
     },
     paddle: {
       environment: env.PADDLE_ENVIRONMENT,

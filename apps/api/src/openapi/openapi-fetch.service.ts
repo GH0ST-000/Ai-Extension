@@ -1,11 +1,9 @@
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
-
 import {
-  isPrivateOrReservedIp,
-  sanitizeOpenApiDocumentUrl,
-  validateOpenApiFetchUrl,
-} from '@project-x/shared';
+  DnsPinError,
+  dnsPinnedFetch,
+  resolvePublicHostAddresses,
+} from '../common/security/dns-pinned-fetch';
+import { sanitizeOpenApiDocumentUrl, validateOpenApiFetchUrl } from '@project-x/shared';
 import {
   OPENAPI_FETCH_TIMEOUT_MS,
   OPENAPI_MAX_DOCUMENT_BYTES,
@@ -42,25 +40,6 @@ function isLikelyOpenApiContentType(contentType: string): boolean {
   );
 }
 
-async function assertResolvedPublic(hostname: string): Promise<void> {
-  const host = hostname.toLowerCase().replace(/\.$/, '');
-  if (isIP(host)) {
-    if (isPrivateOrReservedIp(host)) {
-      throw new Error('PRIVATE_IP');
-    }
-    return;
-  }
-  const records = await lookup(host, { all: true, verbatim: true });
-  if (!records.length) {
-    throw new Error('DNS');
-  }
-  for (const record of records) {
-    if (isPrivateOrReservedIp(record.address)) {
-      throw new Error('PRIVATE_IP');
-    }
-  }
-}
-
 /**
  * Fetch a public OpenAPI document with SSRF protections.
  * Not a generic URL proxy — OpenAPI acquisition only.
@@ -81,10 +60,11 @@ export class OpenApiFetchService {
     let redirects = 0;
 
     while (redirects <= OPENAPI_MAX_REDIRECTS) {
+      let pinRecords: Awaited<ReturnType<typeof resolvePublicHostAddresses>>;
       try {
-        await assertResolvedPublic(current.hostname);
+        pinRecords = await resolvePublicHostAddresses(current.hostname);
       } catch (err) {
-        const code = err instanceof Error ? err.message : '';
+        const code = err instanceof DnsPinError ? err.code : '';
         throw this.errors.toHttpException(
           code === 'PRIVATE_IP' ? 'API_DOC_FETCH_BLOCKED' : 'API_DOC_FETCH_FAILED',
           code === 'PRIVATE_IP'
@@ -97,10 +77,11 @@ export class OpenApiFetchService {
       const timer = setTimeout(() => controller.abort(), OPENAPI_FETCH_TIMEOUT_MS);
       let response: Response;
       try {
-        response = await fetch(current.toString(), {
+        response = await dnsPinnedFetch(current, {
           method: 'GET',
           redirect: 'manual',
           signal: controller.signal,
+          pinRecords,
           headers: {
             Accept: 'application/json, application/yaml, text/yaml, text/plain, */*',
             'User-Agent': 'Project-X-OpenAPI',

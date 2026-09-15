@@ -31,6 +31,7 @@ model User {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
   settings       UserSettings?
+  refreshTokens  RefreshToken[]
   githubConnection GitHubConnection?
   jiraConnection   JiraConnection?
   projectMemories  ProjectMemory[]
@@ -48,6 +49,30 @@ model User {
   createdProjectSystems ProjectSystem[] @relation("ProjectSystemCreator")
 
   @@map("users")
+}
+
+/**
+ * Rotating refresh tokens — store hash only.
+ * Reuse of a revoked token in a family revokes the entire family (theft detection).
+ */
+model RefreshToken {
+  id               String    @id @default(cuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** SHA-256 hex of the opaque refresh token. */
+  tokenHash        String    @unique @map("token_hash")
+  /** Login/session family — all rotations share one family id. */
+  familyId         String    @map("family_id")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  replacedByTokenId String?  @map("replaced_by_token_id")
+  userAgent        String?   @map("user_agent") @db.VarChar(512)
+  ip               String?   @db.VarChar(64)
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
 }
 
 model UserSettings {
@@ -131,9 +156,35 @@ model Workspace {
   workflowAuditEvents WorkflowAuditEvent[]
   executionCheckpoints ExecutionCheckpoint[]
   executionFailures ExecutionFailure[]
+  githubAppInstallation GitHubAppInstallation?
 
   @@index([status])
   @@map("workspaces")
+}
+
+/**
+ * Workspace-scoped GitHub App installation — no long-lived installation tokens stored.
+ * Mint installation access tokens on demand via app JWT (RS256).
+ */
+model GitHubAppInstallation {
+  id                   String    @id @default(cuid())
+  workspaceId          String    @unique @map("workspace_id")
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /** GitHub installation id (numeric string). */
+  installationId       String    @unique @map("installation_id")
+  accountLogin         String    @map("account_login")
+  accountType          String    @map("account_type")
+  repositorySelection  String?   @map("repository_selection")
+  /** active | suspended | removed */
+  status               String    @default("active")
+  /** Optional encrypted JSON metadata from GitHub (permissions snapshot, etc.). */
+  metadataCiphertext   String?   @map("metadata_ciphertext") @db.Text
+  installedByUserId    String?   @map("installed_by_user_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("github_app_installations")
 }
 
 model WorkspaceMembership {

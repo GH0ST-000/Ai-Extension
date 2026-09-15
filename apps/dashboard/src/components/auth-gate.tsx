@@ -11,12 +11,7 @@ import {
 import { useRouter } from 'next/navigation';
 
 import { fetchMe } from '../lib/api';
-import {
-  clearSession,
-  getAccessToken,
-  getStoredUser,
-  type StoredAuthUser,
-} from '../lib/auth-storage';
+import { clearSession, getStoredUser, type StoredAuthUser } from '../lib/auth-storage';
 
 const AuthUserContext = createContext<StoredAuthUser | null>(null);
 
@@ -73,14 +68,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setStatus('checking');
       setErrorMessage(null);
       setReady(false);
-
-      const token = getAccessToken();
-      if (!token) {
-        if (!alive) return;
-        setStatus('redirecting');
-        router.replace('/login');
-        return;
-      }
 
       try {
         const me = await withTimeout(fetchMe(), SESSION_CHECK_TIMEOUT_MS);

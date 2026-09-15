@@ -51,7 +51,7 @@ async function postAuth(
   }
 
   const result = (await response.json()) as AuthTokenResponse;
-  await setSession(result.accessToken, result.user);
+  await setSession(result.accessToken, result.user, result.refreshToken);
   return result;
 }
 

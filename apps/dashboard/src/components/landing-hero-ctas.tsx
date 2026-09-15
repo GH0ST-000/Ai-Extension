@@ -3,14 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { getAccessToken, getStoredUser } from '../lib/auth-storage';
+import { getStoredUser } from '../lib/auth-storage';
 
 export function LandingHeroCtas() {
   const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
-    const token = getAccessToken();
-    setSignedIn(Boolean(token && getStoredUser()));
+    setSignedIn(Boolean(getStoredUser()));
   }, []);
 
   if (signedIn) {

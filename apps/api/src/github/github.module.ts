@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AiModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
+import { GithubAppModule } from '../github-app/github-app.module';
 import { SettingsModule } from '../settings/settings.module';
 import { GithubController } from './github.controller';
 import { GithubCiService } from './github-ci.service';
@@ -12,7 +13,7 @@ import { GithubReviewService } from './github-review.service';
 import { GithubWriteService } from './github-write.service';
 
 @Module({
-  imports: [AuthModule, SettingsModule, AiModule],
+  imports: [AuthModule, SettingsModule, GithubAppModule, AiModule],
   controllers: [GithubController],
   providers: [
     GithubWriteService,
@@ -22,6 +23,6 @@ import { GithubWriteService } from './github-write.service';
     GithubContentService,
     GithubErrorNormalizer,
   ],
-  exports: [GithubContentService, GithubErrorNormalizer],
+  exports: [GithubContentService, GithubErrorNormalizer, GithubAppModule],
 })
 export class GithubModule {}

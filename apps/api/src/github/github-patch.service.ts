@@ -14,7 +14,7 @@ import {
 } from '@project-x/types';
 
 import { RedisService } from '../redis/redis.service';
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { countLineDiff, normalizeRepositoryPath } from './patch-path';
 
@@ -82,7 +82,7 @@ type IdempotencyRecord =
 @Injectable()
 export class GithubPatchService {
   constructor(
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly redis: RedisService,
     private readonly errors: GithubErrorNormalizer,
   ) {}
@@ -449,7 +449,7 @@ export class GithubPatchService {
   }
 
   private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubConnections.getDecryptedToken(userId);
+    const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
       throw this.errors.toHttpException(
         'NOT_CONNECTED',

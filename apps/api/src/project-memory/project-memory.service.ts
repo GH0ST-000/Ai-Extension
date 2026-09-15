@@ -37,7 +37,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
 import { FeatureGate } from '../entitlements/feature-gate';
 import { RedisService } from '../redis/redis.service';
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { projectMemoryException } from './project-memory.errors';
 import { scopeFingerprint, toProjectMemoryItem } from './project-memory.mapper';
 
@@ -108,7 +108,7 @@ export class ProjectMemoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly githubContent: GithubContentService,
     private readonly featureGate: FeatureGate,
   ) {}
@@ -563,7 +563,7 @@ export class ProjectMemoryService {
   }
 
   async assertRepositoryAccess(userId: string, owner: string, repository: string): Promise<string> {
-    const token = await this.githubConnections.getDecryptedToken(userId);
+    const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
       throw projectMemoryException(
         'PROJECT_MEMORY_ACCESS_DENIED',

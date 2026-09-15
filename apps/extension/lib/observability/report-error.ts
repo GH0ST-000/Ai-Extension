@@ -4,15 +4,8 @@ import type {
   ClientTelemetryIntegration,
 } from '@project-x/types';
 
+import { extensionApiFetch } from '../api/background-http';
 import { getAccessToken } from '../services/auth-storage';
-
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
-}
 
 /**
  * Privacy-safe extension telemetry.
@@ -47,13 +40,9 @@ export async function reportExtensionError(input: {
       release: process.env.PLASMO_PUBLIC_APP_RELEASE?.slice(0, 128),
     };
 
-    const response = await fetch(`${getApiBaseUrl()}/api/telemetry/client-errors`, {
+    const response = await extensionApiFetch('/telemetry/client-errors', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...(payload.requestId ? { 'X-Request-Id': payload.requestId } : {}),
-      },
+      headers: payload.requestId ? { 'X-Request-Id': payload.requestId } : undefined,
       body: JSON.stringify(payload),
     });
 

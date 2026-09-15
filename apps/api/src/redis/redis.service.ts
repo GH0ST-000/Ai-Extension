@@ -13,6 +13,7 @@ export class RedisService extends Redis implements OnModuleDestroy {
       host: redis.host,
       port: redis.port,
       password: redis.password || undefined,
+      tls: redis.tls ? {} : undefined,
       lazyConnect: true,
       maxRetriesPerRequest: null,
     });

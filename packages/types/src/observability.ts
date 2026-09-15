@@ -161,6 +161,37 @@ export interface InternalObservabilityHealthResponse {
   timestamp: string;
 }
 
+/** Security audit events exportable via internal observability API (SIEM hook). */
+export type SecurityAuditEventType =
+  | 'auth.login.success'
+  | 'auth.login.failure'
+  | 'auth.register'
+  | 'auth.logout'
+  | 'auth.refresh.reuse_detected'
+  | 'auth.session.invalidated';
+
+export type SecurityAuditOutcome = 'success' | 'failure' | 'blocked';
+
+export interface SecurityAuditEvent {
+  id: string;
+  type: SecurityAuditEventType;
+  timestamp: string;
+  service: string;
+  release: string;
+  environment: string;
+  outcome: SecurityAuditOutcome;
+  requestId?: string;
+  workspaceId?: string;
+  /** HMAC-derived user reference — not reversible to raw user id in export consumers. */
+  actorUserIdHash?: string;
+  /** Hash of email domain only (failures) — no full email. */
+  emailDomainHash?: string;
+  /** Truncated operational context when already collected for auth (max 64 chars). */
+  ipTruncated?: string;
+  /** Safe operational detail — never tokens or passwords. */
+  detail?: string;
+}
+
 export type ObservabilityErrorCode =
   | 'AI_PROVIDER_UNAVAILABLE'
   | 'AI_RATE_LIMITED'

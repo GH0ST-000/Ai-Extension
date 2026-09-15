@@ -44,7 +44,7 @@ import type {
   ReplayPreviewRequest,
 } from '@project-x/types';
 
-import { clearSession, getAccessToken, setSession } from './auth-storage';
+import { clearSession, setSession } from './auth-storage';
 
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -52,6 +52,35 @@ export function getApiBaseUrl(): string {
     /\/$/,
     '',
   );
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+  if (refreshInFlight) {
+    return refreshInFlight;
+  }
+  refreshInFlight = (async () => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: '{}',
+      });
+      if (!response.ok) {
+        return false;
+      }
+      const result = (await response.json()) as AuthTokenResponse;
+      setSession(result.user);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 export class ApiError extends Error {
@@ -127,18 +156,11 @@ export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
 
 export async function apiFetch<T>(
   path: string,
-  init?: RequestInit & { auth?: boolean; workspaceId?: string | null },
+  init?: RequestInit & { auth?: boolean; workspaceId?: string | null; _retried?: boolean },
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type') && init?.body) {
     headers.set('Content-Type', 'application/json');
-  }
-
-  if (init?.auth !== false) {
-    const token = getAccessToken();
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
   }
 
   const workspaceId =
@@ -150,9 +172,16 @@ export async function apiFetch<T>(
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
     ...init,
     headers,
+    credentials: 'include',
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && init?.auth !== false && !init?._retried) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      return apiFetch<T>(path, { ...init, _retried: true });
+    }
+    clearSession();
+  } else if (response.status === 401) {
     clearSession();
   }
 
@@ -173,7 +202,7 @@ export async function register(input: RegisterRequest): Promise<AuthTokenRespons
     body: JSON.stringify(input),
     auth: false,
   });
-  setSession(result.accessToken, result.user);
+  setSession(result.user);
   return result;
 }
 
@@ -183,13 +212,13 @@ export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
     body: JSON.stringify(input),
     auth: false,
   });
-  setSession(result.accessToken, result.user);
+  setSession(result.user);
   return result;
 }
 
 export async function logout(): Promise<void> {
   try {
-    await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST' });
+    await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST', auth: false });
   } catch {
     // Always clear local session even if revocation fails (network / already invalid).
   } finally {

@@ -11,7 +11,7 @@ import type {
 import { CI_MAX_LOG_BYTES } from '@project-x/types';
 
 import { AiService } from '../ai/ai.service';
-import { GithubConnectionService } from '../settings/github-connection.service';
+import { GithubAccessService } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { normalizeRepositoryPath } from './patch-path';
 import { parseCIFailureAnalysisJson } from './ci/ci-analysis-parse';
@@ -89,7 +89,7 @@ export class GithubCiService {
   private readonly logger = new Logger(GithubCiService.name);
 
   constructor(
-    private readonly githubConnections: GithubConnectionService,
+    private readonly githubAccess: GithubAccessService,
     private readonly errors: GithubErrorNormalizer,
     private readonly aiService: AiService,
   ) {}
@@ -427,7 +427,7 @@ export class GithubCiService {
   }
 
   private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubConnections.getDecryptedToken(userId);
+    const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
       throw this.errors.toHttpException(
         'NOT_CONNECTED',

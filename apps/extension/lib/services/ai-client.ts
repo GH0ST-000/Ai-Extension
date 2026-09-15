@@ -7,7 +7,7 @@ import type {
   WorkspaceErrorCode,
 } from '@project-x/types';
 
-import { applyWorkspaceHeader } from '../api/workspace';
+import { extensionApiStream } from '../api/background-http';
 import { USER_FACING_AI_ERROR, USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { entitlementFailureMessage, isEntitlementFailureCode } from '../workspace/entitlement';
 import { clearSession, getAccessToken } from './auth-storage';
@@ -41,14 +41,6 @@ export type StreamAiActionHandlers = {
   onChunk: (chunk: string) => void;
   signal?: AbortSignal;
 };
-
-function getApiBaseUrl(): string {
-  const configured = process.env.PLASMO_PUBLIC_API_URL?.trim();
-  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
-    /\/$/,
-    '',
-  );
-}
 
 async function parseAiError(response: Response): Promise<{
   message: string;
@@ -94,21 +86,25 @@ export async function streamAiAction(
     throw new AiClientError(USER_FACING_AUTH_ERROR, { unauthorized: true });
   }
 
-  const headers = new Headers({
-    'Content-Type': 'application/json',
-    Accept: 'text/plain',
-    Authorization: `Bearer ${accessToken}`,
-  });
-  await applyWorkspaceHeader(headers);
-
   let response: Response;
+  let fullText = '';
   try {
-    response = await fetch(`${getApiBaseUrl()}/api/ai/actions/stream`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(request),
+    response = await extensionApiStream(
+      '/ai/actions/stream',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/plain',
+        },
+        body: JSON.stringify(request),
+      },
+      (chunk) => {
+        fullText += chunk;
+        onChunk(chunk);
+      },
       signal,
-    });
+    );
   } catch (error) {
     if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       throw new AiClientError('Request cancelled', { aborted: true, cause: error });
@@ -142,38 +138,9 @@ export async function streamAiAction(
     throw new AiClientError(USER_FACING_AI_ERROR, { code: parsed.code, requestId });
   }
 
-  if (!response.body) {
-    throw new AiClientError(USER_FACING_AI_ERROR);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let fullText = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      const chunk = decoder.decode(value, { stream: true });
-      if (!chunk) {
-        continue;
-      }
-
-      fullText += chunk;
-      onChunk(chunk);
-    }
-
-    fullText += decoder.decode();
-  } catch (error) {
-    if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
-      throw new AiClientError('Request cancelled', { aborted: true, cause: error });
-    }
-    throw new AiClientError(USER_FACING_AI_ERROR, { cause: error });
-  } finally {
-    reader.releaseLock();
+  // When streaming via proxy, chunks were already delivered; bodyText is the full payload.
+  if (!fullText) {
+    fullText = await response.text();
   }
 
   const trimmed = fullText.trim();

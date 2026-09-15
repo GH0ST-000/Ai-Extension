@@ -8,6 +8,7 @@ import { JsonLd } from '../components/json-ld';
 import { LandingHeader } from '../components/landing-header';
 import { LandingHeroCtas } from '../components/landing-hero-ctas';
 import { LandingProductStage } from '../components/landing-product-stage';
+import { LandingWorkflowDemo } from '../components/landing-workflow-demo';
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -22,10 +23,28 @@ export const metadata: Metadata = {
   ...buildSocialMetadata({ path: '/' }),
 };
 
+const HOW_IT_WORKS = [
+  {
+    step: '01',
+    title: 'Open the page you already use',
+    line: 'GitHub PR, Jira issue, API docs, or any selection on the page.',
+  },
+  {
+    step: '02',
+    title: 'Ask Project X to understand or act',
+    line: 'Stay in the workflow — no rebuilding context in another chat.',
+  },
+  {
+    step: '03',
+    title: 'Review results. Confirm writes.',
+    line: 'Read-only analysis can run after you approve a plan. External changes wait for you.',
+  },
+] as const;
+
 const SIGNALS = [
   {
     label: 'Smart Actions',
-    line: 'Menu follows the selection — ranked on-device.',
+    line: 'The menu follows your selection — ranked on the device.',
   },
   {
     label: 'Replace',
@@ -33,7 +52,7 @@ const SIGNALS = [
   },
   {
     label: 'Errors',
-    line: 'Stack classified locally, then Understand / Root Cause / Fix.',
+    line: 'Stacks classified locally, then Understand / Root Cause / Fix.',
   },
   {
     label: 'Suggest Fix',
@@ -48,10 +67,12 @@ const ALIGN_NODES = [
 ] as const;
 
 const GUARDS = [
-  'Plan approval ≠ write confirmation',
-  'No merge · no shell · no Jira writes',
-  'OpenAPI is analysis-only',
-  'Tokens stay on the API',
+  'Read-only analysis can run after you approve the plan.',
+  'GitHub writes always require confirmation.',
+  'Project X never merges PRs automatically.',
+  'No shell execution. Jira stays read-only.',
+  'API contracts are analyzed, not executed.',
+  'Provider tokens stay on the API — not in the extension.',
 ] as const;
 
 function landingJsonLd() {
@@ -133,10 +154,15 @@ export default function HomePage() {
 
         <section
           id="main-content"
-          className="flex min-h-[62vh] flex-col justify-center py-12 md:min-h-[68vh] md:py-14"
+          className="flex min-h-[58vh] flex-col justify-center py-12 md:min-h-[62vh] md:py-14"
         >
           <div className="rise-in-delay-1 max-w-3xl">
-            <BrandGlyph size={56} className="mb-5 rounded-[1.15rem] shadow-soft" />
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <BrandGlyph size={56} className="rounded-[1.15rem] shadow-soft" />
+              <span className="rounded-full border border-line bg-panel/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:hidden">
+                Private Beta
+              </span>
+            </div>
             <h1 className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
               {APP_NAME}
             </h1>
@@ -144,17 +170,64 @@ export default function HomePage() {
               {SITE_TAGLINE}
             </p>
             <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-              One Chrome selection. Five focused tabs. Confirmed GitHub writes only when you say so.
+              Works inside your browser with the development context already on the page —
+              selections, PRs, Jira issues, API contracts, and CI. GitHub writes never happen
+              silently.
             </p>
             <LandingHeroCtas />
           </div>
+        </section>
+
+        <section className="rise-in pb-12 md:pb-16" aria-labelledby="workflow-heading">
+          <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                See it work
+              </p>
+              <h2
+                id="workflow-heading"
+                className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
+              >
+                Understanding becomes action — under your control.
+              </h2>
+            </div>
+            <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
+              Stay in the workflow. Review the PR, prepare the fix, confirm the write.
+            </p>
+          </div>
+          <LandingWorkflowDemo />
+        </section>
+
+        <section className="rise-in-delay-1 pb-12 md:pb-16" aria-labelledby="how-heading">
+          <div className="mb-6 max-w-xl md:mb-8">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+              How it works
+            </p>
+            <h2
+              id="how-heading"
+              className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
+            >
+              Three steps. Same mental model everywhere.
+            </h2>
+          </div>
+          <ol className="grid gap-6 sm:grid-cols-3 sm:gap-8">
+            {HOW_IT_WORKS.map((item) => (
+              <li key={item.step} className="min-w-0">
+                <p className="font-display text-2xl font-semibold leading-none text-ink/15">
+                  {item.step}
+                </p>
+                <p className="mt-3 text-sm font-semibold text-ink md:text-base">{item.title}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{item.line}</p>
+              </li>
+            ))}
+          </ol>
         </section>
 
         <section className="rise-in pb-4 md:pb-6" aria-labelledby="surface-heading">
           <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                Extension surface
+                Product surface
               </p>
               <h2
                 id="surface-heading"
@@ -164,7 +237,7 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
-              Switch the tab below — same chrome you get in the toolbar.
+              What Project X can do for you in each place you already work.
             </p>
           </div>
           <LandingProductStage />
@@ -183,8 +256,9 @@ export default function HomePage() {
                 Ranking and redaction stay on the device.
               </h2>
               <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
-                The menu reacts to what you highlighted. Secrets are stripped before anything leaves
-                the browser for a model call.
+                Project X decides which actions are relevant locally and strips obvious secrets
+                before model requests leave the browser. AI still runs through the API — not
+                everything stays on-device.
               </p>
             </div>
 
@@ -215,17 +289,18 @@ export default function HomePage() {
           <div className="grid gap-10 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:gap-12">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                Engineering alignment
+                Requirement alignment
               </p>
               <h2
                 id="align-heading"
                 className="mt-2 font-display text-2xl font-semibold tracking-tight text-balance md:text-3xl"
               >
-                Three sources. One bounded answer.
+                Requirements, code, and API contracts — checked together.
               </h2>
               <p className="mt-3 max-w-md text-sm leading-relaxed text-inverse/65 md:text-base">
-                When Jira, a PR, and OpenAPI are in session, Project X builds a typed Engineering
-                Context — coverage and conflicts with evidence, not vibes.
+                Connect the Jira requirement, GitHub implementation, and OpenAPI contract. Project X
+                highlights missing coverage, conflicting changes, and questions worth checking
+                before the PR ships.
               </p>
             </div>
 
@@ -253,7 +328,7 @@ export default function HomePage() {
                 ))}
               </ul>
               <p className="mt-5 text-center text-sm text-inverse/55">
-                Optional CI head · hallucinated paths dropped · stale bindings flagged
+                Optional CI context when the check run is on the page
               </p>
             </div>
           </div>
@@ -262,7 +337,7 @@ export default function HomePage() {
         <section className="rise-in-delay-3 py-14 md:py-16" aria-labelledby="control-heading">
           <div className="max-w-2xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-              Control plane
+              Control
             </p>
             <h2
               id="control-heading"
@@ -281,7 +356,7 @@ export default function HomePage() {
           </ul>
           <p className="mt-5 max-w-xl text-sm leading-relaxed text-muted-foreground">
             Flow can plan and adapt. GitHub comment, review submit, and Apply Fix still open the
-            exact confirmation UI — plan approval never authorizes a write.
+            same confirmation UI — approving a plan never authorizes a write.
           </p>
         </section>
 
@@ -289,17 +364,17 @@ export default function HomePage() {
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="max-w-xl">
               <p className="font-display text-xl font-semibold tracking-tight text-ink md:text-2xl">
-                Same account for extension, studio, GitHub, and Jira.
+                One workspace for your development context.
               </p>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                Connect tokens in Settings. OpenAPI and Flow light up once you are signed in.
+                Connect GitHub and Jira once, then use Project X from the extension or Studio.
               </p>
             </div>
             <Link
               href="/app"
-              className="inline-flex shrink-0 rounded-2xl bg-ink px-5 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90"
+              className="inline-flex shrink-0 rounded-2xl bg-ink px-5 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
-              Open the studio
+              Open Studio
             </Link>
           </div>
         </section>
@@ -309,7 +384,7 @@ export default function HomePage() {
             <p>
               <span className="font-medium text-ink">{APP_NAME}</span>
               {' · '}
-              Chrome extension + studio
+              Private Beta · Chrome extension + studio
             </p>
             <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
               <Link href="/" className="transition hover:text-ink">

@@ -20,7 +20,12 @@ export function LandingHeader() {
 
   return (
     <header className="flex items-center justify-between rise-in">
-      <BrandMark />
+      <div className="flex min-w-0 items-center gap-3">
+        <BrandMark />
+        <span className="hidden rounded-full border border-line bg-panel/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:inline-flex">
+          Private Beta
+        </span>
+      </div>
       <div className="flex items-center gap-2 sm:gap-3">
         <ThemeToggle compact />
         {signedIn ? (
@@ -31,24 +36,24 @@ export function LandingHeader() {
             </span>
             <Link
               href="/app"
-              className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90"
+              className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
-              Open studio
+              Open Studio
             </Link>
           </>
         ) : (
           <>
             <Link
               href="/login"
-              className="rounded-xl px-3 py-2 text-sm font-semibold text-muted-foreground transition hover:text-ink"
+              className="rounded-xl px-3 py-2 text-sm font-semibold text-muted-foreground transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               Sign in
             </Link>
             <Link
               href="/login"
-              className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90"
+              className="rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-inverse transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
-              Open studio
+              Get Started
             </Link>
           </>
         )}

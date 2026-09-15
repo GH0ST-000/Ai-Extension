@@ -27,7 +27,7 @@ export const SITE_NAME = APP_NAME;
 export const SITE_TAGLINE = 'AI that reads the page with you.';
 
 export const SITE_DESCRIPTION =
-  'Project X is a Chrome extension and studio for contextual AI on any page — selection actions, GitHub reviews, Jira alignment, and OpenAPI analysis with confirmed writes only.';
+  'Project X works inside your browser with the development context already on the page — selections, GitHub PRs, Jira issues, and API contracts. GitHub writes always require your confirmation.';
 
 export const SITE_KEYWORDS = [
   'Project X',

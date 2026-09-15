@@ -52,7 +52,7 @@ jobs:
           PLASMO_PUBLIC_API_URL: http://localhost:3001
 
       - name: SBOM — api
-        uses: anchore/sbom-action@v0.20.12
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: apps/api
           format: cyclonedx-json
@@ -60,7 +60,7 @@ jobs:
           output-file: sbom-api.cdx.json
 
       - name: SBOM — dashboard
-        uses: anchore/sbom-action@v0.20.12
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: apps/dashboard
           format: cyclonedx-json
@@ -68,7 +68,7 @@ jobs:
           output-file: sbom-dashboard.cdx.json
 
       - name: SBOM — extension
-        uses: anchore/sbom-action@v0.20.12
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: apps/extension
           format: cyclonedx-json

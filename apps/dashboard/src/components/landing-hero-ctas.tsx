@@ -14,7 +14,7 @@ export function LandingHeroCtas() {
 
   if (signedIn) {
     return (
-      <div className="mt-7 flex flex-wrap gap-3">
+      <div className="mt-5 flex flex-wrap gap-3 md:mt-7">
         <Link
           href="/app"
           className="rounded-2xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -32,7 +32,7 @@ export function LandingHeroCtas() {
   }
 
   return (
-    <div className="mt-7 flex flex-wrap gap-3">
+    <div className="mt-5 flex flex-wrap gap-3 md:mt-7">
       <Link
         href="/login"
         className="rounded-2xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"

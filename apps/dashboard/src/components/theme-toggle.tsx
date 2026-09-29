@@ -3,10 +3,10 @@
 import type { ThemePreference } from '../lib/theme';
 import { useTheme } from './theme-provider';
 
-const OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'Auto' },
+const OPTIONS: { value: ThemePreference; label: string; short: string }[] = [
+  { value: 'light', label: 'Light', short: 'L' },
+  { value: 'dark', label: 'Dark', short: 'D' },
+  { value: 'system', label: 'Auto', short: 'A' },
 ];
 
 type ThemeToggleProps = {
@@ -31,14 +31,18 @@ export function ThemeToggle({ compact = false }: ThemeToggleProps) {
           <button
             key={option.value}
             type="button"
+            aria-label={option.label}
             aria-pressed={active}
+            title={option.label}
             onClick={() => setPreference(option.value)}
             className={[
-              'rounded-lg px-2.5 py-1.5 font-semibold transition',
+              'rounded-lg font-semibold transition',
+              compact ? 'min-w-[1.75rem] px-1.5 py-1.5 sm:min-w-0 sm:px-2.5' : 'px-2.5 py-1.5',
               active ? 'bg-ink text-inverse' : 'text-muted-foreground hover:text-ink',
             ].join(' ')}
           >
-            {option.label}
+            <span className={compact ? 'sm:hidden' : 'hidden'}>{option.short}</span>
+            <span className={compact ? 'hidden sm:inline' : undefined}>{option.label}</span>
           </button>
         );
       })}

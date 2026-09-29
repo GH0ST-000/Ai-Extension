@@ -9,7 +9,12 @@ function apiMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
 
-export function WorkspaceSwitcher() {
+type WorkspaceSwitcherProps = {
+  /** Single-line trigger for tight headers (mobile). */
+  compact?: boolean;
+};
+
+export function WorkspaceSwitcher({ compact = false }: WorkspaceSwitcherProps) {
   const { ready, workspaces, current, switchWorkspace, createWorkspace } = useWorkspace();
   const rootRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
@@ -87,7 +92,7 @@ export function WorkspaceSwitcher() {
     : (current?.workspace.name ?? workspaces[0]?.name ?? 'Workspace');
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={['relative', open ? 'z-50' : ''].filter(Boolean).join(' ')}>
       <button
         type="button"
         aria-haspopup="listbox"
@@ -95,13 +100,25 @@ export function WorkspaceSwitcher() {
         aria-controls={listboxId}
         disabled={!ready || busy}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex max-w-[220px] items-center gap-2 rounded-xl border border-line bg-panel/70 px-3 py-1.5 text-left transition hover:bg-panel disabled:opacity-60"
+        className={[
+          'flex items-center gap-2 rounded-xl border border-line bg-panel text-left shadow-soft transition hover:bg-mist disabled:opacity-60',
+          compact ? 'max-w-[148px] px-2.5 py-1.5' : 'max-w-[220px] px-3 py-1.5',
+        ].join(' ')}
       >
         <span className="min-w-0">
-          <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Workspace
-          </span>
-          <span className="block truncate font-display text-sm font-semibold tracking-tight text-ink">
+          {compact ? (
+            <span className="sr-only">Workspace</span>
+          ) : (
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Workspace
+            </span>
+          )}
+          <span
+            className={[
+              'block truncate font-display font-semibold tracking-tight text-ink',
+              compact ? 'text-xs' : 'text-sm',
+            ].join(' ')}
+          >
             {label}
           </span>
         </span>
@@ -127,7 +144,7 @@ export function WorkspaceSwitcher() {
         <div
           id={listboxId}
           role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] z-40 w-[260px] overflow-hidden rounded-2xl border border-line bg-panel shadow-panel"
+          className="absolute left-0 top-[calc(100%+6px)] z-50 w-[min(260px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-panel shadow-panel"
         >
           <ul className="max-h-56 overflow-y-auto p-1.5">
             {workspaces.map((workspace) => {

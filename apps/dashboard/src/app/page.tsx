@@ -131,7 +131,7 @@ function landingJsonLd() {
 
 export default function HomePage() {
   return (
-    <main className="atmosphere relative min-h-screen overflow-hidden">
+    <main className="atmosphere relative min-h-screen overflow-x-hidden">
       <JsonLd data={landingJsonLd()} />
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" aria-hidden />
       <div
@@ -143,33 +143,37 @@ export default function HomePage() {
         aria-hidden
       />
 
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 py-6 md:px-10 md:py-8">
+      <LandingHeader />
+
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 pb-6 pt-14 md:px-10 md:pb-8 md:pt-[3.75rem]">
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-inverse"
         >
           Skip to content
         </a>
-        <LandingHeader />
 
         <section
           id="main-content"
-          className="flex min-h-[58vh] flex-col justify-center py-12 md:min-h-[62vh] md:py-14"
+          className="flex flex-col pt-6 pb-8 md:min-h-[62vh] md:justify-center md:py-14"
         >
           <div className="rise-in-delay-1 max-w-3xl">
-            <div className="mb-5 flex flex-wrap items-center gap-3">
-              <BrandGlyph size={56} className="rounded-[1.15rem] shadow-soft" />
+            <div className="mb-4 flex flex-wrap items-center gap-3 md:mb-5">
+              <BrandGlyph
+                size={48}
+                className="rounded-[1.05rem] shadow-soft md:rounded-[1.15rem]"
+              />
               <span className="rounded-full border border-line bg-panel/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:hidden">
                 Private Beta
               </span>
             </div>
-            <h1 className="mb-3 font-display text-4xl font-semibold tracking-tight text-ink md:text-6xl">
+            <h1 className="mb-2 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl md:mb-3 md:text-6xl">
               {APP_NAME}
             </h1>
-            <p className="max-w-2xl font-display text-2xl font-semibold leading-[1.12] tracking-tight text-ink text-balance md:text-4xl">
+            <p className="max-w-2xl font-display text-xl font-semibold leading-[1.15] tracking-tight text-ink text-balance sm:text-2xl md:text-4xl md:leading-[1.12]">
               {SITE_TAGLINE}
             </p>
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground md:mt-4 md:text-lg">
               Works inside your browser with the development context already on the page —
               selections, PRs, Jira issues, API contracts, and CI. GitHub writes never happen
               silently.

@@ -176,6 +176,19 @@ function LoginPageContent() {
             )}
           </p>
 
+          {mode === 'register' ? (
+            <p className="mt-4 text-center text-xs leading-relaxed text-muted-foreground">
+              By creating an account you agree to the{' '}
+              <Link
+                href="/terms"
+                className="font-medium text-ink underline-offset-4 hover:underline"
+              >
+                Terms and Conditions
+              </Link>
+              .
+            </p>
+          ) : null}
+
           <p className="mt-4 text-center text-sm text-muted-foreground">
             <Link href="/" className="underline-offset-4 hover:underline">
               Back to home

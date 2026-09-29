@@ -5,7 +5,7 @@ import type {
 } from '@project-x/types';
 
 import { extensionApiFetch } from '../api/background-http';
-import { clearSession, hasAuthSession } from '../services/auth-storage';
+import { clearSessionStorageOnly, hasAuthSession } from '../services/auth-storage';
 
 async function onboardingFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!(await hasAuthSession())) {
@@ -15,7 +15,7 @@ async function onboardingFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
-    await clearSession();
+    await clearSessionStorageOnly();
     throw new Error('Sign in required.');
   }
 

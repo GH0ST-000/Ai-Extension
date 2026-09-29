@@ -14,7 +14,7 @@ import {
   markWelcomeSeen,
 } from './lib/onboarding/onboarding-api';
 import { AuthClientError, login, register, signOut } from './lib/services/auth-client';
-import { getSession } from './lib/services/auth-storage';
+import { getStoredSessionFast } from './lib/services/auth-storage';
 import { getGithubConnection } from './lib/services/github-api';
 import { getDashboardAppUrl, getDashboardBillingUrl } from './lib/workspace/dashboard-url';
 import { useWorkspaceStore } from './lib/workspace/workspace.store';
@@ -178,36 +178,88 @@ function IndexPopup() {
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      const session = await getSession();
-      if (cancelled) return;
+    function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+      return new Promise((resolve) => {
+        const timer = window.setTimeout(() => resolve(undefined), ms);
+        promise.then(
+          (value) => {
+            window.clearTimeout(timer);
+            resolve(value);
+          },
+          () => {
+            window.clearTimeout(timer);
+            resolve(undefined);
+          },
+        );
+      });
+    }
 
-      setUser(session?.user ?? null);
-      setLoading(false);
-
-      if (!session) {
-        setShowWelcome(true);
-        return;
-      }
-
+    async function loadSecondary() {
       void useWorkspaceStore.getState().bootstrap();
-      try {
-        const [githubStatus, onboardingView] = await Promise.all([
+      const extras = await withTimeout(
+        Promise.all([
           getGithubConnection().catch(() => ({ connected: false }) as GitHubConnectionStatus),
           fetchOnboarding().catch(() => null),
-        ]);
+        ]),
+        4_000,
+      );
+      if (cancelled || !extras) return;
+      const [githubStatus, onboardingView] = extras;
+      setGithub(githubStatus);
+      setOnboarding(onboardingView);
+      if (
+        onboardingView &&
+        (onboardingView.status === 'not_started' ||
+          (!onboardingView.preferences.welcomeSeen && !onboardingView.steps.firstActionCompleted))
+      ) {
+        setShowWelcome(true);
+      }
+    }
+
+    async function load() {
+      // Paint immediately from local storage — never block the popup on network/cookies.
+      try {
+        const local = await getStoredSessionFast();
         if (cancelled) return;
-        setGithub(githubStatus);
-        setOnboarding(onboardingView);
-        if (
-          onboardingView &&
-          (onboardingView.status === 'not_started' ||
-            (!onboardingView.preferences.welcomeSeen && !onboardingView.steps.firstActionCompleted))
-        ) {
+        if (local?.user) {
+          setUser(local.user);
+          setShowWelcome(false);
+        } else {
+          setUser(null);
           setShowWelcome(true);
         }
       } catch {
-        // Ignore — status rows degrade gracefully
+        if (!cancelled) {
+          setUser(null);
+          setShowWelcome(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+
+      // Best-effort sync from dashboard cookies / handoff.
+      type SyncResult = { signedIn?: boolean; user?: AuthUser | null };
+      const synced = await withTimeout(
+        chrome.runtime.sendMessage({ type: 'SYNC_SESSION' }) as Promise<SyncResult>,
+        3_000,
+      );
+      if (cancelled) return;
+
+      if (synced?.signedIn && synced.user) {
+        setUser(synced.user);
+        setShowWelcome(false);
+        void loadSecondary();
+        return;
+      }
+
+      const localAfter = await getStoredSessionFast().catch(() => null);
+      if (cancelled) return;
+      if (localAfter?.user) {
+        setUser(localAfter.user);
+        setShowWelcome(false);
+        void loadSecondary();
       }
     }
 
@@ -234,6 +286,7 @@ function IndexPopup() {
       setUser(result.user);
       setPassword('');
       setShowWelcome(false);
+      setLoading(false);
       void useWorkspaceStore.getState().bootstrap();
       const [githubStatus, onboardingView] = await Promise.all([
         getGithubConnection().catch(() => ({ connected: false }) as GitHubConnectionStatus),
@@ -241,7 +294,7 @@ function IndexPopup() {
       ]);
       setGithub(githubStatus);
       setOnboarding(onboardingView);
-      await markWelcomeSeen();
+      await markWelcomeSeen().catch(() => undefined);
     } catch (err) {
       setError(err instanceof AuthClientError ? err.message : 'Unable to authenticate.');
     } finally {

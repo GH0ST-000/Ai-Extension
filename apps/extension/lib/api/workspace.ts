@@ -5,7 +5,7 @@ import type {
 } from '@project-x/types';
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession } from '../services/auth-storage';
+import { clearSessionStorageOnly } from '../services/auth-storage';
 import { getCurrentWorkspaceId } from '../workspace/current-workspace-id';
 import { extensionApiFetch } from './background-http';
 import { applyWorkspaceHeader } from './workspace-header';
@@ -62,7 +62,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
-    await clearSession();
+    await clearSessionStorageOnly();
     throw new WorkspaceApiError(USER_FACING_AUTH_ERROR, 401, 'WORKSPACE_ACCESS_DENIED');
   }
 

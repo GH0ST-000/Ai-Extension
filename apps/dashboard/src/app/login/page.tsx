@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, type FormEvent, useState } from 'react';
+import { Suspense, type FormEvent, useEffect, useState } from 'react';
 
 import { APP_NAME, safeInternalPath } from '@project-x/shared';
 
-import { ApiError, login, register } from '../../lib/api';
+import { ApiError, fetchMe, login, register } from '../../lib/api';
+import { setSession } from '../../lib/auth-storage';
+import { publishExtensionSync } from '../../lib/extension-handoff';
 import { BrandMark } from '../../components/brand-mark';
 import { ThemeToggle } from '../../components/theme-toggle';
 
@@ -21,6 +23,44 @@ function LoginPageContent() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // If the extension (or a prior tab) already set API cookies, skip the form.
+  useEffect(() => {
+    let alive = true;
+    const next = safeInternalPath(searchParams.get('next'));
+
+    async function tryExistingSession(): Promise<boolean> {
+      try {
+        const me = await Promise.race([
+          fetchMe(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error('timeout')), 2_500);
+          }),
+        ]);
+        if (!alive) return false;
+        setSession(me);
+        void publishExtensionSync();
+        router.replace(next);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    void (async () => {
+      if (await tryExistingSession()) return;
+      // Extension may push cookies a moment after load — retry once.
+      await new Promise((r) => window.setTimeout(r, 1_000));
+      if (!alive) return;
+      if (await tryExistingSession()) return;
+      if (alive) setCheckingSession(false);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [router, searchParams]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +77,7 @@ function LoginPageContent() {
       } else {
         await login({ email, password });
       }
+      publishExtensionSync();
       router.replace(safeInternalPath(searchParams.get('next')));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to sign in.');
@@ -45,6 +86,13 @@ function LoginPageContent() {
     }
   }
 
+  if (checkingSession) {
+    return (
+      <main className="atmosphere relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
+        <p className="text-sm text-ink/60">Checking session…</p>
+      </main>
+    );
+  }
   return (
     <main className="atmosphere relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-40" aria-hidden />

@@ -1,5 +1,5 @@
 import {
-  clearSession,
+  clearSessionStorageOnly,
   getAccessToken,
   getRefreshToken,
   setSession,
@@ -156,7 +156,8 @@ export async function executeApiFetch(
       await attachAuthHeaders(retryHeaders, true);
       response = await fetch(url, { ...init, headers: retryHeaders });
     } else {
-      await clearSession();
+      // Keep browser cookies so the dashboard session stays intact.
+      await clearSessionStorageOnly();
     }
   }
 
@@ -206,7 +207,8 @@ export async function executeApiStream(
         signal,
       });
     } else {
-      await clearSession();
+      // Keep browser cookies so the dashboard session stays intact.
+      await clearSessionStorageOnly();
     }
   }
 

@@ -10,7 +10,7 @@ import type {
 
 import { extensionApiFetch } from '../api/background-http';
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, hasAuthSession } from './auth-storage';
+import { clearSessionStorageOnly, hasAuthSession } from './auth-storage';
 
 export class OpenApiApiError extends Error {
   readonly statusCode: number;
@@ -73,7 +73,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (response.status === 401) {
-    await clearSession();
+    await clearSessionStorageOnly();
     throw new OpenApiApiError(USER_FACING_AUTH_ERROR, 401, 'UNKNOWN');
   }
 

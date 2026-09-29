@@ -1,8 +1,17 @@
 import type { AuthUser } from '@project-x/types';
 
+import { getApiBaseUrl } from '../api/api-base-url';
+import {
+  clearAuthCookiesFromBrowser,
+  readAccessTokenFromBrowserCookie,
+  readRefreshTokenFromBrowserCookie,
+  writeAuthCookiesToBrowser,
+} from './auth-cookie-bridge';
+
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 const USER_KEY = 'user';
+const HYDRATE_FETCH_TIMEOUT_MS = 2_500;
 
 export type StoredAuthSession = {
   accessToken: string;
@@ -11,6 +20,16 @@ export type StoredAuthSession = {
 };
 
 let sessionAccessLevelReady: Promise<void> | null = null;
+/** Ignore cookie onChanged side-effects while we are writing/clearing cookies ourselves. */
+let cookieSyncSuppressedUntil = 0;
+
+export function suppressCookieSyncBriefly(ms = 2_500): void {
+  cookieSyncSuppressedUntil = Date.now() + ms;
+}
+
+export function isCookieSyncSuppressed(): boolean {
+  return Date.now() < cookieSyncSuppressedUntil;
+}
 
 /**
  * Restrict chrome.storage.session to extension pages + service worker so
@@ -37,12 +56,10 @@ function tokenStorageArea(): chrome.storage.StorageArea {
   return chrome.storage.session ?? chrome.storage.local;
 }
 
-/** Profile cache may live in local so CS UI can detect signed-in without JWTs. */
 function userStorageArea(): chrome.storage.StorageArea {
   return chrome.storage.local;
 }
 
-/** True in service worker / extension pages — not host-page content scripts. */
 export function isPrivilegedExtensionContext(): boolean {
   try {
     const href = globalThis.location?.href ?? '';
@@ -55,29 +72,48 @@ export function isPrivilegedExtensionContext(): boolean {
   }
 }
 
+async function readStoredAccessToken(): Promise<string | null> {
+  const result = await tokenStorageArea().get(ACCESS_TOKEN_KEY);
+  const stored = result[ACCESS_TOKEN_KEY];
+  return typeof stored === 'string' && stored.length > 0 ? stored : null;
+}
+
+async function readStoredRefreshToken(): Promise<string | null> {
+  const result = await tokenStorageArea().get(REFRESH_TOKEN_KEY);
+  const stored = result[REFRESH_TOKEN_KEY];
+  return typeof stored === 'string' && stored.length > 0 ? stored : null;
+}
+
+/**
+ * Extension API auth uses storage as source of truth.
+ * Browser cookies are only a mirror for the dashboard SPA.
+ */
 export async function getAccessToken(): Promise<string | null> {
   if (!isPrivilegedExtensionContext()) {
     return null;
   }
-  const result = await tokenStorageArea().get(ACCESS_TOKEN_KEY);
-  const token = result[ACCESS_TOKEN_KEY];
-  return typeof token === 'string' && token.length > 0 ? token : null;
+  const storedToken = await readStoredAccessToken();
+  if (storedToken) {
+    return storedToken;
+  }
+  return readAccessTokenFromBrowserCookie();
 }
 
 export async function getRefreshToken(): Promise<string | null> {
   if (!isPrivilegedExtensionContext()) {
     return null;
   }
-  const result = await tokenStorageArea().get(REFRESH_TOKEN_KEY);
-  const token = result[REFRESH_TOKEN_KEY];
-  return typeof token === 'string' && token.length > 0 ? token : null;
+  const storedToken = await readStoredRefreshToken();
+  if (storedToken) {
+    return storedToken;
+  }
+  return readRefreshTokenFromBrowserCookie();
 }
 
 export async function getStoredUser(): Promise<AuthUser | null> {
   const result = await userStorageArea().get(USER_KEY);
   const user = result[USER_KEY];
   if (!user || typeof user !== 'object') {
-    // Migrate legacy session-stored profile once.
     if (isPrivilegedExtensionContext() && chrome.storage.session) {
       try {
         const legacy = await chrome.storage.session.get(USER_KEY);
@@ -88,7 +124,7 @@ export async function getStoredUser(): Promise<AuthUser | null> {
           return legacyUser as AuthUser;
         }
       } catch {
-        // Session may be TRUSTED_CONTEXTS-only for CS — ignore.
+        // ignore
       }
     }
     return null;
@@ -96,10 +132,14 @@ export async function getStoredUser(): Promise<AuthUser | null> {
   return user as AuthUser;
 }
 
-export async function getSession(): Promise<StoredAuthSession | null> {
+/** Storage-only session read — never touches cookies or network. */
+export async function getStoredSessionFast(): Promise<StoredAuthSession | null> {
+  if (!isPrivilegedExtensionContext()) {
+    return null;
+  }
   const [accessToken, refreshToken, user] = await Promise.all([
-    getAccessToken(),
-    getRefreshToken(),
+    readStoredAccessToken(),
+    readStoredRefreshToken(),
     getStoredUser(),
   ]);
   if (!accessToken || !user) {
@@ -108,10 +148,121 @@ export async function getSession(): Promise<StoredAuthSession | null> {
   return { accessToken, refreshToken: refreshToken ?? undefined, user };
 }
 
-/** Signed-in check — CS asks the background so JWT presence is authoritative. */
+export async function getSession(): Promise<StoredAuthSession | null> {
+  await syncSharedSession();
+  return getStoredSessionFast();
+}
+
+/** Push extension storage tokens into browser cookies for the dashboard. */
+export async function pushSessionCookiesToBrowser(): Promise<boolean> {
+  if (!isPrivilegedExtensionContext()) {
+    return false;
+  }
+  const session = await getStoredSessionFast();
+  if (!session) {
+    return false;
+  }
+  suppressCookieSyncBriefly();
+  await writeAuthCookiesToBrowser({
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+  });
+  return true;
+}
+
+/**
+ * If the dashboard already set auth cookies but extension storage is empty/stale,
+ * pull /auth/me and mirror tokens into extension storage.
+ */
+export async function hydrateSessionFromBrowserCookies(force = false): Promise<boolean> {
+  if (!isPrivilegedExtensionContext()) {
+    return false;
+  }
+
+  if (!force) {
+    const existing = await getStoredSessionFast();
+    if (existing) {
+      return true;
+    }
+  }
+
+  const cookieToken = await readAccessTokenFromBrowserCookie();
+  if (!cookieToken) {
+    return false;
+  }
+
+  // Already have the same token in storage — nothing to do.
+  if (!force) {
+    const stored = await readStoredAccessToken();
+    if (stored === cookieToken && (await getStoredUser())) {
+      return true;
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HYDRATE_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${cookieToken}`,
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const body = (await response.json()) as { user?: AuthUser };
+    if (!body.user) {
+      return false;
+    }
+    const refreshToken = (await readRefreshTokenFromBrowserCookie()) ?? undefined;
+    await setSession(cookieToken, body.user, refreshToken);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Bidirectional sync with clear precedence:
+ * - If an API cookie exists and differs from storage → cookies win (dashboard login / account switch).
+ * - If no cookie but extension storage has a session → push cookies for the dashboard.
+ * - If neither → signed out.
+ */
+export async function syncSharedSession(): Promise<boolean> {
+  if (!isPrivilegedExtensionContext()) {
+    return false;
+  }
+
+  const cookieToken = await readAccessTokenFromBrowserCookie();
+  const local = await getStoredSessionFast();
+
+  if (cookieToken) {
+    if (!local || local.accessToken !== cookieToken) {
+      return hydrateSessionFromBrowserCookies(true);
+    }
+    return true;
+  }
+
+  if (local) {
+    await pushSessionCookiesToBrowser();
+    return true;
+  }
+
+  return false;
+}
+
 export async function hasAuthSession(): Promise<boolean> {
   if (isPrivilegedExtensionContext()) {
-    return Boolean(await getAccessToken());
+    if (await getStoredSessionFast()) {
+      return true;
+    }
+    await hydrateSessionFromBrowserCookies(true);
+    return Boolean(await getStoredSessionFast());
   }
   try {
     const result = (await chrome.runtime.sendMessage({ type: 'AUTH_STATUS' })) as
@@ -120,7 +271,7 @@ export async function hasAuthSession(): Promise<boolean> {
       return result.signedIn;
     }
   } catch {
-    // Fall through to profile hint.
+    // Fall through.
   }
   return Boolean(await getStoredUser());
 }
@@ -129,6 +280,7 @@ export async function setSession(
   accessToken: string,
   user: AuthUser,
   refreshToken?: string,
+  options?: { accessMaxAgeSeconds?: number; refreshMaxAgeSeconds?: number },
 ): Promise<void> {
   if (!accessToken || typeof accessToken !== 'string') {
     throw new Error('Cannot persist session without an access token.');
@@ -143,13 +295,22 @@ export async function setSession(
     tokenStorageArea().set(tokenPayload),
     userStorageArea().set({ [USER_KEY]: user }),
   ]);
-  // Remove legacy local token copies if we use session storage for JWTs.
-  if (chrome.storage.session) {
-    await chrome.storage.local.remove([ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY]);
-  }
+  suppressCookieSyncBriefly();
+  await writeAuthCookiesToBrowser({
+    accessToken,
+    refreshToken,
+    accessMaxAgeSeconds: options?.accessMaxAgeSeconds,
+    refreshMaxAgeSeconds: options?.refreshMaxAgeSeconds,
+  });
 }
 
 export async function clearSession(): Promise<void> {
+  suppressCookieSyncBriefly();
+  await Promise.all([clearSessionStorageOnly(), clearAuthCookiesFromBrowser()]);
+}
+
+/** Clear extension storage without touching browser cookies (used when cookies were already removed). */
+export async function clearSessionStorageOnly(): Promise<void> {
   await Promise.all([
     tokenStorageArea().remove([ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY]),
     userStorageArea().remove([USER_KEY]),

@@ -45,6 +45,7 @@ import type {
 } from '@project-x/types';
 
 import { clearSession, setSession } from './auth-storage';
+import { publishExtensionLogout } from './extension-handoff';
 
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -217,6 +218,8 @@ export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
 }
 
 export async function logout(): Promise<void> {
+  // Clear extension first so cookie-removal heal cannot race (heal is disabled; still order-safe).
+  publishExtensionLogout();
   try {
     await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST', auth: false });
   } catch {

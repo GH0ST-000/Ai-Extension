@@ -28,6 +28,7 @@ Project X uses short-lived Bearer JWTs plus rotating refresh tokens.
 
 - **Dashboard:** access + refresh tokens are set as **HttpOnly `SameSite=Lax` cookies** (`px_at`, `px_rt`). Auth JSON omits tokens unless `X-Project-X-Client: extension`. Legacy `localStorage` keys are purged. Profile cache may live in `sessionStorage`.
 - **Extension:** receives tokens in the JSON body only when opting in via `X-Project-X-Client: extension`. Tokens live in `chrome.storage.session` with `TRUSTED_CONTEXTS` (content scripts cannot read JWTs). Profile hint may live in `chrome.storage.local`. Background proxy allowlists API paths.
+- **Shared session:** the extension mirrors cookies via `chrome.cookies` (never puts JWTs in page JS). Dashboard only signals sync/logout via `sessionStorage` flags. Cookie overwrite → hydrate (cookies win). Explicit cookie clear → clear extension storage (logout authoritative).
 - Logout increments `sessionVersion` (invalidates access JWTs) and revokes refresh token families — including when access JWT is expired but refresh cookie/body is present. Refresh reuse of a revoked token revokes the entire family.
 - CORS is credentialed (`credentials: true`) with exact origin allowlists.
 

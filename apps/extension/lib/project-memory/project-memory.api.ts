@@ -12,7 +12,7 @@ import type {
 
 import { extensionApiFetch } from '../api/background-http';
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, hasAuthSession } from '../services/auth-storage';
+import { clearSessionStorageOnly, hasAuthSession } from '../services/auth-storage';
 
 export class ProjectMemoryApiError extends Error {
   readonly statusCode: number;
@@ -75,7 +75,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (response.status === 401) {
-    await clearSession();
+    await clearSessionStorageOnly();
     throw new ProjectMemoryApiError(USER_FACING_AUTH_ERROR, 401, 'PROJECT_MEMORY_ACCESS_DENIED');
   }
 

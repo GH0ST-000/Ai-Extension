@@ -47,6 +47,8 @@ async function postAuth(
       'X-Project-X-Client': 'extension',
     },
     body: JSON.stringify(body),
+    // Accept Set-Cookie from the API so the dashboard shares this session.
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -57,7 +59,9 @@ async function postAuth(
   if (!result.accessToken || !result.user) {
     throw new AuthClientError('Authentication response missing tokens.', 500);
   }
-  await setSession(result.accessToken, result.user, result.refreshToken);
+  await setSession(result.accessToken, result.user, result.refreshToken, {
+    accessMaxAgeSeconds: result.expiresIn,
+  });
   return result;
 }
 
@@ -71,20 +75,19 @@ export async function register(input: RegisterRequest): Promise<AuthTokenRespons
 
 export async function signOut(): Promise<void> {
   const token = await getAccessToken().catch(() => null);
-  if (token) {
-    try {
-      await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'X-Project-X-Client': 'extension',
-        },
-        body: '{}',
-      });
-    } catch {
-      // Always clear local session.
-    }
+  try {
+    await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'Content-Type': 'application/json',
+        'X-Project-X-Client': 'extension',
+      },
+      body: '{}',
+      credentials: 'include',
+    });
+  } catch {
+    // Always clear local session.
   }
   await clearSession();
   await clearCurrentWorkspaceId();

@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 
 import { fetchMe } from '../lib/api';
 import { clearSession, getStoredUser, type StoredAuthUser } from '../lib/auth-storage';
+import { publishExtensionSync } from '../lib/extension-handoff';
 
 const AuthUserContext = createContext<StoredAuthUser | null>(null);
 
@@ -74,6 +75,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         if (!alive) return;
         setUser(me);
         setReady(true);
+        void publishExtensionSync();
       } catch (err) {
         if (!alive) return;
 

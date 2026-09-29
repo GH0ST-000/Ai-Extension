@@ -18,7 +18,7 @@ import type {
 } from '@project-x/types';
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, hasAuthSession } from '../services/auth-storage';
+import { clearSessionStorageOnly, hasAuthSession } from '../services/auth-storage';
 import { extensionApiFetch } from './background-http';
 
 export class ReliabilityApiError extends Error {
@@ -47,7 +47,7 @@ async function reliabilityFetch<T>(path: string, init?: RequestInit): Promise<T>
   const response = await extensionApiFetch(path, init);
 
   if (response.status === 401) {
-    await clearSession();
+    await clearSessionStorageOnly();
     throw new ReliabilityApiError(USER_FACING_AUTH_ERROR, 401);
   }
 

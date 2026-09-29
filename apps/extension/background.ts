@@ -10,16 +10,40 @@ import {
 } from './lib/api/background-http';
 import { isAllowedExtensionApiPath } from './lib/api/allowed-api-paths';
 import {
+  clearSession,
+  clearSessionStorageOnly,
   ensureTrustedSessionStorage,
-  getAccessToken,
-  getStoredUser,
+  getStoredSessionFast,
+  hydrateSessionFromBrowserCookies,
+  isCookieSyncSuppressed,
+  syncSharedSession,
 } from './lib/services/auth-storage';
+import { ACCESS_COOKIE_NAME } from './lib/services/auth-cookie-bridge';
+import { getApiBaseUrl } from './lib/api/api-base-url';
+import { clearCurrentWorkspaceId } from './lib/workspace/current-workspace-id';
 
-const ALLOWED_MESSAGE_TYPES = new Set(['PING', 'AUTH_STATUS', 'OPEN_SIGN_IN', API_FETCH_MESSAGE]);
+const ALLOWED_MESSAGE_TYPES = new Set([
+  'PING',
+  'AUTH_STATUS',
+  'SYNC_SESSION',
+  'CLEAR_SESSION',
+  'OPEN_SIGN_IN',
+  API_FETCH_MESSAGE,
+]);
 
 type ExtensionMessage = {
   type?: unknown;
 };
+
+function cookieHostMatchesApi(cookieDomain: string, apiHostname: string): boolean {
+  const domain = cookieDomain.replace(/^\./, '');
+  return (
+    domain === apiHostname ||
+    apiHostname.endsWith(`.${domain}`) ||
+    (domain === 'localhost' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) ||
+    (domain === '127.0.0.1' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1'))
+  );
+}
 
 void ensureTrustedSessionStorage();
 
@@ -32,13 +56,51 @@ chrome.runtime.onStartup?.addListener(() => {
   void ensureTrustedSessionStorage();
 });
 
+/**
+ * Cookie sync rules:
+ * - overwrite → hydrate (dashboard login / account switch; cookies win)
+ * - explicit removal → clear extension storage (logout is authoritative; never heal)
+ * - expired/evicted → leave storage alone (extension Bearer session remains valid)
+ */
+if (chrome.cookies?.onChanged) {
+  chrome.cookies.onChanged.addListener((change) => {
+    if (change.cookie.name !== ACCESS_COOKIE_NAME) return;
+    if (isCookieSyncSuppressed()) return;
+
+    let apiHost: string;
+    try {
+      apiHost = new URL(getApiBaseUrl()).hostname;
+    } catch {
+      return;
+    }
+    if (!cookieHostMatchesApi(change.cookie.domain, apiHost)) {
+      return;
+    }
+
+    if (change.removed) {
+      if (
+        change.cause === 'overwrite' ||
+        change.cause === 'expired_overwrite' ||
+        change.cause === 'expired' ||
+        change.cause === 'evicted'
+      ) {
+        return;
+      }
+      // explicit clear (logout / clearAuthCookies)
+      void clearSessionStorageOnly().then(() => clearCurrentWorkspaceId());
+      return;
+    }
+
+    // New or overwritten cookie — adopt dashboard session.
+    void hydrateSessionFromBrowserCookies(true);
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // After an extension reload, stale workers can still receive events briefly.
   if (!chrome.runtime?.id) {
     return false;
   }
 
-  // Only accept messages from this extension (never from arbitrary web pages).
   if (!sender.id || sender.id !== chrome.runtime.id) {
     return false;
   }
@@ -57,16 +119,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (typed.type === 'AUTH_STATUS') {
+  if (typed.type === 'AUTH_STATUS' || typed.type === 'SYNC_SESSION') {
     void (async () => {
       try {
-        const [accessToken, user] = await Promise.all([getAccessToken(), getStoredUser()]);
+        await Promise.race([
+          syncSharedSession(),
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), 3_000);
+          }),
+        ]);
+        const session = await getStoredSessionFast();
         sendResponse({
-          signedIn: Boolean(accessToken),
-          user: accessToken ? user : null,
+          ok: true,
+          signedIn: Boolean(session),
+          user: session?.user ?? null,
         });
       } catch {
-        sendResponse({ signedIn: false, user: null });
+        sendResponse({ ok: false, signedIn: false, user: null });
+      }
+    })();
+    return true;
+  }
+
+  if (typed.type === 'CLEAR_SESSION') {
+    void (async () => {
+      try {
+        await clearSession();
+        await clearCurrentWorkspaceId();
+        sendResponse({ ok: true, signedIn: false });
+      } catch {
+        sendResponse({ ok: false, signedIn: false });
       }
     })();
     return true;

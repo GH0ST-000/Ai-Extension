@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const navItems = [
+export const DASHBOARD_NAV_ITEMS = [
   { href: '/app', label: 'Overview', hint: 'Workspace pulse' },
   { href: '/app/memory', label: 'Memory', hint: 'Project context' },
   { href: '/app/systems', label: 'Systems', hint: 'Multi-repo scope' },
@@ -14,23 +14,29 @@ const navItems = [
   { href: '/app/settings', label: 'Settings', hint: 'Preferences' },
 ] as const;
 
+export function isDashboardNavActive(pathname: string, href: string): boolean {
+  if (href === '/app') {
+    return pathname === '/app';
+  }
+  if (href === '/app/workspace') {
+    return pathname === '/app/workspace';
+  }
+  return pathname.startsWith(href);
+}
+
 export function DashboardNav() {
   const pathname = usePathname() ?? '';
 
   return (
     <nav className="space-y-1" aria-label="Dashboard">
-      {navItems.map((item) => {
-        const active =
-          item.href === '/app'
-            ? pathname === '/app'
-            : item.href === '/app/workspace'
-              ? pathname === '/app/workspace'
-              : pathname.startsWith(item.href);
+      {DASHBOARD_NAV_ITEMS.map((item) => {
+        const active = isDashboardNavActive(pathname, item.href);
 
         return (
           <Link
             key={item.href}
             href={item.href}
+            aria-current={active ? 'page' : undefined}
             className={[
               'group flex flex-col rounded-xl px-3 py-2.5 transition-colors duration-200',
               active

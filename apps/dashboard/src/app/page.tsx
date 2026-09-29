@@ -131,21 +131,18 @@ function landingJsonLd() {
 
 export default function HomePage() {
   return (
-    <main className="atmosphere relative min-h-screen overflow-x-hidden">
+    <main className="atmosphere relative isolate min-h-dvh">
       <JsonLd data={landingJsonLd()} />
-      <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" aria-hidden />
-      <div
-        className="pointer-events-none absolute left-[-10%] top-[-12%] h-[36rem] w-[36rem] rounded-full bg-accent/20 blur-3xl float-soft"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute bottom-[-18%] right-[-10%] h-[30rem] w-[30rem] rounded-full bg-spark/15 blur-3xl"
-        aria-hidden
-      />
+      {/* Decorative layer clipped so blur orbs cannot extend document scroll height */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+        <div className="absolute inset-0 grid-fade opacity-50" />
+        <div className="absolute left-[-8%] top-[-10%] h-[22rem] w-[22rem] rounded-full bg-accent/20 blur-3xl" />
+        <div className="absolute bottom-[8%] right-[-8%] h-[18rem] w-[18rem] rounded-full bg-spark/15 blur-3xl" />
+      </div>
 
       <LandingHeader />
 
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 pb-6 pt-14 md:px-10 md:pb-8 md:pt-[3.75rem]">
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col px-6 pb-10 pt-14 md:px-10 md:pb-12 md:pt-[3.75rem]">
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-inverse"
@@ -153,11 +150,8 @@ export default function HomePage() {
           Skip to content
         </a>
 
-        <section
-          id="main-content"
-          className="flex flex-col pt-6 pb-8 md:min-h-[62vh] md:justify-center md:py-14"
-        >
-          <div className="rise-in-delay-1 max-w-3xl">
+        <section id="main-content" className="flex flex-col pt-6 pb-10 md:pb-14 md:pt-10">
+          <div className="landing-fade max-w-3xl">
             <div className="mb-4 flex flex-wrap items-center gap-3 md:mb-5">
               <BrandGlyph
                 size={48}
@@ -182,7 +176,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in pb-12 md:pb-16" aria-labelledby="workflow-heading">
+        <section className="pb-12 md:pb-16" aria-labelledby="workflow-heading">
           <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
@@ -202,7 +196,7 @@ export default function HomePage() {
           <LandingWorkflowDemo />
         </section>
 
-        <section className="rise-in-delay-1 pb-12 md:pb-16" aria-labelledby="how-heading">
+        <section className="pb-12 md:pb-16" aria-labelledby="how-heading">
           <div className="mb-6 max-w-xl md:mb-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
               How it works
@@ -227,7 +221,7 @@ export default function HomePage() {
           </ol>
         </section>
 
-        <section className="rise-in pb-4 md:pb-6" aria-labelledby="surface-heading">
+        <section className="pb-4 md:pb-6" aria-labelledby="surface-heading">
           <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
@@ -247,7 +241,7 @@ export default function HomePage() {
           <LandingProductStage />
         </section>
 
-        <section className="rise-in-delay-1 py-14 md:py-16" aria-labelledby="device-heading">
+        <section className="py-14 md:py-16" aria-labelledby="device-heading">
           <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-14">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
@@ -287,7 +281,7 @@ export default function HomePage() {
         </section>
 
         <section
-          className="rise-in-delay-2 overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-inverse shadow-panel md:px-10 md:py-12"
+          className="overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-inverse shadow-panel md:px-10 md:py-12"
           aria-labelledby="align-heading"
         >
           <div className="grid gap-10 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:gap-12">
@@ -338,7 +332,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rise-in-delay-3 py-14 md:py-16" aria-labelledby="control-heading">
+        <section className="py-14 md:py-16" aria-labelledby="control-heading">
           <div className="max-w-2xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
               Control
@@ -364,7 +358,7 @@ export default function HomePage() {
           </p>
         </section>
 
-        <section className="rise-in border-t border-line/70 py-10 md:py-12">
+        <section className="border-t border-line/70 py-10 md:py-12">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="max-w-xl">
               <p className="font-display text-xl font-semibold tracking-tight text-ink md:text-2xl">

@@ -19,7 +19,7 @@ export {
   type EntitlementFailureCode,
 } from './entitlement';
 
-export { getDashboardBaseUrl, getDashboardBillingUrl } from './dashboard-url';
+export { getDashboardBaseUrl, getDashboardAppUrl, getDashboardBillingUrl } from './dashboard-url';
 
 export { WorkspaceSwitcher } from './workspace-switcher';
 export { EntitlementUpgradeCta } from './entitlement-upgrade-cta';

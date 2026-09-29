@@ -161,6 +161,11 @@ body {
     animation: rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
   }
 
+  /* Opacity-only entrance — avoids transform jank while scrolling the landing */
+  .landing-fade {
+    animation: landing-fade 0.55s ease-out both;
+  }
+
   .float-soft {
     animation: float-soft 7s ease-in-out infinite;
   }
@@ -192,6 +197,7 @@ body {
     .rise-in-delay-3,
     .landing-stage-in,
     .landing-stage-in-delay,
+    .landing-fade,
     .float-soft,
     .health-backdrop-in,
     .health-panel-in,
@@ -200,6 +206,15 @@ body {
     .health-pulse {
       animation: none;
     }
+  }
+}
+
+@keyframes landing-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 

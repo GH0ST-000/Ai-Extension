@@ -8,7 +8,8 @@ import {
 import type { AIAction, WorkspaceErrorCode } from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
-import { getDashboardBaseUrl, getDashboardBillingUrl } from '~/lib/workspace/dashboard-url';
+import { getDashboardAppUrl, getDashboardBillingUrl } from '~/lib/workspace/dashboard-url';
+import { getCurrentWorkspaceIdSync } from '~/lib/workspace/current-workspace-id';
 import { EntitlementUpgradeCta } from '~/lib/workspace/entitlement-upgrade-cta';
 import { isEntitlementFailureCode } from '~/lib/workspace/entitlement';
 
@@ -81,15 +82,23 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
       return;
     }
     if (kind === 'view_plans') {
-      window.open(getDashboardBillingUrl(), '_blank', 'noopener,noreferrer');
+      window.open(
+        getDashboardBillingUrl(getCurrentWorkspaceIdSync()),
+        '_blank',
+        'noopener,noreferrer',
+      );
       return;
     }
     if (kind === 'reconnect_github' || kind === 'grant_repo_access' || kind === 'open_settings') {
-      window.open(`${getDashboardBaseUrl()}/app/settings`, '_blank', 'noopener,noreferrer');
+      window.open(
+        getDashboardAppUrl('/app/settings', getCurrentWorkspaceIdSync()),
+        '_blank',
+        'noopener,noreferrer',
+      );
       return;
     }
     if (kind === 'sign_in') {
-      window.open(`${getDashboardBaseUrl()}/login`, '_blank', 'noopener,noreferrer');
+      window.open(getDashboardAppUrl('/login'), '_blank', 'noopener,noreferrer');
       return;
     }
     if (kind === 'copy_reference') {

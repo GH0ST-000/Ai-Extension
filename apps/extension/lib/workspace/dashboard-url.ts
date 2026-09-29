@@ -7,6 +7,17 @@ export function getDashboardBaseUrl(): string {
   );
 }
 
-export function getDashboardBillingUrl(): string {
-  return `${getDashboardBaseUrl()}/app/billing`;
+/** Build a dashboard path URL, optionally pinning the active workspace. */
+export function getDashboardAppUrl(path = '/app', workspaceId?: string | null): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  const url = new URL(`${getDashboardBaseUrl()}${normalized}`);
+  const trimmed = workspaceId?.trim();
+  if (trimmed) {
+    url.searchParams.set('workspace', trimmed);
+  }
+  return url.toString();
+}
+
+export function getDashboardBillingUrl(workspaceId?: string | null): string {
+  return getDashboardAppUrl('/app/billing', workspaceId);
 }

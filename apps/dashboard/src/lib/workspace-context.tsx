@@ -22,6 +22,7 @@ import { ApiError, setWorkspaceIdGetter } from './api';
 import { bootstrapWorkspaces, createWorkspace as createWorkspaceRequest } from './workspace-api';
 
 const STORAGE_KEY = 'project-x.dashboard.workspaceId';
+const WORKSPACE_QUERY_PARAM = 'workspace';
 
 export type WorkspaceListItem = WorkspaceBootstrapResponse['workspaces'][number];
 
@@ -54,6 +55,36 @@ function readStoredWorkspaceId(): string | null {
     return value && value.trim() ? value.trim() : null;
   } catch {
     return null;
+  }
+}
+
+/** Prefer `?workspace=` from extension deep-links over localStorage. */
+function readWorkspaceIdFromUrl(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const value = new URL(window.location.href).searchParams.get(WORKSPACE_QUERY_PARAM);
+    return value && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkspaceIdFromUrl(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(WORKSPACE_QUERY_PARAM)) {
+      return;
+    }
+    url.searchParams.delete(WORKSPACE_QUERY_PARAM);
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(window.history.state, '', next);
+  } catch {
+    // ignore
   }
 }
 
@@ -111,7 +142,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [applyBootstrap]);
 
   useEffect(() => {
-    currentWorkspaceIdRef.current = readStoredWorkspaceId();
+    const fromUrl = readWorkspaceIdFromUrl();
+    const initialId = fromUrl ?? readStoredWorkspaceId();
+    if (fromUrl) {
+      writeStoredWorkspaceId(fromUrl);
+      clearWorkspaceIdFromUrl();
+    }
+    currentWorkspaceIdRef.current = initialId;
     setWorkspaceIdGetter(() => currentWorkspaceIdRef.current);
 
     let cancelled = false;

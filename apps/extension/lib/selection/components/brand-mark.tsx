@@ -8,16 +8,40 @@ export function BrandMark({ className, ...props }: SVGProps<SVGSVGElement>) {
     <svg
       viewBox="0 0 128 128"
       aria-hidden
-      className={cn('h-6 w-6 shrink-0 rounded-[7px]', className)}
+      className={cn('h-6 w-6 shrink-0 rounded-[9px]', className)}
       {...props}
     >
-      <rect width="128" height="128" rx="32" fill="#0B1220" />
-      <g fill="none" stroke="#14B8A6" strokeWidth="18" strokeLinecap="round">
-        <path d="M34 34 L94 94" />
-        <path d="M94 34 L34 94" />
+      <defs>
+        <linearGradient
+          id="pxPlate"
+          x1="20"
+          y1="8"
+          x2="108"
+          y2="120"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0%" stopColor="#141C2E" />
+          <stop offset="100%" stopColor="#0B1220" />
+        </linearGradient>
+      </defs>
+      <rect width="128" height="128" rx="36" fill="url(#pxPlate)" />
+      <rect
+        x="3"
+        y="3"
+        width="122"
+        height="122"
+        rx="33"
+        fill="none"
+        stroke="#14B8A6"
+        strokeOpacity="0.35"
+        strokeWidth="3"
+      />
+      <g fill="none" stroke="#14B8A6" strokeWidth="14" strokeLinecap="round">
+        <path d="M36 36 L92 92" />
+        <path d="M92 36 L36 92" />
       </g>
-      <circle cx="94" cy="34" r="9" fill="#F59E0B" />
-      <circle cx="94" cy="34" r="3.5" fill="#FFF7ED" fillOpacity="0.9" />
+      <circle cx="92" cy="36" r="8" fill="#F59E0B" />
+      <circle cx="92" cy="36" r="3" fill="#FFF7ED" fillOpacity="0.92" />
     </svg>
   );
 }

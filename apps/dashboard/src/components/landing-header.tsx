@@ -19,7 +19,7 @@ export function LandingHeader() {
   const signedIn = ready && Boolean(user);
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-line/60 bg-mist/85 backdrop-blur-xl supports-[backdrop-filter]:bg-mist/70">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-line/60 bg-mist/92 backdrop-blur-md supports-[backdrop-filter]:bg-mist/80">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-6 md:h-[3.75rem] md:px-10">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="sm:hidden">

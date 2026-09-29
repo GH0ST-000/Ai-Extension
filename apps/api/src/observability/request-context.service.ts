@@ -8,6 +8,12 @@ export type RequestContextStore = ObservabilityContext & {
 
 const storage = new AsyncLocalStorage<RequestContextStore>();
 
+/** Read workspace from the active ALS store (set by RequestContextMiddleware from X-Workspace-Id). */
+export function peekRequestWorkspaceId(): string | undefined {
+  const workspaceId = storage.getStore()?.workspaceId;
+  return typeof workspaceId === 'string' && workspaceId.length > 0 ? workspaceId : undefined;
+}
+
 /**
  * AsyncLocalStorage-backed request/trace context.
  * Must not use global mutable state — concurrent requests stay isolated.

@@ -7,7 +7,7 @@ import type {
 
 import { extensionApiFetch } from '../api/background-http';
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, getAccessToken } from './auth-storage';
+import { clearSession, hasAuthSession } from './auth-storage';
 
 export class JiraApiError extends Error {
   readonly statusCode: number;
@@ -53,8 +53,7 @@ async function parseError(
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
+  if (!(await hasAuthSession())) {
     throw new JiraApiError(USER_FACING_AUTH_ERROR, 401, 'JIRA_NOT_CONNECTED');
   }
 

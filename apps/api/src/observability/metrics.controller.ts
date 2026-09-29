@@ -2,9 +2,11 @@ import { Controller, Get, Headers, UnauthorizedException, Header } from '@nestjs
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
 
+import { Public } from '../auth/public.decorator';
 import type { ApiConfig } from '../config/configuration';
 import { MetricsService } from './metrics.service';
 
+@Public()
 @Controller('metrics')
 export class MetricsController {
   constructor(

@@ -61,6 +61,12 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
   app.use(applySecurityHeaders);
 
+  // Honor X-Forwarded-For from a single reverse-proxy hop so auth rate limits
+  // key on the client IP rather than the proxy.
+  if (nodeEnv === 'production') {
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  }
+
   app.useLogger(app.get(Logger));
   app.useGlobalPipes(
     new ValidationPipe({
@@ -113,6 +119,7 @@ async function bootstrap(): Promise<void> {
       'Authorization',
       'X-Workspace-Id',
       'X-Request-Id',
+      'X-Project-X-Client',
       'Paddle-Signature',
     ],
     exposedHeaders: ['X-Request-Id'],

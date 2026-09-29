@@ -5,7 +5,7 @@ import type {
 } from '@project-x/types';
 
 import { extensionApiFetch } from '../api/background-http';
-import { getAccessToken } from '../services/auth-storage';
+import { hasAuthSession } from '../services/auth-storage';
 
 /**
  * Privacy-safe extension telemetry.
@@ -22,8 +22,7 @@ export async function reportExtensionError(input: {
   stack?: string;
 }): Promise<string | undefined> {
   try {
-    const token = await getAccessToken();
-    if (!token) return undefined;
+    if (!(await hasAuthSession())) return undefined;
 
     const payload: ClientErrorTelemetryInput = {
       client: 'extension',

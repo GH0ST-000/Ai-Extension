@@ -1,8 +1,10 @@
 import { Controller, Headers, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 
+import { Public } from '../auth/public.decorator';
 import { BillingService } from './billing.service';
 
+@Public()
 @Controller('webhooks')
 export class PaddleWebhookController {
   constructor(private readonly billing: BillingService) {}

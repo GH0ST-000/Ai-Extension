@@ -42,7 +42,10 @@ async function postAuth(
 ): Promise<AuthTokenResponse> {
   const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Project-X-Client': 'extension',
+    },
     body: JSON.stringify(body),
   });
 
@@ -51,6 +54,9 @@ async function postAuth(
   }
 
   const result = (await response.json()) as AuthTokenResponse;
+  if (!result.accessToken || !result.user) {
+    throw new AuthClientError('Authentication response missing tokens.', 500);
+  }
   await setSession(result.accessToken, result.user, result.refreshToken);
   return result;
 }
@@ -72,7 +78,9 @@ export async function signOut(): Promise<void> {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'X-Project-X-Client': 'extension',
         },
+        body: '{}',
       });
     } catch {
       // Always clear local session.

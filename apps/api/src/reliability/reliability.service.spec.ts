@@ -293,14 +293,14 @@ describe('ReliabilityService', () => {
     expect(resumed.execution.trigger).toBe('resume');
   });
 
-  it('enforces workspace isolation on missing execution (cross-tenant IDOR)', async () => {
+  it('enforces owner + workspace isolation on missing execution (cross-tenant IDOR)', async () => {
     prisma.user.findUnique.mockResolvedValue({ lastWorkspaceId: 'ws_user-2' });
     prisma.workspaceMembership.findFirst.mockResolvedValue({ workspaceId: 'ws_user-2' });
     prisma.workflowExecution.findFirst.mockResolvedValue(null);
     await expect(service.getExecution('user-2', 'wex_1')).rejects.toBeInstanceOf(HttpException);
     expect(prisma.workflowExecution.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'wex_1', workspaceId: 'ws_user-2' },
+        where: { id: 'wex_1', workspaceId: 'ws_user-2', userId: 'user-2' },
       }),
     );
   });

@@ -8,15 +8,28 @@ import {
   type ApiFetchRequestMessage,
   type ApiStreamStartMessage,
 } from './lib/api/background-http';
+import { isAllowedExtensionApiPath } from './lib/api/allowed-api-paths';
+import {
+  ensureTrustedSessionStorage,
+  getAccessToken,
+  getStoredUser,
+} from './lib/services/auth-storage';
 
-const ALLOWED_MESSAGE_TYPES = new Set(['PING', API_FETCH_MESSAGE]);
+const ALLOWED_MESSAGE_TYPES = new Set(['PING', 'AUTH_STATUS', 'OPEN_SIGN_IN', API_FETCH_MESSAGE]);
 
 type ExtensionMessage = {
   type?: unknown;
 };
 
+void ensureTrustedSessionStorage();
+
 chrome.runtime.onInstalled.addListener(() => {
+  void ensureTrustedSessionStorage();
   console.info(`[${APP_NAME}] extension installed`);
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  void ensureTrustedSessionStorage();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -26,7 +39,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Only accept messages from this extension (never from arbitrary web pages).
-  if (sender.id && sender.id !== chrome.runtime.id) {
+  if (!sender.id || sender.id !== chrome.runtime.id) {
     return false;
   }
 
@@ -44,10 +57,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (typed.type === 'AUTH_STATUS') {
+    void (async () => {
+      try {
+        const [accessToken, user] = await Promise.all([getAccessToken(), getStoredUser()]);
+        sendResponse({
+          signedIn: Boolean(accessToken),
+          user: accessToken ? user : null,
+        });
+      } catch {
+        sendResponse({ signedIn: false, user: null });
+      }
+    })();
+    return true;
+  }
+
+  if (typed.type === 'OPEN_SIGN_IN') {
+    const popupUrl = chrome.runtime.getURL('popup.html');
+    void chrome.tabs.create({ url: popupUrl });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (typed.type === API_FETCH_MESSAGE) {
     const req = message as ApiFetchRequestMessage;
-    if (typeof req.path !== 'string' || !req.path.startsWith('/')) {
-      sendResponse({ ok: false, status: 0, headers: {}, bodyText: '', error: 'Invalid API path.' });
+    if (typeof req.path !== 'string' || !isAllowedExtensionApiPath(req.path)) {
+      sendResponse({
+        ok: false,
+        status: 0,
+        headers: {},
+        bodyText: '',
+        error: 'API path is not allowed.',
+      });
       return true;
     }
     void executeApiFetch(req)
@@ -71,7 +112,7 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== API_STREAM_PORT) {
     return;
   }
-  if (port.sender?.id && port.sender.id !== chrome.runtime.id) {
+  if (!port.sender?.id || port.sender.id !== chrome.runtime.id) {
     port.disconnect();
     return;
   }
@@ -89,7 +130,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (
         message?.type !== 'START' ||
         typeof message.path !== 'string' ||
-        !message.path.startsWith('/')
+        !isAllowedExtensionApiPath(message.path)
       ) {
         port.postMessage({ type: 'ERROR', error: 'Invalid stream request.' });
         return;

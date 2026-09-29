@@ -12,6 +12,7 @@ import { useGithubReviewDraftStore } from '../review-draft';
 import { useGithubCiStore } from '../ci';
 import { useCIFixSessionStore } from '../ci/fix/ci-fix.store';
 import { usePatchApplyStore, type SuggestFixApplyTarget } from './patch-apply.store';
+import { safeHttpsHref } from '../ci/safe-external-url';
 
 function createClientRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -285,14 +286,16 @@ export function ApplyFixPanel({
           {result.deduplicated ? ' · replayed' : ''}
         </p>
         <div className="mt-2 flex flex-wrap gap-1">
-          <a
-            href={result.commitUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md bg-accent-soft px-2 py-1 text-[11px] font-semibold text-accent"
-          >
-            View Commit
-          </a>
+          {safeHttpsHref(result.commitUrl) ? (
+            <a
+              href={safeHttpsHref(result.commitUrl)!}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md bg-accent-soft px-2 py-1 text-[11px] font-semibold text-accent"
+            >
+              View Commit
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={() => {

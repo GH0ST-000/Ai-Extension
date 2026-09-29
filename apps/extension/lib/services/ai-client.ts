@@ -10,7 +10,7 @@ import type {
 import { extensionApiStream } from '../api/background-http';
 import { USER_FACING_AI_ERROR, USER_FACING_AUTH_ERROR } from '../selection/constants';
 import { entitlementFailureMessage, isEntitlementFailureCode } from '../workspace/entitlement';
-import { clearSession, getAccessToken } from './auth-storage';
+import { clearSession, hasAuthSession } from './auth-storage';
 
 export class AiClientError extends Error {
   readonly aborted: boolean;
@@ -80,9 +80,7 @@ export async function streamAiAction(
   handlers: StreamAiActionHandlers,
 ): Promise<string> {
   const { onChunk, signal } = handlers;
-  const accessToken = await getAccessToken();
-
-  if (!accessToken) {
+  if (!(await hasAuthSession())) {
     throw new AiClientError(USER_FACING_AUTH_ERROR, { unauthorized: true });
   }
 

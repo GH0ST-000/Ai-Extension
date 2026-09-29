@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportExtensionError } from '~/lib/observability/report-error';
 import { SelectionToolbar } from '~/lib/selection/components/selection-toolbar';
 import { SHADOW_HOST_ID } from '~/lib/selection/constants';
+import { registerToolbarShadowRoot } from '~/lib/selection/shadow-root-registry';
 
 import cssText from 'data-text:~/style.css';
 import type { PlasmoCSConfig, PlasmoGetShadowHostId } from 'plasmo';
@@ -14,6 +15,13 @@ export const config: PlasmoCSConfig = {
 };
 
 export const getShadowHostId: PlasmoGetShadowHostId = () => SHADOW_HOST_ID;
+
+/** Closed shadow so host-page JS cannot reach into the toolbar DOM. */
+export const createShadowRoot = (shadowHost: HTMLElement): ShadowRoot => {
+  const root = shadowHost.attachShadow({ mode: 'closed' });
+  registerToolbarShadowRoot(root);
+  return root;
+};
 
 export const getStyle = () => {
   const style = document.createElement('style');

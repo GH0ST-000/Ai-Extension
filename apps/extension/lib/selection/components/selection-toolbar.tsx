@@ -58,7 +58,7 @@ import { extractPageContext } from '../../context/extract-page-context';
 import { parseGitHubUrl } from '../../context/adapters/github.adapter';
 import { detectJiraKeysInPrSignals } from '@project-x/shared';
 import { buildJiraIssuePromptText } from '../jira/jira.store';
-import { getSession } from '../../services/auth-storage';
+import { hasAuthSession } from '../../services/auth-storage';
 import { useWorkspaceStore } from '../../workspace/workspace.store';
 
 export function SelectionToolbar() {
@@ -68,8 +68,8 @@ export function SelectionToolbar() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const session = await getSession();
-      if (cancelled || !session) {
+      const signedIn = await hasAuthSession();
+      if (cancelled || !signedIn) {
         return;
       }
       const state = useWorkspaceStore.getState();

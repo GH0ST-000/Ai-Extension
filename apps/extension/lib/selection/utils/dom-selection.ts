@@ -1,5 +1,6 @@
 import type { SelectionRect } from '../types';
 import { MIN_SELECTION_LENGTH, SHADOW_HOST_ID } from '../constants';
+import { getToolbarShadowRoot } from '../shadow-root-registry';
 
 export function toSelectionRect(rect: DOMRect): SelectionRect {
   return {
@@ -45,7 +46,7 @@ export function isNodeInsideToolbar(node: Node | null): boolean {
     return true;
   }
 
-  const root = host.shadowRoot;
+  const root = getToolbarShadowRoot() ?? host.shadowRoot;
   return Boolean(root?.contains(node));
 }
 

@@ -98,7 +98,11 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
       return;
     }
     if (kind === 'sign_in') {
-      window.open(getDashboardAppUrl('/login'), '_blank', 'noopener,noreferrer');
+      try {
+        void chrome.runtime.sendMessage({ type: 'OPEN_SIGN_IN' });
+      } catch {
+        window.open(getDashboardAppUrl('/login'), '_blank', 'noopener,noreferrer');
+      }
       return;
     }
     if (kind === 'copy_reference') {

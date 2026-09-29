@@ -194,12 +194,12 @@ export interface AuthUser {
 
 export interface AuthTokenResponse {
   /**
-   * Short-lived access JWT. Dashboard uses HttpOnly cookie instead of storing this;
-   * extension may keep it in background/session storage only.
+   * Short-lived access JWT. Omitted for cookie-based clients (dashboard).
+   * Extension requests tokens via `X-Project-X-Client: extension`.
    */
-  accessToken: string;
-  /** Opaque rotating refresh token (also set as HttpOnly cookie for dashboard). */
-  refreshToken: string;
+  accessToken?: string;
+  /** Opaque rotating refresh token. Omitted for cookie-based clients (dashboard). */
+  refreshToken?: string;
   /** Access token lifetime in seconds. */
   expiresIn: number;
   user: AuthUser;

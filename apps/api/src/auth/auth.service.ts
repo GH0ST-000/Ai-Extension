@@ -31,7 +31,9 @@ export class AuthService {
     const email = input.email.toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
-      throw new ConflictException('An account with this email already exists.');
+      // Equalize timing vs new-user path; avoid confirming which emails exist.
+      await bcrypt.hash(input.password, 12);
+      throw new ConflictException('Unable to create an account with the provided details.');
     }
 
     const passwordHash = await bcrypt.hash(input.password, 12);
@@ -108,6 +110,8 @@ export class AuthService {
     const email = input.email.toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
+      // Dummy compare so unknown emails take similar time as bad passwords.
+      await bcrypt.compare(input.password, UNKNOWN_USER_PASSWORD_HASH);
       this.securityAudit?.record({
         type: 'auth.login.failure',
         outcome: 'failure',
@@ -270,6 +274,19 @@ export class AuthService {
     return { ok: true };
   }
 
+  /**
+   * Logout when access JWT is missing/expired but a refresh cookie/body is still present.
+   * Looks up the refresh family and revokes it + bumps sessionVersion.
+   */
+  async logoutByRefreshToken(rawRefreshToken: string): Promise<{ ok: true }> {
+    const tokenHash = hashToken(rawRefreshToken);
+    const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+    if (!row || row.revokedAt) {
+      return { ok: true };
+    }
+    return this.logout(row.userId, rawRefreshToken);
+  }
+
   /** Revoke every refresh family and bump session — all devices. */
   async logoutAll(userId: string): Promise<{ ok: true }> {
     return this.logout(userId);
@@ -311,6 +328,9 @@ export class AuthService {
     };
   }
 }
+
+/** Precomputed bcrypt hash used only to equalize login timing for unknown emails. */
+const UNKNOWN_USER_PASSWORD_HASH = '$2b$12$KBdPyzLfXY3FRTs0XEdYoelnQwRMSk2yMtVqwC/ipmDvhMnghZ7Zq';
 
 function createRefreshToken(): string {
   return randomBytes(48).toString('base64url');

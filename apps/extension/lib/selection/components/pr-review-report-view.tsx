@@ -16,6 +16,7 @@ import {
   buildPrReviewHandoffSummary,
 } from '../utils/format-pr-review-markdown';
 import { ReviewDraftChip, ReviewDraftPanel } from './review-draft-panel';
+import { safeHttpsHref } from '../ci/safe-external-url';
 
 const FILTERS: { id: PrFindingFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -353,11 +354,11 @@ export function PrReviewReportView({
       {postMessage ? (
         <p className="text-[11px] text-accent">
           {postMessage}
-          {postedUrl ? (
+          {postedUrl && safeHttpsHref(postedUrl) ? (
             <>
               {' '}
               <a
-                href={postedUrl}
+                href={safeHttpsHref(postedUrl)!}
                 target="_blank"
                 rel="noreferrer"
                 className="font-semibold underline-offset-2 hover:underline"

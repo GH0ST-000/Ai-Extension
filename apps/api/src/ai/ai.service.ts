@@ -26,6 +26,7 @@ import type { AiActionRequest } from './interfaces/ai-prompt-definition.interfac
 import { AiModelFactory } from './models/ai-model.factory';
 import { PromptRegistry } from './prompts/prompt.registry';
 import { responseStyleHint } from './prompts/prompt.utils';
+import { redactSensitiveString } from '@project-x/shared';
 
 export interface AiTextStreamHandle {
   pipeTextStreamToResponse: (response: ServerResponse) => Promise<void>;
@@ -377,7 +378,11 @@ export class AiService {
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
 
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await resolveWorkspaceIdForUser(
+      this.prisma,
+      userId,
+      this.requestContext.get()?.workspaceId,
+    );
     await this.featureGate.require(workspaceId, featureForAiAction(request.action));
     await this.usage.consume({
       workspaceId,
@@ -431,8 +436,8 @@ export class AiService {
 
     return {
       action: input.action,
-      text: input.text,
-      customPrompt: input.customPrompt ?? null,
+      text: redactSensitiveString(input.text),
+      customPrompt: input.customPrompt ? redactSensitiveString(input.customPrompt) : null,
       targetLanguage: input.targetLanguage ?? null,
       context: includePageContext ? this.toPageContext(input.context) : null,
       errorIntelligence: this.toErrorIntelligence(input.errorIntelligence),

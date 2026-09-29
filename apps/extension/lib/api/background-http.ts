@@ -5,6 +5,7 @@ import {
   setSession,
 } from '../services/auth-storage';
 import { applyWorkspaceHeader } from './workspace-header';
+import { isAllowedExtensionApiPath } from './allowed-api-paths';
 import { assertAllowedApiUrl, getApiBaseUrl, needsApiProxy } from './api-base-url';
 
 export const API_FETCH_MESSAGE = 'API_FETCH' as const;
@@ -60,7 +61,10 @@ async function tryRefresh(): Promise<boolean> {
   try {
     const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Project-X-Client': 'extension',
+      },
       body: JSON.stringify({ refreshToken }),
     });
     if (!response.ok) {
@@ -89,15 +93,44 @@ function headersToRecord(headers: Headers): Record<string, string> {
   return out;
 }
 
+function sanitizeProxyHeaders(input?: Record<string, string>): Record<string, string> {
+  if (!input) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    const lower = key.toLowerCase();
+    if (
+      lower === 'authorization' ||
+      lower === 'host' ||
+      lower === 'cookie' ||
+      lower === 'content-length'
+    ) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /** Background-side executor — never call from content scripts directly. */
 export async function executeApiFetch(
   input: Omit<ApiFetchRequestMessage, 'type'>,
 ): Promise<ApiFetchResponseMessage> {
+  if (!isAllowedExtensionApiPath(input.path)) {
+    return {
+      ok: false,
+      status: 0,
+      headers: {},
+      bodyText: '',
+      error: 'API path is not allowed.',
+    };
+  }
   const path = input.path.startsWith('/') ? input.path : `/${input.path}`;
   const url = `${getApiBaseUrl()}/api${path}`;
   assertAllowedApiUrl(url);
 
-  const headers = new Headers(input.headers ?? {});
+  const headers = new Headers(sanitizeProxyHeaders(input.headers));
   const auth = input.auth !== false;
   const authState = await attachAuthHeaders(headers, auth);
   if (authState.unauthorized) {
@@ -119,7 +152,7 @@ export async function executeApiFetch(
   if (response.status === 401 && auth) {
     const refreshed = await tryRefresh();
     if (refreshed) {
-      const retryHeaders = new Headers(input.headers ?? {});
+      const retryHeaders = new Headers(sanitizeProxyHeaders(input.headers));
       await attachAuthHeaders(retryHeaders, true);
       response = await fetch(url, { ...init, headers: retryHeaders });
     } else {
@@ -140,11 +173,14 @@ export async function executeApiStream(
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
 ): Promise<{ ok: boolean; status: number; bodyText: string }> {
+  if (!isAllowedExtensionApiPath(input.path)) {
+    return { ok: false, status: 0, bodyText: 'API path is not allowed.' };
+  }
   const path = input.path.startsWith('/') ? input.path : `/${input.path}`;
   const url = `${getApiBaseUrl()}/api${path}`;
   assertAllowedApiUrl(url);
 
-  const headers = new Headers(input.headers ?? {});
+  const headers = new Headers(sanitizeProxyHeaders(input.headers));
   const auth = input.auth !== false;
   const authState = await attachAuthHeaders(headers, auth);
   if (authState.unauthorized) {
@@ -161,7 +197,7 @@ export async function executeApiStream(
   if (response.status === 401 && auth) {
     const refreshed = await tryRefresh();
     if (refreshed) {
-      const retryHeaders = new Headers(input.headers ?? {});
+      const retryHeaders = new Headers(sanitizeProxyHeaders(input.headers));
       await attachAuthHeaders(retryHeaders, true);
       response = await fetch(url, {
         method: input.method ?? 'POST',

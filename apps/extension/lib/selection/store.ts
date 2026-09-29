@@ -312,12 +312,10 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
       const errorIntelligence = useErrorIntel
         ? buildErrorIntelligenceContext({ text: selectedText, context: pageContext })
         : null;
-      const { text: redactedSelection } = useErrorIntel
-        ? redactSensitiveText(selectedText)
-        : { text: selectedText };
+      const { text: redactedSelection } = redactSensitiveText(selectedText);
       const requestText = useErrorIntel
         ? redactedSelection.trim().slice(0, MAX_ERROR_TEXT_CHARACTERS)
-        : selectedText;
+        : redactedSelection;
 
       const memoryBlock = await loadProjectMemoryPromptBlock({
         action,

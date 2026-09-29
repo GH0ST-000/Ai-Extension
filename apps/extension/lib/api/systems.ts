@@ -17,7 +17,7 @@ import type {
 } from '@project-x/types';
 
 import { USER_FACING_AUTH_ERROR } from '../selection/constants';
-import { clearSession, getAccessToken } from '../services/auth-storage';
+import { clearSession, hasAuthSession } from '../services/auth-storage';
 import { extensionApiFetch } from './background-http';
 
 export class MultiRepoApiError extends Error {
@@ -106,8 +106,7 @@ async function parseError(
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
+  if (!(await hasAuthSession())) {
     throw new MultiRepoApiError(USER_FACING_AUTH_ERROR, 401, 'SYSTEM_CONTEXT_NOT_CONFIGURED');
   }
 

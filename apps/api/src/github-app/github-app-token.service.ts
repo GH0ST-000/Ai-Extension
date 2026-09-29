@@ -2,6 +2,7 @@ import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { ApiConfig } from '../config/configuration';
+import { decryptSecret, encryptSecret } from '../common/crypto/secret-box';
 import { RedisService } from '../redis/redis.service';
 import { createGitHubAppJwt } from './github-app-jwt';
 
@@ -36,7 +37,12 @@ export class GithubAppTokenService {
     const cacheKey = `${INSTALLATION_TOKEN_CACHE_PREFIX}${installationId}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
-      return cached;
+      const decrypted = this.tryDecryptCachedToken(cached);
+      if (decrypted) {
+        return decrypted;
+      }
+      // Legacy plaintext or corrupt ciphertext — drop and remint.
+      await this.redis.del(cacheKey);
     }
 
     const jwt = this.createAppJwt();
@@ -66,11 +72,26 @@ export class GithubAppTokenService {
       );
     }
 
-    await this.redis.set(cacheKey, body.token, 'EX', INSTALLATION_TOKEN_CACHE_TTL_SECONDS);
+    const encryptionKey = this.config.getOrThrow('secrets.encryptionKey', { infer: true });
+    await this.redis.set(
+      cacheKey,
+      encryptSecret(body.token, encryptionKey),
+      'EX',
+      INSTALLATION_TOKEN_CACHE_TTL_SECONDS,
+    );
     return body.token;
   }
 
   async revokeCachedInstallationToken(installationId: string): Promise<void> {
     await this.redis.del(`${INSTALLATION_TOKEN_CACHE_PREFIX}${installationId}`);
+  }
+
+  private tryDecryptCachedToken(cached: string): string | null {
+    try {
+      const encryptionKey = this.config.getOrThrow('secrets.encryptionKey', { infer: true });
+      return decryptSecret(cached, encryptionKey);
+    } catch {
+      return null;
+    }
   }
 }

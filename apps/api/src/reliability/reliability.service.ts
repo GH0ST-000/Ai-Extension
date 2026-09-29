@@ -76,7 +76,7 @@ export class ReliabilityService {
   async listExecutions(userId: string): Promise<ListWorkflowExecutionsResponse> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const rows = await this.prisma.workflowExecution.findMany({
-      where: { workspaceId },
+      where: { workspaceId, userId },
       orderBy: { startedAt: 'desc' },
       take: RELIABILITY_MAX_LIST_EXECUTIONS,
       include: { promptSnapshot: true },
@@ -849,7 +849,7 @@ export class ReliabilityService {
   private async requireExecution(userId: string, executionId: string): Promise<ExecutionLoaded> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const row = await this.prisma.workflowExecution.findFirst({
-      where: { id: executionId, workspaceId },
+      where: { id: executionId, workspaceId, userId },
       include: { promptSnapshot: true },
     });
     if (!row) {

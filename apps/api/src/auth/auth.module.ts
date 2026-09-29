@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -6,6 +7,7 @@ import { PassportModule } from '@nestjs/passport';
 import type { ApiConfig } from '../config/configuration';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 
@@ -24,7 +26,16 @@ import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, OptionalJwtAuthGuard],
-  exports: [AuthService, JwtModule, PassportModule],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    OptionalJwtAuthGuard,
+    JwtAuthGuard,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
+  exports: [AuthService, JwtModule, PassportModule, JwtAuthGuard],
 })
 export class AuthModule {}

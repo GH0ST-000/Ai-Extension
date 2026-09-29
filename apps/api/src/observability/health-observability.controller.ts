@@ -7,10 +7,12 @@ import type {
   InternalObservabilityHealthResponse,
 } from '@project-x/types';
 
+import { Public } from '../auth/public.decorator';
 import type { ApiConfig } from '../config/configuration';
 import { ProviderHealthService } from './provider-health.service';
 import { SecurityAuditService } from './security-audit.service';
 
+@Public()
 @Controller('health')
 export class DependencyHealthController {
   constructor(
@@ -73,6 +75,7 @@ export class DependencyHealthController {
   }
 }
 
+@Public()
 @Controller('internal/observability')
 export class InternalObservabilityController {
   constructor(

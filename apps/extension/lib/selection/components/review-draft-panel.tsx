@@ -20,6 +20,7 @@ import {
   useGithubReviewDraftStore,
   validateReviewDraft,
 } from '../review-draft';
+import { safeHttpsHref } from '../ci/safe-external-url';
 
 type ReviewDraftPanelProps = {
   report: PRReviewReport;
@@ -171,9 +172,9 @@ export function ReviewDraftPanel({
             {submitResult.deduplicated ? ' · replayed' : ''}
           </p>
           <div className="mt-2 flex flex-wrap gap-1">
-            {submitResult.reviewUrl ? (
+            {safeHttpsHref(submitResult.reviewUrl) ? (
               <a
-                href={submitResult.reviewUrl}
+                href={safeHttpsHref(submitResult.reviewUrl)!}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-md bg-accent-soft px-2 py-1 text-[11px] font-semibold text-accent"

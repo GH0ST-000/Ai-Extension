@@ -1,18 +1,21 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import { peekRequestWorkspaceId } from '../observability/request-context.service';
 
 /**
  * Resolve the acting workspace for legacy user-scoped call sites.
- * Prefer lastWorkspaceId; fall back to personal workspace id convention `ws_${userId}`.
+ * Prefer explicit / X-Workspace-Id header (ALS), then lastWorkspaceId,
+ * then personal workspace id convention `ws_${userId}`.
  */
 export async function resolveWorkspaceIdForUser(
   prisma: PrismaService,
   userId: string,
   explicitWorkspaceId?: string,
 ): Promise<string> {
-  if (explicitWorkspaceId) {
+  const candidate = explicitWorkspaceId ?? peekRequestWorkspaceId();
+  if (candidate) {
     const membership = await prisma.workspaceMembership.findFirst({
       where: {
-        workspaceId: explicitWorkspaceId,
+        workspaceId: candidate,
         userId,
         status: 'active',
         workspace: { status: 'active' },

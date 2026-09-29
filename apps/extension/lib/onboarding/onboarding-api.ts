@@ -5,11 +5,10 @@ import type {
 } from '@project-x/types';
 
 import { extensionApiFetch } from '../api/background-http';
-import { clearSession, getAccessToken } from '../services/auth-storage';
+import { clearSession, hasAuthSession } from '../services/auth-storage';
 
 async function onboardingFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
+  if (!(await hasAuthSession())) {
     throw new Error('Sign in required.');
   }
 

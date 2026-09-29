@@ -16,18 +16,19 @@ Release-blocking invariants for Day 30 private beta. These must match code and t
 12. **Client cannot choose arbitrary Paddle price** — server resolves price from plan + cycle.
 13. **Client cannot override AI model / budget / retries.**
 14. **AI cache cannot leak private results across workspaces.**
-15. **Production refuses known auth/security bypass / default secret configs.**
+15. **Production refuses known auth/security bypass / default secret configs.** New API routes require JWT by default (`APP_GUARD` + `@Public()` escape hatch only).
 16. **Webhook mutations require valid signature verification** — Paddle Billing uses `Paddle-Signature` (`ts=…;h1=…`, HMAC-SHA256 over `timestamp:rawBody`, ~5s replay window). Production rejects sandbox Paddle config and dedupes `event_id`.
 17. **Patch path traversal is rejected before GitHub mutation.**
-18. **Secrets do not appear in logs, Sentry, audit bodies, or Copy Diagnostics.**
+18. **Secrets do not appear in logs, Sentry, audit bodies, or Copy Diagnostics.** GitHub App installation tokens in Redis are AES-GCM encrypted at rest (same key as PATs).
+19. **Workflow executions are owner-scoped** — listing and detail require `userId` match inside the acting workspace (no cross-member execution peek).
 
 ## Auth architecture note
 
 Project X uses short-lived Bearer JWTs plus rotating refresh tokens.
 
-- **Dashboard:** access + refresh tokens are set as **HttpOnly `SameSite=Lax` cookies** (`px_at`, `px_rt`). The browser JS never stores the access token (legacy `localStorage` keys are purged). Profile cache may live in `sessionStorage`.
-- **Extension:** may receive tokens in the JSON body for background/session storage only (not page `localStorage`). Prefer background proxy (#2) so content scripts never hold tokens.
-- Logout increments `sessionVersion` (invalidates access JWTs) and revokes refresh token families. Refresh reuse of a revoked token revokes the entire family.
+- **Dashboard:** access + refresh tokens are set as **HttpOnly `SameSite=Lax` cookies** (`px_at`, `px_rt`). Auth JSON omits tokens unless `X-Project-X-Client: extension`. Legacy `localStorage` keys are purged. Profile cache may live in `sessionStorage`.
+- **Extension:** receives tokens in the JSON body only when opting in via `X-Project-X-Client: extension`. Tokens live in `chrome.storage.session` with `TRUSTED_CONTEXTS` (content scripts cannot read JWTs). Profile hint may live in `chrome.storage.local`. Background proxy allowlists API paths.
+- Logout increments `sessionVersion` (invalidates access JWTs) and revokes refresh token families — including when access JWT is expired but refresh cookie/body is present. Refresh reuse of a revoked token revokes the entire family.
 - CORS is credentialed (`credentials: true`) with exact origin allowlists.
 
 ## Provider access model

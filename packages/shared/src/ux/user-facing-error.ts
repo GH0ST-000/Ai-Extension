@@ -51,7 +51,8 @@ export function mapToUserFacingError(input: MapErrorInput): UserFacingError {
   if (input.unauthorized) {
     return error({
       title: 'Sign in to continue',
-      message: 'Your session expired or you are signed out. Sign in again, then retry the action.',
+      message:
+        'Open the Project X extension popup and sign in there (website login does not sign in the extension). Then retry.',
       severity: 'warning',
       code: 'UNAUTHORIZED',
       referenceId: input.referenceId ?? undefined,

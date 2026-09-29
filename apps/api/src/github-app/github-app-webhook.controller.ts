@@ -2,6 +2,7 @@ import { Controller, Headers, Post, Req, UnauthorizedException } from '@nestjs/c
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 
+import { Public } from '../auth/public.decorator';
 import type { ApiConfig } from '../config/configuration';
 import { GithubAppInstallationService } from './github-app-installation.service';
 import { GithubAppApiClient } from './github-app-api.client';
@@ -18,6 +19,7 @@ type InstallationWebhookPayload = {
   };
 };
 
+@Public()
 @Controller('webhooks')
 export class GithubAppWebhookController {
   constructor(

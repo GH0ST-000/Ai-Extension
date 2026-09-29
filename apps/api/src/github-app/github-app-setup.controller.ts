@@ -2,9 +2,11 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 
+import { Public } from '../auth/public.decorator';
 import type { ApiConfig } from '../config/configuration';
 import { GithubAppInstallationService } from './github-app-installation.service';
 
+@Public()
 @Controller('integrations/github-app')
 export class GithubAppSetupController {
   constructor(

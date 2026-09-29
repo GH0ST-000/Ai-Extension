@@ -5,10 +5,12 @@ import { timingSafeEqual } from 'node:crypto';
 import { APP_NAME } from '@project-x/shared';
 import type { HealthCheckResponse } from '@project-x/types';
 
+import { Public } from '../auth/public.decorator';
 import type { ApiConfig } from '../config/configuration';
 import { PrismaHealthIndicator } from './indicators/prisma.health';
 import { RedisHealthIndicator } from './indicators/redis.health';
 
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

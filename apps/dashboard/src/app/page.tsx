@@ -394,6 +394,9 @@ export default function HomePage() {
               <Link href="/app" className="transition hover:text-ink">
                 Studio
               </Link>
+              <Link href="/terms" className="transition hover:text-ink">
+                Terms
+              </Link>
               <a href="/sitemap.xml" className="transition hover:text-ink">
                 Sitemap
               </a>

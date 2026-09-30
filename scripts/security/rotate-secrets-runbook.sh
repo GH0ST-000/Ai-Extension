@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Project X — secret rotation ops outline (safe by default).
-#
+#Rms
 # This script does NOT rotate secrets automatically. It prints a checklist and
 # optional SQL snippets for operators. Review docs/security/encryption-key-rotation.md
 #

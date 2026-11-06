@@ -634,9 +634,12 @@ export default function SystemsPage() {
                   })}
                 </ul>
 
-                <form onSubmit={onAddRepository} className="mt-4 grid gap-3 sm:grid-cols-4">
-                  <div>
-                    <label htmlFor="add-owner" className="text-xs font-semibold text-ink">
+                <form
+                  onSubmit={onAddRepository}
+                  className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                >
+                  <div className="min-w-0">
+                    <label htmlFor="add-owner" className="text-sm font-semibold text-ink">
                       Owner
                     </label>
                     <input
@@ -646,11 +649,11 @@ export default function SystemsPage() {
                       spellCheck={false}
                       value={addOwner}
                       onChange={(event) => setAddOwner(event.target.value)}
-                      className="mt-1 w-full rounded-xl border border-line bg-mist px-3 py-2 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
+                      className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
                     />
                   </div>
-                  <div>
-                    <label htmlFor="add-repo" className="text-xs font-semibold text-ink">
+                  <div className="min-w-0">
+                    <label htmlFor="add-repo" className="text-sm font-semibold text-ink">
                       Repository
                     </label>
                     <input
@@ -660,7 +663,7 @@ export default function SystemsPage() {
                       spellCheck={false}
                       value={addRepo}
                       onChange={(event) => setAddRepo(event.target.value)}
-                      className="mt-1 w-full rounded-xl border border-line bg-mist px-3 py-2 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
+                      className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
                     />
                   </div>
                   <StudioSelect
@@ -669,23 +672,29 @@ export default function SystemsPage() {
                     value={addRole}
                     options={ROLE_OPTIONS}
                     onChange={setAddRole}
+                    className="min-w-0"
                   />
-                  <div className="flex items-end gap-3">
-                    <label className="mb-2 flex items-center gap-2 text-xs font-medium text-ink">
+                  <div className="min-w-0">
+                    <span id="add-enabled-label" className="text-sm font-semibold text-ink">
+                      Enabled
+                    </span>
+                    <div className="mt-2 flex h-[42px] items-center gap-3">
                       <input
+                        id="add-enabled"
                         type="checkbox"
+                        aria-labelledby="add-enabled-label"
                         checked={addEnabled}
                         onChange={(event) => setAddEnabled(event.target.checked)}
+                        className="size-4 shrink-0 rounded border-line"
                       />
-                      Enabled
-                    </label>
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      className="rounded-xl bg-ink px-3 py-2 text-sm font-semibold text-inverse disabled:opacity-50"
-                    >
-                      Add
-                    </button>
+                      <button
+                        type="submit"
+                        disabled={busy}
+                        className="h-full rounded-xl bg-ink px-4 text-sm font-semibold text-inverse disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>

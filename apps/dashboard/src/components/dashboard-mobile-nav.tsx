@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { DASHBOARD_NAV_ITEMS, isDashboardNavActive } from './dashboard-nav';
+import { NavPendingIndicator } from './nav-pending-indicator';
 
 type MobileTab = {
   href: string;
@@ -146,7 +147,10 @@ export function DashboardMobileNav() {
                       active ? 'bg-accent-soft text-ink' : 'text-ink hover:bg-mist',
                     ].join(' ')}
                   >
-                    <span className="text-sm font-semibold tracking-tight">{item.label}</span>
+                    <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+                      <span className="min-w-0 flex-1">{item.label}</span>
+                      <NavPendingIndicator />
+                    </span>
                     <span className="text-[11px] text-muted-foreground">{item.hint}</span>
                   </Link>
                 </li>
@@ -170,13 +174,16 @@ export function DashboardMobileNav() {
                   href={tab.href}
                   aria-current={active ? 'page' : undefined}
                   className={[
-                    'flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-center transition',
+                    'relative flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-center transition',
                     active ? 'text-accent' : 'text-muted-foreground hover:text-ink',
                   ].join(' ')}
                 >
                   <TabIcon name={tab.icon} active={active} />
                   <span className="max-w-full truncate text-[10px] font-semibold tracking-tight">
                     {tab.label}
+                  </span>
+                  <span className="absolute right-1 top-1">
+                    <NavPendingIndicator />
                   </span>
                 </Link>
               </li>

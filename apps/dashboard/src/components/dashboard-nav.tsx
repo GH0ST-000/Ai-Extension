@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { NavPendingIndicator } from './nav-pending-indicator';
+
 export const DASHBOARD_NAV_ITEMS = [
   { href: '/app', label: 'Overview', hint: 'Workspace pulse' },
   { href: '/app/memory', label: 'Memory', hint: 'Project context' },
@@ -51,7 +53,8 @@ export function DashboardNav() {
                   active ? 'bg-accent' : 'bg-line group-hover:bg-accent/60',
                 ].join(' ')}
               />
-              {item.label}
+              <span className="min-w-0 flex-1">{item.label}</span>
+              <NavPendingIndicator />
             </span>
             <span className="pl-3.5 text-[11px] text-muted-foreground/90">{item.hint}</span>
           </Link>

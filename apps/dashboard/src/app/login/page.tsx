@@ -29,18 +29,26 @@ function LoginPageContent() {
   useEffect(() => {
     let alive = true;
     const next = safeInternalPath(searchParams.get('next'));
+    const controller = new AbortController();
+    const timers: number[] = [];
+    const stopChecking = () => {
+      if (alive) setCheckingSession(false);
+    };
+
+    // Hard cap so a hung API never leaves the spinner up.
+    timers.push(
+      window.setTimeout(() => {
+        controller.abort();
+        stopChecking();
+      }, 2_800),
+    );
 
     async function tryExistingSession(): Promise<boolean> {
       try {
-        const me = await Promise.race([
-          fetchMe(),
-          new Promise<never>((_, reject) => {
-            window.setTimeout(() => reject(new Error('timeout')), 2_500);
-          }),
-        ]);
-        if (!alive) return false;
+        const me = await fetchMe({ signal: controller.signal });
+        if (!alive || controller.signal.aborted) return false;
         setSession(me);
-        void publishExtensionSync();
+        publishExtensionSync();
         router.replace(next);
         return true;
       } catch {
@@ -49,16 +57,25 @@ function LoginPageContent() {
     }
 
     void (async () => {
-      if (await tryExistingSession()) return;
-      // Extension may push cookies a moment after load — retry once.
-      await new Promise((r) => window.setTimeout(r, 1_000));
-      if (!alive) return;
-      if (await tryExistingSession()) return;
-      if (alive) setCheckingSession(false);
+      // Second attempt covers the extension pushing cookies a moment after load.
+      for (const delayMs of [0, 600]) {
+        if (delayMs > 0) {
+          await new Promise((resolve) => timers.push(window.setTimeout(resolve, delayMs)));
+        }
+        if (!alive || controller.signal.aborted) break;
+        if (await tryExistingSession()) {
+          // Keep the spinner only until navigation unmounts this page; never block forever.
+          timers.push(window.setTimeout(stopChecking, 1_500));
+          return;
+        }
+      }
+      stopChecking();
     })();
 
     return () => {
       alive = false;
+      controller.abort();
+      timers.forEach((id) => window.clearTimeout(id));
     };
   }, [router, searchParams]);
 

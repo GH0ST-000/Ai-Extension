@@ -57,17 +57,52 @@ export function getApiBaseUrl(): string {
 
 let refreshInFlight: Promise<boolean> | null = null;
 
-async function refreshSession(): Promise<boolean> {
-  if (refreshInFlight) {
-    return refreshInFlight;
+const REFRESH_TIMEOUT_MS = 3_000;
+
+/**
+ * The refresh request is shared by every concurrent caller, so it is bounded only
+ * by its own timeout. A caller's signal stops that caller from waiting; it must
+ * never cancel the shared request (that would log out the other callers).
+ */
+function refreshSession(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) {
+    return Promise.reject(abortError());
   }
-  refreshInFlight = (async () => {
+  const shared = refreshInFlight ?? (refreshInFlight = startRefresh());
+  if (!signal) {
+    return shared;
+  }
+  return new Promise<boolean>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    shared.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function startRefresh(): Promise<boolean> {
+  return (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: '{}',
+        signal: controller.signal,
       });
       if (!response.ok) {
         return false;
@@ -78,10 +113,10 @@ async function refreshSession(): Promise<boolean> {
     } catch {
       return false;
     } finally {
+      clearTimeout(timer);
       refreshInFlight = null;
     }
   })();
-  return refreshInFlight;
 }
 
 export class ApiError extends Error {
@@ -177,7 +212,8 @@ export async function apiFetch<T>(
   });
 
   if (response.status === 401 && init?.auth !== false && !init?._retried) {
-    const refreshed = await refreshSession();
+    // Rejects with AbortError if this caller's signal aborts; never clears the session then.
+    const refreshed = await refreshSession(init?.signal ?? undefined);
     if (refreshed) {
       return apiFetch<T>(path, { ...init, _retried: true });
     }

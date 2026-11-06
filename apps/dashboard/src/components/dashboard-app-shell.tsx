@@ -8,6 +8,7 @@ import { DashboardErrorBoundary } from './dashboard-error-boundary';
 import { DashboardMobileNav } from './dashboard-mobile-nav';
 import { DashboardNav } from './dashboard-nav';
 import { AuthGate, useAuthUser } from './auth-gate';
+import { NavigationProgress } from './navigation-progress';
 import { ThemeToggle } from './theme-toggle';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { logout } from '../lib/api';
@@ -25,6 +26,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="atmosphere relative h-dvh overflow-hidden text-ink">
+      <NavigationProgress />
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-60" aria-hidden />
       <div
         className="pointer-events-none absolute -left-24 top-24 h-64 w-64 rounded-full bg-accent/15 blur-3xl float-soft"

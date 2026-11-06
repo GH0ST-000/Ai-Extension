@@ -16,7 +16,8 @@ import { publishExtensionSync } from '../lib/extension-handoff';
 
 const AuthUserContext = createContext<StoredAuthUser | null>(null);
 
-const SESSION_CHECK_TIMEOUT_MS = 6_000;
+/** Keep this short — a hung /me or refresh must not brick the shell. */
+const SESSION_CHECK_TIMEOUT_MS = 3_500;
 
 const shellStyle: CSSProperties = {
   display: 'flex',
@@ -28,7 +29,7 @@ const shellStyle: CSSProperties = {
   padding: 24,
   textAlign: 'center',
   fontSize: 14,
-  color: '#64748b',
+  color: 'var(--foreground, #94a3b8)',
   fontFamily: 'ui-sans-serif, system-ui, sans-serif',
 };
 
@@ -36,67 +37,56 @@ export function useAuthUser(): StoredAuthUser | null {
   return useContext(AuthUserContext);
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      reject(new Error('SESSION_CHECK_TIMEOUT'));
-    }, ms);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      },
-      (err: unknown) => {
-        window.clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
-}
-
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
+  // Start empty on both server and client to keep hydration consistent;
+  // the cached user is applied in the effect below.
   const [user, setUser] = useState<StoredAuthUser | null>(null);
+  const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<'checking' | 'redirecting' | 'error'>('checking');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SESSION_CHECK_TIMEOUT_MS);
 
     async function verify() {
       setStatus('checking');
       setErrorMessage(null);
-      setReady(false);
+
+      // Optimistic: paint shell from cache while we revalidate.
+      const cached = getStoredUser();
+      if (cached) {
+        setUser(cached);
+        setReady(true);
+      }
 
       try {
-        const me = await withTimeout(fetchMe(), SESSION_CHECK_TIMEOUT_MS);
+        const me = await fetchMe({ signal: controller.signal });
         if (!alive) return;
         setUser(me);
         setReady(true);
         void publishExtensionSync();
-      } catch (err) {
+      } catch {
         if (!alive) return;
 
-        const timedOut =
-          err instanceof Error &&
-          (err.message === 'SESSION_CHECK_TIMEOUT' || err.name === 'AbortError');
-
-        if (timedOut) {
-          // Prefer cached user so a flaky API does not hard-lock the dashboard.
-          const cached = getStoredUser();
-          if (cached) {
-            setUser(cached);
+        if (controller.signal.aborted) {
+          const fallback = getStoredUser();
+          if (fallback) {
+            setUser(fallback);
             setReady(true);
             return;
           }
+          setReady(false);
           setStatus('error');
-          setErrorMessage('Session check timed out. Confirm the API is running on port 3001.');
+          setErrorMessage('Session check timed out. Please check your connection and try again.');
           return;
         }
 
         clearSession();
+        setReady(false);
         setStatus('redirecting');
         router.replace('/login');
       }
@@ -105,6 +95,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void verify();
     return () => {
       alive = false;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, [router, retryToken]);
 
@@ -112,7 +104,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (status === 'error') {
       return (
         <div style={shellStyle} role="alert">
-          <p style={{ margin: 0, color: '#0f172a', fontWeight: 600 }}>
+          <p style={{ margin: 0, color: 'inherit', fontWeight: 600 }}>
             {errorMessage ?? 'Unable to verify session.'}
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
@@ -135,9 +127,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
               type="button"
               style={{
                 borderRadius: 12,
-                border: '1px solid #cbd5e1',
-                background: '#fff',
-                color: '#0f172a',
+                border: '1px solid #475569',
+                background: 'transparent',
+                color: 'inherit',
                 fontWeight: 600,
                 padding: '8px 14px',
                 cursor: 'pointer',

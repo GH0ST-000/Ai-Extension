@@ -22,7 +22,7 @@ import {
   REFRESH_COOKIE,
   setAuthCookies,
 } from './auth-cookies';
-import { AuthService } from './auth.service';
+import { AuthService, RefreshTokenRotatedException } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import { LoginDto, RefreshDto, RegisterDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -88,7 +88,10 @@ export class AuthController {
       this.writeSessionCookies(res, result.accessToken!, result.refreshToken!);
       return this.shapeAuthResponse(req, result);
     } catch (error) {
-      clearAuthCookies(res, this.cookieSecure());
+      // A lost rotation race must not wipe the cookies the winning client just set.
+      if (!(error instanceof RefreshTokenRotatedException)) {
+        clearAuthCookies(res, this.cookieSecure());
+      }
       throw error;
     }
   }

@@ -1,7 +1,9 @@
+import { readAccessTokenFromBrowserCookie } from '../services/auth-cookie-bridge';
 import {
   clearSessionStorageOnly,
   getAccessToken,
-  getRefreshToken,
+  getFreshestRefreshToken,
+  hydrateSessionFromBrowserCookies,
   setSession,
 } from '../services/auth-storage';
 import { applyWorkspaceHeader } from './workspace-header';
@@ -10,6 +12,12 @@ import { assertAllowedApiUrl, getApiBaseUrl, needsApiProxy } from './api-base-ur
 
 export const API_FETCH_MESSAGE = 'API_FETCH' as const;
 export const API_STREAM_PORT = 'api-stream' as const;
+export const REFRESH_SESSION_MESSAGE = 'REFRESH_SESSION' as const;
+
+export type RefreshSessionMessage = {
+  type: typeof REFRESH_SESSION_MESSAGE;
+  rejectedAccessToken: string | null;
+};
 
 export type ApiFetchRequestMessage = {
   type: typeof API_FETCH_MESSAGE;
@@ -40,21 +48,62 @@ export type ApiStreamStartMessage = {
 async function attachAuthHeaders(
   headers: Headers,
   auth: boolean,
-): Promise<{ unauthorized: boolean }> {
+): Promise<{ unauthorized: boolean; accessToken: string | null }> {
   if (!auth) {
-    return { unauthorized: false };
+    return { unauthorized: false, accessToken: null };
   }
   const accessToken = await getAccessToken();
   if (!accessToken) {
-    return { unauthorized: true };
+    return { unauthorized: true, accessToken: null };
   }
   headers.set('Authorization', `Bearer ${accessToken}`);
   await applyWorkspaceHeader(headers);
-  return { unauthorized: false };
+  return { unauthorized: false, accessToken };
 }
 
-async function tryRefresh(): Promise<boolean> {
-  const refreshToken = await getRefreshToken();
+/** How long to wait for the winner of a rotation race to write its cookies. */
+const ROTATION_RACE_SETTLE_MS = 500;
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+function isServiceWorkerContext(): boolean {
+  return typeof window === 'undefined';
+}
+
+/**
+ * The extension and the dashboard share one refresh-token family, and the API revokes
+ * the whole family when a rotated token is presented again. So refresh runs once at a
+ * time, only in the service worker (extension pages delegate to it), and prefers
+ * whatever newer session the dashboard has already put in the cookies.
+ */
+export function tryRefresh(rejectedAccessToken: string | null): Promise<boolean> {
+  if (!isServiceWorkerContext()) {
+    const message: RefreshSessionMessage = { type: REFRESH_SESSION_MESSAGE, rejectedAccessToken };
+    return chrome.runtime
+      .sendMessage(message)
+      .then((result: { refreshed?: boolean } | undefined) => result?.refreshed === true)
+      .catch(() => false);
+  }
+  refreshInFlight ??= refreshSharedSession(rejectedAccessToken).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+/** Adopt the cookie session when the dashboard already holds a different access token. */
+async function adoptNewerCookieSession(rejectedAccessToken: string | null): Promise<boolean> {
+  const cookieToken = await readAccessTokenFromBrowserCookie();
+  if (!cookieToken || cookieToken === rejectedAccessToken) {
+    return false;
+  }
+  return hydrateSessionFromBrowserCookies(true);
+}
+
+async function refreshSharedSession(rejectedAccessToken: string | null): Promise<boolean> {
+  if (await adoptNewerCookieSession(rejectedAccessToken)) {
+    return true;
+  }
+  const refreshToken = await getFreshestRefreshToken();
   if (!refreshToken) {
     return false;
   }
@@ -68,7 +117,12 @@ async function tryRefresh(): Promise<boolean> {
       body: JSON.stringify({ refreshToken }),
     });
     if (!response.ok) {
-      return false;
+      if (response.status !== 401) {
+        return false;
+      }
+      // Possibly lost a rotation race with the dashboard; take its new session if it lands.
+      await new Promise((resolve) => setTimeout(resolve, ROTATION_RACE_SETTLE_MS));
+      return adoptNewerCookieSession(rejectedAccessToken);
     }
     const result = (await response.json()) as {
       accessToken?: string;
@@ -150,7 +204,7 @@ export async function executeApiFetch(
 
   let response = await fetch(url, init);
   if (response.status === 401 && auth) {
-    const refreshed = await tryRefresh();
+    const refreshed = await tryRefresh(authState.accessToken);
     if (refreshed) {
       const retryHeaders = new Headers(sanitizeProxyHeaders(input.headers));
       await attachAuthHeaders(retryHeaders, true);
@@ -196,7 +250,7 @@ export async function executeApiStream(
   });
 
   if (response.status === 401 && auth) {
-    const refreshed = await tryRefresh();
+    const refreshed = await tryRefresh(authState.accessToken);
     if (refreshed) {
       const retryHeaders = new Headers(sanitizeProxyHeaders(input.headers));
       await attachAuthHeaders(retryHeaders, true);

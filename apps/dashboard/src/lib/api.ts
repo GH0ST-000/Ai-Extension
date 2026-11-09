@@ -88,6 +88,20 @@ function refreshSession(signal?: AbortSignal): Promise<boolean> {
   });
 }
 
+/** Matches RefreshTokenRotatedException in apps/api auth.service. */
+const ROTATED_REFRESH_MESSAGE = 'Refresh token was already rotated.';
+const ROTATION_RACE_SETTLE_MS = 500;
+
+async function isLostRotationRace(response: Response): Promise<boolean> {
+  if (response.status !== 401) return false;
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    return body.message === ROTATED_REFRESH_MESSAGE;
+  } catch {
+    return false;
+  }
+}
+
 function abortError(): DOMException {
   return new DOMException('The operation was aborted.', 'AbortError');
 }
@@ -105,7 +119,12 @@ function startRefresh(): Promise<boolean> {
         signal: controller.signal,
       });
       if (!response.ok) {
-        return false;
+        if (!(await isLostRotationRace(response))) {
+          return false;
+        }
+        // The extension rotated the shared token first and is writing the new cookies.
+        await new Promise((resolve) => setTimeout(resolve, ROTATION_RACE_SETTLE_MS));
+        return true;
       }
       const result = (await response.json()) as AuthTokenResponse;
       setSession(result.user);
@@ -254,13 +273,14 @@ export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
 }
 
 export async function logout(): Promise<void> {
-  // Clear extension first so cookie-removal heal cannot race (heal is disabled; still order-safe).
-  publishExtensionLogout();
   try {
+    // Revoke server-side first: the request needs the px_at / px_rt cookies, and the
+    // extension's CLEAR_SESSION handler deletes them.
     await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST', auth: false });
   } catch {
     // Always clear local session even if revocation fails (network / already invalid).
   } finally {
+    publishExtensionLogout();
     clearSession();
   }
 }

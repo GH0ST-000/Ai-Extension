@@ -13,6 +13,21 @@ import { durationToSeconds } from './auth-cookies';
 import type { LoginDto, RegisterDto } from './dto/auth.dto';
 import { SecurityAuditService } from '../observability/security-audit.service';
 
+/**
+ * The dashboard (cookie) and the extension (body) share one refresh family, so two
+ * clients can legitimately present the same token a moment apart. Within this window
+ * the loser gets a plain 401 (and adopts the winner's session) instead of tripping
+ * reuse detection and revoking the family.
+ */
+const REFRESH_ROTATION_GRACE_MS = 30_000;
+
+/** Refresh lost a race with a concurrent rotation; the session itself is still valid. */
+export class RefreshTokenRotatedException extends UnauthorizedException {
+  constructor() {
+    super('Refresh token was already rotated.');
+  }
+}
+
 export type AuthIssueContext = {
   userAgent?: string | null;
   ip?: string | null;
@@ -170,6 +185,12 @@ export class AuthService {
     }
 
     if (existing.revokedAt) {
+      const rotatedRecently =
+        existing.replacedByTokenId !== null &&
+        Date.now() - existing.revokedAt.getTime() < REFRESH_ROTATION_GRACE_MS;
+      if (rotatedRecently) {
+        throw new RefreshTokenRotatedException();
+      }
       await this.prisma.refreshToken.updateMany({
         where: { familyId: existing.familyId, revokedAt: null },
         data: { revokedAt: new Date() },

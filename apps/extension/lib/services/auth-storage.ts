@@ -3,6 +3,7 @@ import type { AuthUser } from '@project-x/types';
 import { getApiBaseUrl } from '../api/api-base-url';
 import {
   clearAuthCookiesFromBrowser,
+  hasTrustedAuthCookies,
   readAccessTokenFromBrowserCookie,
   readRefreshTokenFromBrowserCookie,
   writeAuthCookiesToBrowser,
@@ -110,6 +111,17 @@ export async function getRefreshToken(): Promise<string | null> {
   return readRefreshTokenFromBrowserCookie();
 }
 
+/**
+ * Newest refresh token of the shared family. The dashboard rotates it in the cookie,
+ * so the cookie wins over storage, which may still hold an already-rotated token.
+ */
+export async function getFreshestRefreshToken(): Promise<string | null> {
+  if (!isPrivilegedExtensionContext()) {
+    return null;
+  }
+  return (await readRefreshTokenFromBrowserCookie()) ?? (await readStoredRefreshToken());
+}
+
 export async function getStoredUser(): Promise<AuthUser | null> {
   const result = await userStorageArea().get(USER_KEY);
   const user = result[USER_KEY];
@@ -151,23 +163,6 @@ export async function getStoredSessionFast(): Promise<StoredAuthSession | null> 
 export async function getSession(): Promise<StoredAuthSession | null> {
   await syncSharedSession();
   return getStoredSessionFast();
-}
-
-/** Push extension storage tokens into browser cookies for the dashboard. */
-export async function pushSessionCookiesToBrowser(): Promise<boolean> {
-  if (!isPrivilegedExtensionContext()) {
-    return false;
-  }
-  const session = await getStoredSessionFast();
-  if (!session) {
-    return false;
-  }
-  suppressCookieSyncBriefly();
-  await writeAuthCookiesToBrowser({
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-  });
-  return true;
 }
 
 /**
@@ -228,10 +223,11 @@ export async function hydrateSessionFromBrowserCookies(force = false): Promise<b
 }
 
 /**
- * Bidirectional sync with clear precedence:
- * - If an API cookie exists and differs from storage → cookies win (dashboard login / account switch).
- * - If no cookie but extension storage has a session → push cookies for the dashboard.
- * - If neither → signed out.
+ * Cookies are the shared source of truth; the extension never writes its stored
+ * tokens back into them (that would undo a dashboard logout it did not hear about).
+ * - Access cookie exists and differs from storage → adopt it (dashboard login / switch).
+ * - No auth cookie at all but storage has a session → dashboard logged out; clear storage.
+ * - Only the refresh cookie left (access cookie expired), or cookies unreadable → keep storage.
  */
 export async function syncSharedSession(): Promise<boolean> {
   if (!isPrivilegedExtensionContext()) {
@@ -248,12 +244,15 @@ export async function syncSharedSession(): Promise<boolean> {
     return true;
   }
 
-  if (local) {
-    await pushSessionCookiesToBrowser();
-    return true;
+  if (!local) {
+    return false;
   }
 
-  return false;
+  if ((await hasTrustedAuthCookies()) === false) {
+    await clearSessionStorageOnly();
+    return false;
+  }
+  return true;
 }
 
 export async function hasAuthSession(): Promise<boolean> {
@@ -291,10 +290,8 @@ export async function setSession(
   if (refreshToken) {
     tokenPayload[REFRESH_TOKEN_KEY] = refreshToken;
   }
-  await Promise.all([
-    tokenStorageArea().set(tokenPayload),
-    userStorageArea().set({ [USER_KEY]: user }),
-  ]);
+  // Cookies first: a concurrent syncSharedSession must never see a stored session
+  // without cookies, which it treats as a dashboard logout.
   suppressCookieSyncBriefly();
   await writeAuthCookiesToBrowser({
     accessToken,
@@ -302,6 +299,10 @@ export async function setSession(
     accessMaxAgeSeconds: options?.accessMaxAgeSeconds,
     refreshMaxAgeSeconds: options?.refreshMaxAgeSeconds,
   });
+  await Promise.all([
+    tokenStorageArea().set(tokenPayload),
+    userStorageArea().set({ [USER_KEY]: user }),
+  ]);
 }
 
 export async function clearSession(): Promise<void> {

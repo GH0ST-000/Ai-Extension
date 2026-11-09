@@ -50,15 +50,32 @@ function canUseCookies(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.cookies?.get);
 }
 
-function hostMatchesApi(cookieDomain: string, apiHostname: string): boolean {
-  const domain = cookieDomain.replace(/^\./, '');
-  return (
-    domain === apiHostname ||
-    apiHostname === domain ||
-    apiHostname.endsWith(`.${domain}`) ||
-    (domain === 'localhost' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) ||
-    (domain === '127.0.0.1' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1'))
-  );
+function isLoopback(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1';
+}
+
+/**
+ * The API sets px_at / px_rt as host-only cookies on its own hostname. Accept only
+ * those: a cookie scoped to a parent domain (Domain=.example.com) can be planted by
+ * any sibling subdomain and must never be adopted as the user's session.
+ */
+export function isTrustedApiCookie(
+  cookie: Pick<chrome.cookies.Cookie, 'domain' | 'hostOnly'>,
+  apiHost: string,
+): boolean {
+  if (!cookie.hostOnly) {
+    return false;
+  }
+  const domain = cookie.domain.replace(/^\./, '');
+  return domain === apiHost || (isLoopback(domain) && isLoopback(apiHost));
+}
+
+function apiHostname(): string | null {
+  try {
+    return new URL(apiUrl()).hostname;
+  } catch {
+    return null;
+  }
 }
 
 async function cookiesGet(url: string, name: string): Promise<chrome.cookies.Cookie | null> {
@@ -103,63 +120,68 @@ async function cookiesGetAll(name: string): Promise<chrome.cookies.Cookie[]> {
   );
 }
 
-async function readCookieValue(name: string): Promise<string | null> {
+async function readTrustedCookieValue(name: string, urls: string[]): Promise<string | null> {
   if (!canUseCookies()) return null;
+  const host = apiHostname();
+  if (!host) return null;
 
-  const fromUrls = await Promise.all(candidateApiUrls().map((url) => cookiesGet(url, name)));
+  // cookies.get(url) can return a parent-domain cookie, so every hit is re-checked.
+  const fromUrls = await Promise.all(urls.map((url) => cookiesGet(url, name)));
   for (const cookie of fromUrls) {
-    if (cookie?.value) {
+    if (cookie?.value && isTrustedApiCookie(cookie, host)) {
       return cookie.value;
     }
   }
 
-  try {
-    const apiHostname = new URL(apiUrl()).hostname;
-    const all = await cookiesGetAll(name);
-    const match = all.find((cookie) => hostMatchesApi(cookie.domain, apiHostname));
-    if (match?.value) {
-      return match.value;
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
+  const all = await cookiesGetAll(name);
+  const match = all.find((cookie) => cookie.value && isTrustedApiCookie(cookie, host));
+  return match?.value ?? null;
 }
 
 /** Read HttpOnly access JWT set by dashboard (or extension) login. */
 export async function readAccessTokenFromBrowserCookie(): Promise<string | null> {
-  return readCookieValue(ACCESS_COOKIE_NAME);
+  return readTrustedCookieValue(ACCESS_COOKIE_NAME, candidateApiUrls());
 }
 
 export async function readRefreshTokenFromBrowserCookie(): Promise<string | null> {
-  if (!canUseCookies()) return null;
-
-  const refreshUrls = [
+  return readTrustedCookieValue(REFRESH_COOKIE_NAME, [
     ...candidateApiUrls().map((u) => `${u.replace(/\/$/, '')}/api/auth/refresh`),
     ...candidateApiUrls(),
-  ];
-  const fromUrls = await Promise.all(
-    refreshUrls.map((url) => cookiesGet(url, REFRESH_COOKIE_NAME)),
+  ]);
+}
+
+/**
+ * Whether the browser still holds any trusted auth cookie for the API.
+ * Returns null when that cannot be determined (no cookies API, timeout, error), so
+ * callers never treat a failed read as a logout.
+ */
+export async function hasTrustedAuthCookies(): Promise<boolean | null> {
+  if (!canUseCookies()) return null;
+  const host = apiHostname();
+  if (!host) return null;
+  const lists = await Promise.all(
+    [ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME].map((name) =>
+      withTimeout(
+        new Promise<chrome.cookies.Cookie[] | null>((resolve) => {
+          try {
+            chrome.cookies.getAll({ name }, (cookies) => {
+              resolve(chrome.runtime.lastError ? null : (cookies ?? []));
+            });
+          } catch {
+            resolve(null);
+          }
+        }),
+        COOKIE_OP_TIMEOUT_MS,
+        null,
+      ),
+    ),
   );
-  for (const cookie of fromUrls) {
-    if (cookie?.value) {
-      return cookie.value;
-    }
+  if (lists.some((list) => list === null)) {
+    return null;
   }
-
-  try {
-    const apiHostname = new URL(apiUrl()).hostname;
-    const all = await cookiesGetAll(REFRESH_COOKIE_NAME);
-    const match = all.find((cookie) => hostMatchesApi(cookie.domain, apiHostname));
-    if (match?.value) {
-      return match.value;
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
+  return lists.some((list) =>
+    list!.some((cookie) => Boolean(cookie.value) && isTrustedApiCookie(cookie, host)),
+  );
 }
 
 /** Write auth cookies so the dashboard SPA shares the extension session. */

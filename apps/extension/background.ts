@@ -5,8 +5,11 @@ import {
   API_STREAM_PORT,
   executeApiFetch,
   executeApiStream,
+  REFRESH_SESSION_MESSAGE,
+  tryRefresh,
   type ApiFetchRequestMessage,
   type ApiStreamStartMessage,
+  type RefreshSessionMessage,
 } from './lib/api/background-http';
 import { isAllowedExtensionApiPath } from './lib/api/allowed-api-paths';
 import {
@@ -18,7 +21,11 @@ import {
   isCookieSyncSuppressed,
   syncSharedSession,
 } from './lib/services/auth-storage';
-import { ACCESS_COOKIE_NAME } from './lib/services/auth-cookie-bridge';
+import {
+  ACCESS_COOKIE_NAME,
+  isTrustedApiCookie,
+  REFRESH_COOKIE_NAME,
+} from './lib/services/auth-cookie-bridge';
 import { getApiBaseUrl } from './lib/api/api-base-url';
 import { clearCurrentWorkspaceId } from './lib/workspace/current-workspace-id';
 
@@ -29,21 +36,12 @@ const ALLOWED_MESSAGE_TYPES = new Set([
   'CLEAR_SESSION',
   'OPEN_SIGN_IN',
   API_FETCH_MESSAGE,
+  REFRESH_SESSION_MESSAGE,
 ]);
 
 type ExtensionMessage = {
   type?: unknown;
 };
-
-function cookieHostMatchesApi(cookieDomain: string, apiHostname: string): boolean {
-  const domain = cookieDomain.replace(/^\./, '');
-  return (
-    domain === apiHostname ||
-    apiHostname.endsWith(`.${domain}`) ||
-    (domain === 'localhost' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) ||
-    (domain === '127.0.0.1' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1'))
-  );
-}
 
 void ensureTrustedSessionStorage();
 
@@ -57,14 +55,16 @@ chrome.runtime.onStartup?.addListener(() => {
 });
 
 /**
- * Cookie sync rules:
- * - overwrite → hydrate (dashboard login / account switch; cookies win)
- * - explicit removal → clear extension storage (logout is authoritative; never heal)
- * - expired/evicted → leave storage alone (extension Bearer session remains valid)
+ * Cookie sync rules (px_at / px_rt, host-only on the API hostname only):
+ * - px_at set/overwritten → hydrate (dashboard login / account switch; cookies win)
+ * - explicit removal, or a server clear (Set-Cookie with a past expiry, reported as
+ *   expired_overwrite) → clear extension storage (logout is authoritative; never heal)
+ * - natural expiry / eviction / rotation overwrite → leave storage alone
  */
 if (chrome.cookies?.onChanged) {
   chrome.cookies.onChanged.addListener((change) => {
-    if (change.cookie.name !== ACCESS_COOKIE_NAME) return;
+    const name = change.cookie.name;
+    if (name !== ACCESS_COOKIE_NAME && name !== REFRESH_COOKIE_NAME) return;
     if (isCookieSyncSuppressed()) return;
 
     let apiHost: string;
@@ -73,26 +73,21 @@ if (chrome.cookies?.onChanged) {
     } catch {
       return;
     }
-    if (!cookieHostMatchesApi(change.cookie.domain, apiHost)) {
+    if (!isTrustedApiCookie(change.cookie, apiHost)) {
       return;
     }
 
     if (change.removed) {
-      if (
-        change.cause === 'overwrite' ||
-        change.cause === 'expired_overwrite' ||
-        change.cause === 'expired' ||
-        change.cause === 'evicted'
-      ) {
-        return;
+      if (change.cause === 'explicit' || change.cause === 'expired_overwrite') {
+        void clearSessionStorageOnly().then(() => clearCurrentWorkspaceId());
       }
-      // explicit clear (logout / clearAuthCookies)
-      void clearSessionStorageOnly().then(() => clearCurrentWorkspaceId());
       return;
     }
 
-    // New or overwritten cookie — adopt dashboard session.
-    void hydrateSessionFromBrowserCookies(true);
+    if (name === ACCESS_COOKIE_NAME) {
+      // New or overwritten access cookie — adopt dashboard session.
+      void hydrateSessionFromBrowserCookies(true);
+    }
   });
 }
 
@@ -151,6 +146,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, signedIn: false });
       }
     })();
+    return true;
+  }
+
+  if (typed.type === REFRESH_SESSION_MESSAGE) {
+    // Extension pages (popup) only; content scripts refresh implicitly via API_FETCH.
+    if (sender.tab) {
+      return false;
+    }
+    const rejected = (message as RefreshSessionMessage).rejectedAccessToken;
+    void tryRefresh(typeof rejected === 'string' ? rejected : null)
+      .then((refreshed) => sendResponse({ refreshed }))
+      .catch(() => sendResponse({ refreshed: false }));
     return true;
   }
 

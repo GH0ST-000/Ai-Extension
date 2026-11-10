@@ -6,7 +6,8 @@ import { BASE_RULES, buildUserContent, PROJECT_MEMORY_POLICY } from './prompt.ut
 const INSTRUCTIONS = [
   'Review this pull request using the multi-file changedFiles list in CTX (and PR meta).',
   'Prefer concrete risks: bugs, security, regressions, missing tests, broken contracts.',
-  'Only discuss files/lines present in CTX. If changedFiles is empty or truncated, say so and ask the user to open the Files tab / scroll to load more.',
+  'Only discuss files/lines present in CTX. Files listed without diff lines exist in the PR but were not provided — do not guess about them.',
+  'If filesTruncated is 1, review what is provided and state in the Summary how many files were reviewed (files with diffs) versus filesTotal when given.',
   'SEL is optional focus — still review the whole bounded file set.',
   'Output format (strict markdown):',
   '## Summary',
@@ -15,7 +16,7 @@ const INSTRUCTIONS = [
   'Numbered list. Each item:',
   '1. **[high|medium|low]** `path/to/file` — short title',
   '   Why: one or two sentences.',
-  'If no material risks, say so under Risk Findings.',
+  'Always include both headings. If no material risks, write exactly "No material risks found." under Risk Findings.',
   'Do not invent patches in this action — findings only.',
   PROJECT_MEMORY_POLICY,
   BASE_RULES,

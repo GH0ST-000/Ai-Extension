@@ -27,14 +27,54 @@ import { AiModelFactory } from './models/ai-model.factory';
 import { PromptRegistry } from './prompts/prompt.registry';
 import { neutralizeProjectMemoryMarkers, responseStyleHint } from './prompts/prompt.utils';
 import { memoryCapabilityForAiAction, redactSensitiveString } from '@project-x/shared';
+import {
+  AIAction,
+  PR_REVIEW_INCOMPLETE_MARKER,
+  PR_REVIEW_SCOPE_HEADER,
+  PROJECT_MEMORY_METADATA_HEADER,
+  type PageContextGitHub,
+  type PRReviewScope,
+  type ProjectMemoryPromptMetadata,
+  type ProjectMemorySkipReason,
+} from '@project-x/types';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
+import { PullRequestDiffService } from './pr-review/pull-request-diff.service';
 
 export interface AiTextStreamHandle {
   pipeTextStreamToResponse: (response: ServerResponse) => Promise<void>;
 }
 
+type StreamTextHandle = ReturnType<typeof streamText>;
+
+/** Trailer appended to a PR review that ended before the model finished normally. */
+export function prReviewIncompleteTrailer(reason: string): string {
+  return `\n\n${PR_REVIEW_INCOMPLETE_MARKER} reason=${reason}]]`;
+}
+
+/** Used when config predates the PR review overrides (e.g. hand-built test config). */
+const DEFAULT_PR_REVIEW_MAX_OUTPUT_TOKENS = 4_096;
+const DEFAULT_PR_REVIEW_TIMEOUT_MS = 120_000;
+
+type LoadedProjectMemory = {
+  block?: string;
+  version?: string;
+  metadata: ProjectMemoryPromptMetadata;
+};
+
+/**
+ * base64url(UTF-8 JSON) so rule titles in any language are header-safe. Only the rules the
+ * requester was authorized to read and that were actually placed in the prompt.
+ */
+export function encodeProjectMemoryMetadata(metadata: ProjectMemoryPromptMetadata): string {
+  return Buffer.from(JSON.stringify(metadata), 'utf8').toString('base64url');
+}
+
 type ResolvedAiRun = {
   request: AiActionRequest;
+  /** Set for REVIEW_ENTIRE_PR: the diff scope actually sent to the model. */
+  reviewScope?: PRReviewScope;
+  /** Set for memory-aware actions: rules applied, or why none were. */
+  memoryMetadata?: ProjectMemoryPromptMetadata;
   instructions: string;
   messages: ReturnType<PromptRegistry['build']>['messages'];
   maxOutputTokens: number;
@@ -70,9 +110,24 @@ export class AiService {
     @Optional()
     @Inject(forwardRef(() => ProjectMemoryService))
     private readonly projectMemory?: ProjectMemoryService,
+    // Optional so unit tests that build AiService by hand keep the legacy (page-only) path.
+    @Optional()
+    private readonly pullRequestDiff?: PullRequestDiffService,
   ) {}
 
   async generateAction(userId: string, input: ExecuteAiActionDto): Promise<string> {
+    return (await this.generateActionWithMetadata(userId, input)).text;
+  }
+
+  /** Like {@link generateAction}, plus the review scope and project memory metadata. */
+  async generateActionWithMetadata(
+    userId: string,
+    input: ExecuteAiActionDto,
+  ): Promise<{
+    text: string;
+    reviewScope?: PRReviewScope;
+    projectMemory?: ProjectMemoryPromptMetadata;
+  }> {
     const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
     const provider = this.modelFactory.getProviderName();
@@ -116,8 +171,12 @@ export class AiService {
           if (!out) {
             throw new ServiceUnavailableException('Unable to generate a response.');
           }
+          const incomplete =
+            run.request.action === AIAction.REVIEW_ENTIRE_PR &&
+            result.finishReason != null &&
+            result.finishReason !== 'stop';
           return {
-            result: out,
+            result: incomplete ? out + prReviewIncompleteTrailer(result.finishReason) : out,
             usageRaw: {
               inputTokens: result.usage?.inputTokens,
               outputTokens: result.usage?.outputTokens,
@@ -185,7 +244,11 @@ export class AiService {
         ...run.contextVersions,
       });
 
-      return text;
+      return {
+        text,
+        ...(run.reviewScope ? { reviewScope: run.reviewScope } : {}),
+        ...(run.memoryMetadata ? { projectMemory: run.memoryMetadata } : {}),
+      };
     } catch (error) {
       this.providerHealth.recordSignal('ai', false);
       this.logFailure('ai.generate.failure', run.request, startedAt, error);
@@ -211,8 +274,16 @@ export class AiService {
     input: ExecuteAiActionDto,
     abortSignal?: AbortSignal,
   ): Promise<AiTextStreamHandle> {
-    const startedAt = Date.now();
     const run = await this.resolveRun(userId, input);
+    return this.streamResolvedRun(userId, run, abortSignal);
+  }
+
+  private async streamResolvedRun(
+    userId: string,
+    run: ResolvedAiRun,
+    abortSignal?: AbortSignal,
+  ): Promise<StreamTextHandle> {
+    const startedAt = Date.now();
     const provider = this.modelFactory.getProviderName();
     const model = this.modelFactory.getModelName();
     const capability = String(run.request.action);
@@ -373,8 +444,65 @@ export class AiService {
     response: ServerResponse,
     abortSignal?: AbortSignal,
   ): Promise<void> {
-    const result = await this.streamAction(userId, input, abortSignal);
-    await result.pipeTextStreamToResponse(response);
+    const run = await this.resolveRun(userId, input);
+    const result = await this.streamResolvedRun(userId, run, abortSignal);
+    if (run.request.action !== AIAction.REVIEW_ENTIRE_PR) {
+      await result.pipeTextStreamToResponse(response);
+      return;
+    }
+    if (run.reviewScope) {
+      response.setHeader(PR_REVIEW_SCOPE_HEADER, JSON.stringify(run.reviewScope));
+    }
+    if (run.memoryMetadata) {
+      response.setHeader(
+        PROJECT_MEMORY_METADATA_HEADER,
+        encodeProjectMemoryMetadata(run.memoryMetadata),
+      );
+    }
+    await this.pipePrReviewStream(result, response, abortSignal);
+  }
+
+  /**
+   * Like pipeTextStreamToResponse, but a PR review that stops early (output-token limit,
+   * provider error, content filter) ends with an explicit incomplete trailer instead of
+   * looking like a finished review with zero findings.
+   */
+  private async pipePrReviewStream(
+    result: StreamTextHandle,
+    response: ServerResponse,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    response.statusCode = 200;
+    response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    let incompleteReason: string | null = null;
+    let finished = false;
+    let wroteText = false;
+    try {
+      for await (const part of result.stream) {
+        if (abortSignal?.aborted) return;
+        if (part.type === 'text-delta' && part.text) {
+          response.write(part.text);
+          wroteText = true;
+        } else if (part.type === 'error') {
+          incompleteReason = 'error';
+        } else if (part.type === 'finish') {
+          finished = true;
+          if (part.finishReason !== 'stop') incompleteReason = part.finishReason;
+        }
+      }
+    } catch {
+      incompleteReason = 'error';
+    }
+    if (abortSignal?.aborted || response.writableEnded) return;
+    if (!wroteText) {
+      // Nothing streamed yet: fail as a normal error (503) rather than an empty 200.
+      throw new ServiceUnavailableException('Unable to generate a response.');
+    }
+    if (!finished && !incompleteReason) incompleteReason = 'other';
+    if (incompleteReason) {
+      response.write(prReviewIncompleteTrailer(incompleteReason));
+    }
+    response.end();
   }
 
   private async resolveRun(userId: string, input: ExecuteAiActionDto): Promise<ResolvedAiRun> {
@@ -388,6 +516,14 @@ export class AiService {
       this.requestContext.get()?.workspaceId,
     );
     await this.featureGate.require(workspaceId, featureForAiAction(request.action));
+
+    // Resolve the PR diff before usage is consumed: when no diff can be loaded the request
+    // fails with PR_DIFF_UNAVAILABLE and neither the AI nor the quota is touched.
+    const reviewScope =
+      request.action === AIAction.REVIEW_ENTIRE_PR
+        ? await this.attachPullRequestDiff(userId, workspaceId, input, request)
+        : undefined;
+
     await this.usage.consume({
       workspaceId,
       metric: usageMetricForAiAction(request.action),
@@ -397,10 +533,15 @@ export class AiService {
 
     const built = this.promptRegistry.build(request);
     const promptName = this.promptRegistry.registryNameFor(request.action);
-    const memory = await this.loadProjectMemory(userId, workspaceId, input);
+    const memory = await this.loadProjectMemory(
+      userId,
+      workspaceId,
+      input,
+      request.context?.github?.changedFiles,
+    );
     const prompt = { ...built, messages: this.withTrustedMemory(built.messages, memory?.block) };
 
-    let contextVersions: ResolvedAiRun['contextVersions'] = memory
+    let contextVersions: ResolvedAiRun['contextVersions'] = memory?.version
       ? { memoryVersion: memory.version }
       : {};
     if (input.executionId && this.reliability) {
@@ -423,14 +564,68 @@ export class AiService {
 
     return {
       request,
+      ...(reviewScope ? { reviewScope } : {}),
+      ...(memory ? { memoryMetadata: memory.metadata } : {}),
       instructions: `${prompt.instructions} ${responseStyleHint(settings.responseStyle)}`,
       messages: prompt.messages,
-      maxOutputTokens: this.clampTokens(settings.maxOutputTokens),
-      requestTimeoutMs: ai.requestTimeoutMs,
+      ...this.outputBudgetFor(request.action, settings.maxOutputTokens, ai),
       promptName,
       contextVersions,
       ...(input.executionId ? { executionId: input.executionId } : {}),
     };
+  }
+
+  /**
+   * REVIEW_ENTIRE_PR: replace the page-scraped file list with the GitHub API diff (falling
+   * back to page files only when GitHub is unusable) and record the real review scope.
+   * PR identity comes from the request even when page context sharing is off, since the
+   * action cannot run without it; page-scraped diff text is only used when sharing is on.
+   */
+  private async attachPullRequestDiff(
+    userId: string,
+    workspaceId: string,
+    input: ExecuteAiActionDto,
+    request: AiActionRequest,
+  ): Promise<PRReviewScope | undefined> {
+    if (!this.pullRequestDiff) {
+      return undefined;
+    }
+    const identity = input.context?.github;
+    const pageGithub = request.context?.github;
+    const diff = await this.pullRequestDiff.resolve({
+      userId,
+      workspaceId,
+      owner: identity?.owner,
+      repository: identity?.repository,
+      pullRequestNumber: identity?.pullRequestNumber,
+      pageFiles: pageGithub?.changedFiles,
+      pageTruncated: pageGithub?.changedFilesTruncated,
+    });
+
+    const github: PageContextGitHub = {
+      ...(pageGithub ?? {}),
+      owner: identity?.owner ?? undefined,
+      repository: identity?.repository ?? undefined,
+      pullRequestNumber: identity?.pullRequestNumber ?? undefined,
+      changedFiles: diff.changedFiles,
+      changedFilesTruncated: diff.scope.truncated,
+      changedFilesSource: diff.scope.source,
+      ...(diff.scope.totalFiles != null ? { changedFilesTotal: diff.scope.totalFiles } : {}),
+      ...(diff.pullRequestTitle && !pageGithub?.pullRequestTitle
+        ? { pullRequestTitle: diff.pullRequestTitle }
+        : {}),
+      ...(diff.baseBranch ? { baseBranch: diff.baseBranch } : {}),
+      ...(diff.headBranch ? { headBranch: diff.headBranch } : {}),
+    };
+    request.context = request.context
+      ? { ...request.context, github }
+      : {
+          type: 'github',
+          url: `https://github.com/${github.owner}/${github.repository}/pull/${github.pullRequestNumber}`,
+          title: github.pullRequestTitle ?? `PR #${github.pullRequestNumber}`,
+          github,
+        };
+    return diff.scope;
   }
 
   private clampTokens(userTokens: number): number {
@@ -438,31 +633,78 @@ export class AiService {
   }
 
   /**
+   * Output budget and timeout for this action. REVIEW_ENTIRE_PR uses its own configured
+   * budget (a multi-file review does not fit the per-user 150–2000 setting); every other
+   * action keeps the user setting and the global timeout unchanged.
+   */
+  private outputBudgetFor(
+    action: AIAction,
+    userTokens: number,
+    ai: ApiConfig['ai'],
+  ): { maxOutputTokens: number; requestTimeoutMs: number } {
+    if (action === AIAction.REVIEW_ENTIRE_PR) {
+      return {
+        maxOutputTokens: ai.prReview?.maxOutputTokens ?? DEFAULT_PR_REVIEW_MAX_OUTPUT_TOKENS,
+        requestTimeoutMs: Math.max(
+          ai.requestTimeoutMs,
+          ai.prReview?.requestTimeoutMs ?? DEFAULT_PR_REVIEW_TIMEOUT_MS,
+        ),
+      };
+    }
+    return { maxOutputTokens: this.clampTokens(userTokens), requestTimeoutMs: ai.requestTimeoutMs };
+  }
+
+  /**
    * Project memory for memory-aware actions, loaded and authorized server-side on every
    * request. The client only names the repository; it never supplies memory text.
+   * Returns null for actions that do not use memory; otherwise the applied rules or the
+   * reason none were applied (also logged, as codes and counts only).
    */
   private async loadProjectMemory(
     userId: string,
     workspaceId: string,
     input: ExecuteAiActionDto,
-  ): Promise<{ block: string; version: string } | null> {
+    /** Server-resolved changed files (PR review); falls back to the client's page files. */
+    resolvedChangedFiles?: { path: string }[],
+  ): Promise<LoadedProjectMemory | null> {
     const capability = memoryCapabilityForAiAction(input.action);
-    if (!capability || !this.projectMemory) {
+    if (!capability) {
       return null;
+    }
+    const skipped = (
+      reason: ProjectMemorySkipReason,
+      extra: Record<string, unknown> = {},
+    ): LoadedProjectMemory => {
+      this.logger.log({
+        msg: 'ai.project_memory.skipped',
+        action: input.action,
+        capability,
+        reason,
+        ...extra,
+      });
+      return { metadata: { status: 'skipped', reason } };
+    };
+
+    if (!this.projectMemory) {
+      return skipped('memory_service_unavailable');
     }
     const github = input.context?.github;
     const [owner, repository] = input.memoryRepository
       ? input.memoryRepository.split('/')
       : [github?.owner ?? undefined, github?.repository ?? undefined];
     if (!owner || !repository) {
-      return null;
+      return skipped('no_repository');
     }
     const paths = [
       ...(github?.filePath ? [github.filePath] : []),
-      ...(github?.changedFiles ?? []).map((file) => file.path).filter(Boolean),
+      ...(resolvedChangedFiles ?? github?.changedFiles ?? [])
+        .map((file) => file.path)
+        .filter(Boolean),
     ].slice(0, 24);
+
+    let resolved: Awaited<ReturnType<ProjectMemoryService['resolvePromptContext']>>;
     try {
-      return await this.projectMemory.buildPromptContext({
+      resolved = await this.projectMemory.resolvePromptContext({
         userId,
         workspaceId,
         owner,
@@ -471,12 +713,32 @@ export class AiService {
         paths,
       });
     } catch (error) {
+      // Unexpected failure: log the error class only — messages can carry request data.
       this.logger.warn({
         msg: 'ai.project_memory.unavailable',
-        error: error instanceof Error ? error.message : 'unknown',
+        action: input.action,
+        capability,
+        errorName: error instanceof Error ? error.name : 'unknown',
       });
-      return null;
+      return { metadata: { status: 'skipped', reason: 'retrieval_failed' } };
     }
+
+    if (resolved.status === 'skipped') {
+      return skipped(resolved.reason, resolved.diagnostics);
+    }
+    this.logger.log({
+      msg: 'ai.project_memory.applied',
+      action: input.action,
+      capability,
+      version: resolved.version,
+      ruleIds: resolved.rules.map((rule) => rule.id),
+      ...resolved.diagnostics,
+    });
+    return {
+      block: resolved.block,
+      version: resolved.version,
+      metadata: { status: 'applied', version: resolved.version, rules: resolved.rules },
+    };
   }
 
   /**

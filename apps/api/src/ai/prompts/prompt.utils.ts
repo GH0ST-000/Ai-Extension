@@ -110,6 +110,10 @@ export function formatPageContext(
     if (g.changedFilesTruncated) {
       pushLine(lines, 'filesTruncated', '1');
     }
+    if (g.changedFilesTotal != null) {
+      pushLine(lines, 'filesTotal', g.changedFilesTotal);
+    }
+    pushLine(lines, 'filesSource', g.changedFilesSource);
     if (g.changedFiles && g.changedFiles.length > 0) {
       const fileBlocks = g.changedFiles.map((file, index) => {
         const excerpt = file.patchExcerpt?.trim();

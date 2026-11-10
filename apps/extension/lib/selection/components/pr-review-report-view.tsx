@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PRReviewFinding, PRReviewReport } from '@project-x/types';
+import type {
+  PRReviewFinding,
+  PRReviewReport,
+  ProjectMemoryPromptMetadata,
+} from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
 import { extractPageContext } from '~/lib/context/extract-page-context';
@@ -7,6 +11,8 @@ import { extractPageContext } from '~/lib/context/extract-page-context';
 import { activeDraftComments, useGithubReviewDraftStore } from '../review-draft';
 import {
   filterPrFindings,
+  formatFindingsCountLabel,
+  formatReviewedFilesLabel,
   type PrFindingDisposition,
   type PrFindingDispositionMap,
   type PrFindingFilter,
@@ -16,6 +22,7 @@ import {
   buildPrReviewHandoffSummary,
 } from '../utils/format-pr-review-markdown';
 import { ReviewDraftChip, ReviewDraftPanel } from './review-draft-panel';
+import { PrReviewMemory } from './pr-review-memory';
 import { safeHttpsHref } from '../ci/safe-external-url';
 
 const FILTERS: { id: PrFindingFilter; label: string }[] = [
@@ -36,6 +43,8 @@ export type PostPrCommentResult = {
 
 type PrReviewReportViewProps = {
   report: PRReviewReport;
+  /** Project memory applied to this review's prompt (from the API response). */
+  memory?: ProjectMemoryPromptMetadata | null;
   streaming?: boolean;
   filter: PrFindingFilter;
   dispositions: PrFindingDispositionMap;
@@ -50,6 +59,7 @@ type PrReviewReportViewProps = {
 
 export function PrReviewReportView({
   report,
+  memory = null,
   streaming = false,
   filter,
   dispositions,
@@ -109,6 +119,7 @@ export function PrReviewReportView({
     [report.findings, filter, dispositions],
   );
   const openCount = report.findings.filter((finding) => !dispositions[finding.id]).length;
+  const incomplete = !streaming && report.completeness?.complete === false;
   const handoff = useMemo(
     () => buildPrReviewHandoffSummary(report, dispositions),
     [report, dispositions],
@@ -177,32 +188,66 @@ export function PrReviewReportView({
               </p>
             ) : null}
           </div>
-          <span
-            className={cn(
-              'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-              report.riskLevel === 'high'
-                ? 'bg-[#e11d48]/15 text-[#fb7185]'
-                : report.riskLevel === 'medium'
-                  ? 'bg-spark/15 text-spark'
-                  : 'bg-accent-soft text-accent',
-            )}
-          >
-            {report.riskLevel}
-          </span>
+          {incomplete ? (
+            <span className="shrink-0 rounded bg-spark/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-spark">
+              incomplete
+            </span>
+          ) : (
+            <span
+              className={cn(
+                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                report.riskLevel === 'high'
+                  ? 'bg-[#e11d48]/15 text-[#fb7185]'
+                  : report.riskLevel === 'medium'
+                    ? 'bg-spark/15 text-spark'
+                    : report.riskLevel === 'unknown'
+                      ? 'bg-hover text-muted'
+                      : 'bg-accent-soft text-accent',
+              )}
+            >
+              {report.riskLevel === 'unknown' && streaming ? 'reviewing…' : report.riskLevel}
+            </span>
+          )}
         </div>
 
         <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted">
-          <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.findings} findings</span>
+          <span className="rounded bg-hover px-1.5 py-0.5">{formatFindingsCountLabel(report)}</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.high} high</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.medium} med</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.low} low</span>
-          <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.analyzedFiles} files</span>
+          <span className="rounded bg-hover px-1.5 py-0.5">{formatReviewedFilesLabel(report)}</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{openCount} open</span>
           {report.reviewScope?.truncated ? (
-            <span className="rounded bg-hover px-1.5 py-0.5">truncated</span>
+            <span className="rounded bg-hover px-1.5 py-0.5">partial diff</span>
+          ) : null}
+          {report.reviewScope?.source === 'page' ? (
+            <span
+              className="rounded bg-hover px-1.5 py-0.5"
+              title="GitHub API unavailable; diff read from the page"
+            >
+              page diff
+            </span>
           ) : null}
         </div>
       </div>
+
+      {incomplete ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-spark/40 bg-spark/10 px-2.5 py-2 text-[11px] leading-4 text-primary"
+        >
+          <p className="font-semibold">
+            This review is incomplete — do not treat it as a clean PR.
+          </p>
+          <ul className="mt-1 list-disc pl-4 text-secondary">
+            {report.completeness!.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <PrReviewMemory metadata={memory} />
 
       <div>
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Overview</p>

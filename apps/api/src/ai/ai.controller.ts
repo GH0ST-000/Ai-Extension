@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   HttpCode,
+  HttpException,
   Post,
   Req,
   Res,
@@ -60,6 +61,21 @@ export class AiController {
         return;
       }
 
+      // Coded, user-actionable failures (e.g. PR_DIFF_UNAVAILABLE) keep their code and message.
+      if (error instanceof HttpException) {
+        const body = error.getResponse();
+        if (
+          typeof body === 'object' &&
+          body !== null &&
+          typeof (body as { code?: unknown }).code === 'string' &&
+          typeof (body as { message?: unknown }).message === 'string'
+        ) {
+          const { code, message } = body as { code: string; message: string };
+          res.status(error.getStatus()).json({ statusCode: error.getStatus(), code, message });
+          return;
+        }
+      }
+
       const status =
         typeof error === 'object' &&
         error !== null &&
@@ -82,12 +98,17 @@ export class AiController {
   @Post('actions')
   @HttpCode(200)
   async generateAction(@CurrentUser() user: AuthRequestUser, @Body() body: ExecuteAiActionDto) {
-    const result = await this.aiService.generateAction(user.id, body);
+    const { text, reviewScope, projectMemory } = await this.aiService.generateActionWithMetadata(
+      user.id,
+      body,
+    );
     return {
       success: true as const,
       data: {
         action: body.action,
-        result,
+        result: text,
+        ...(reviewScope ? { reviewScope } : {}),
+        ...(projectMemory ? { projectMemory } : {}),
       },
     };
   }

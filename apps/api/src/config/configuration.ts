@@ -30,6 +30,11 @@ export interface ApiConfig {
     maxOutputTokens: number;
     requestTimeoutMs: number;
     maxInputCharacters: number;
+    /** REVIEW_ENTIRE_PR overrides (output budget + timeout); other actions are unaffected. */
+    prReview: {
+      maxOutputTokens: number;
+      requestTimeoutMs: number;
+    };
     corsOrigins: string[];
     corsContentScriptOrigins: string[];
   };
@@ -141,6 +146,10 @@ export default (): ApiConfig => {
       maxOutputTokens: env.AI_MAX_OUTPUT_TOKENS,
       requestTimeoutMs: env.AI_REQUEST_TIMEOUT_MS,
       maxInputCharacters: env.AI_MAX_INPUT_CHARACTERS,
+      prReview: {
+        maxOutputTokens: env.AI_PR_REVIEW_MAX_OUTPUT_TOKENS,
+        requestTimeoutMs: env.AI_PR_REVIEW_TIMEOUT_MS,
+      },
       corsOrigins: parseCorsOrigins(env.AI_CORS_ORIGINS),
       corsContentScriptOrigins: parseCorsOrigins(env.AI_CORS_CONTENT_SCRIPT_ORIGINS),
     },

@@ -47,8 +47,10 @@ describe('formatPrReviewMarkdown', () => {
   });
 
   it('builds a compact handoff summary', () => {
+    // A finished review of one file diff — the only state where overall risk is derived.
     const report = buildPrReviewReport({
       markdown: SAMPLE,
+      final: true,
       context: {
         type: 'github',
         url: 'https://github.com/acme/app/pull/3',
@@ -57,7 +59,7 @@ describe('formatPrReviewMarkdown', () => {
           owner: 'acme',
           repository: 'app',
           pullRequestNumber: 3,
-          changedFiles: [],
+          changedFiles: [{ path: 'src/a.ts', patchExcerpt: '+a.b' }],
         },
       },
     })!;
@@ -65,6 +67,30 @@ describe('formatPrReviewMarkdown', () => {
     const summary = buildPrReviewHandoffSummary(report);
     expect(summary).toContain('Overall risk: MEDIUM');
     expect(summary).toContain('1 open');
+  });
+
+  it('never exports LOW risk or "0 findings" for an incomplete review', () => {
+    const report = buildPrReviewReport({
+      markdown: '## Summary\nChanged files list is empty.\n## Risk Findings\nCannot assess.',
+      final: true,
+      context: {
+        type: 'github',
+        url: 'https://github.com/acme/app/pull/3',
+        title: 't',
+        github: { owner: 'acme', repository: 'app', pullRequestNumber: 3 },
+      },
+    })!;
+
+    const outputs = [
+      buildPrReviewHandoffSummary(report),
+      formatPrReviewMarkdown(report),
+      buildPrReviewCommentDraft(report),
+    ];
+    for (const text of outputs) {
+      expect(text).not.toMatch(/\bLOW\b/);
+      expect(text).not.toMatch(/\b0 findings?\b|Findings: 0\b/);
+      expect(text).toMatch(/INCOMPLETE|Incomplete/);
+    }
   });
 
   it('builds a PR comment draft for manual paste', () => {

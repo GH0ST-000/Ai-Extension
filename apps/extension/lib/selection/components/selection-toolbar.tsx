@@ -88,6 +88,8 @@ export function SelectionToolbar() {
   const assistant = useSelectionToolbarStore((s) => s.assistant);
   const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
   const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
+  const lastReviewScope = useSelectionToolbarStore((s) => s.lastReviewScope);
+  const lastReviewMemory = useSelectionToolbarStore((s) => s.lastReviewMemory);
   const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
   const findingDispositions = useSelectionToolbarStore((s) => s.findingDispositions);
   const suggestFixApplyTarget = useSelectionToolbarStore((s) => s.suggestFixApplyTarget);
@@ -502,8 +504,10 @@ export function SelectionToolbar() {
     return buildPrReviewReport({
       markdown: assistant.content,
       context: lastReviewContext,
+      scope: lastReviewScope,
+      final: assistant.status === 'success',
     });
-  }, [assistant, lastReviewContext]);
+  }, [assistant, lastReviewContext, lastReviewScope]);
 
   const handleCopyFullReview = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -809,6 +813,12 @@ export function SelectionToolbar() {
                 }
                 reviewContext={
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
+                }
+                reviewScope={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewScope : null
+                }
+                reviewMemory={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewMemory : null
                 }
                 findingFilter={findingFilter}
                 findingDispositions={findingDispositions}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import type { ProjectMemory as ProjectMemoryRow, Prisma } from '@prisma/client';
 import {
   categoryRelevanceForCapability,
@@ -11,6 +11,8 @@ import {
   validateScope,
 } from '@project-x/shared';
 import type {
+  AppliedProjectMemoryRule,
+  ProjectMemorySkipReason,
   WorkspacePermission,
   LearnProjectMemoryResponse,
   ListProjectMemoryResponse,
@@ -103,6 +105,62 @@ type PersistInput = {
   /** When true, do not overwrite active user_explicit memories. */
   inferred?: boolean;
 };
+
+export type PromptContextInput = {
+  userId: string;
+  workspaceId: string;
+  owner: string;
+  repository: string;
+  capability: string;
+  paths?: string[];
+};
+
+/** Counts and an error code only — safe to log; never rule text, tokens or messages. */
+export type ProjectMemoryPromptDiagnostics = {
+  activeRules: number;
+  safeRules: number;
+  selectedRules: number;
+  errorCode?: string;
+};
+
+export type ProjectMemoryPromptResolution =
+  | {
+      status: 'applied';
+      block: string;
+      version: string;
+      /** Exactly the rules placed in `block`, in prompt order. */
+      rules: AppliedProjectMemoryRule[];
+      diagnostics: ProjectMemoryPromptDiagnostics;
+    }
+  | {
+      status: 'skipped';
+      reason: ProjectMemorySkipReason;
+      diagnostics: ProjectMemoryPromptDiagnostics;
+    };
+
+const MEMORY_TITLE_MAX_CHARS = 120;
+
+function displayTitle(summary: string): string {
+  const text = summary.replace(/\s+/g, ' ').trim();
+  return text.length > MEMORY_TITLE_MAX_CHARS
+    ? `${text.slice(0, MEMORY_TITLE_MAX_CHARS - 1)}…`
+    : text;
+}
+
+/** Error *code* for diagnostics (e.g. FEATURE_NOT_AVAILABLE); never the message. */
+function safeErrorCode(error: unknown): string {
+  if (error instanceof HttpException) {
+    const body = error.getResponse();
+    if (typeof body === 'object' && body !== null) {
+      const code = (body as { code?: unknown }).code;
+      if (typeof code === 'string' && /^[A-Z_]{1,64}$/.test(code)) {
+        return code;
+      }
+    }
+    return `HTTP_${error.getStatus()}`;
+  }
+  return error instanceof Error ? error.name.slice(0, 64) : 'UNKNOWN';
+}
 
 @Injectable()
 export class ProjectMemoryService {
@@ -593,12 +651,60 @@ export class ProjectMemoryService {
   }
 
   async assertRepositoryAccess(userId: string, owner: string, repository: string): Promise<string> {
+    const result = await this.checkRepositoryAccess(userId, owner, repository);
+    if (result.ok) {
+      return result.token;
+    }
+    switch (result.reason) {
+      case 'github_not_connected':
+        throw projectMemoryException(
+          'PROJECT_MEMORY_ACCESS_DENIED',
+          'Connect a GitHub token in dashboard Settings before using project memory.',
+        );
+      case 'repository_access_denied':
+        throw projectMemoryException(
+          'PROJECT_MEMORY_ACCESS_DENIED',
+          'GitHub denied access to this repository for the connected account.',
+        );
+      case 'github_token_rejected':
+        throw projectMemoryException(
+          'PROJECT_MEMORY_ACCESS_DENIED',
+          'GitHub rejected your stored token. Update it in dashboard Settings.',
+        );
+      case 'github_unreachable':
+        // Transient network — do not delete memory.
+        throw projectMemoryException(
+          'PROJECT_MEMORY_SOURCE_UNAVAILABLE',
+          'Unable to reach GitHub to verify repository access. Existing memory was not modified.',
+        );
+      default:
+        throw projectMemoryException(
+          'PROJECT_MEMORY_SOURCE_UNAVAILABLE',
+          'GitHub repository access check failed temporarily. Existing memory was not modified.',
+        );
+    }
+  }
+
+  /** Repository access check that reports a reason code instead of throwing. */
+  private async checkRepositoryAccess(
+    userId: string,
+    owner: string,
+    repository: string,
+  ): Promise<
+    | { ok: true; token: string }
+    | {
+        ok: false;
+        reason:
+          | 'github_not_connected'
+          | 'repository_access_denied'
+          | 'github_token_rejected'
+          | 'github_unreachable'
+          | 'github_unavailable';
+      }
+  > {
     const token = await this.githubAccess.getDecryptedToken(userId);
     if (!token) {
-      throw projectMemoryException(
-        'PROJECT_MEMORY_ACCESS_DENIED',
-        'Connect a GitHub token in dashboard Settings before using project memory.',
-      );
+      return { ok: false, reason: 'github_not_connected' };
     }
 
     const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
@@ -614,35 +720,19 @@ export class ProjectMemoryService {
         },
       });
     } catch {
-      // Transient network — do not delete memory.
-      throw projectMemoryException(
-        'PROJECT_MEMORY_SOURCE_UNAVAILABLE',
-        'Unable to reach GitHub to verify repository access. Existing memory was not modified.',
-      );
+      return { ok: false, reason: 'github_unreachable' };
     }
 
     if (response.status === 404 || response.status === 403) {
-      throw projectMemoryException(
-        'PROJECT_MEMORY_ACCESS_DENIED',
-        'GitHub denied access to this repository for the connected account.',
-      );
+      return { ok: false, reason: 'repository_access_denied' };
     }
-
     if (response.status === 401) {
-      throw projectMemoryException(
-        'PROJECT_MEMORY_ACCESS_DENIED',
-        'GitHub rejected your stored token. Update it in dashboard Settings.',
-      );
+      return { ok: false, reason: 'github_token_rejected' };
     }
-
     if (!response.ok) {
-      throw projectMemoryException(
-        'PROJECT_MEMORY_SOURCE_UNAVAILABLE',
-        'GitHub repository access check failed temporarily. Existing memory was not modified.',
-      );
+      return { ok: false, reason: 'github_unavailable' };
     }
-
-    return token;
+    return { ok: true, token };
   }
 
   /**
@@ -712,45 +802,107 @@ export class ProjectMemoryService {
    * Trusted PROJECT_MEMORY block for an AI request, built server-side from the database on
    * every call (no cache, so archived/superseded rules drop out immediately). Returns null
    * when memory does not apply: no permission/feature, no repository access, or no rules.
+   * Prefer {@link resolvePromptContext}, which also says why memory was skipped.
    */
-  async buildPromptContext(input: {
-    userId: string;
-    workspaceId: string;
-    owner: string;
-    repository: string;
-    capability: string;
-    paths?: string[];
-  }): Promise<{ block: string; version: string; ruleIds: string[] } | null> {
+  async buildPromptContext(
+    input: PromptContextInput,
+  ): Promise<{ block: string; version: string; ruleIds: string[] } | null> {
+    const resolved = await this.resolvePromptContext(input);
+    return resolved.status === 'applied'
+      ? {
+          block: resolved.block,
+          version: resolved.version,
+          ruleIds: resolved.rules.map((r) => r.id),
+        }
+      : null;
+  }
+
+  /**
+   * Same authorization and selection as {@link buildPromptContext}, but always returns a
+   * result: the applied rules (exactly those placed in the block) or a skip reason code.
+   * Diagnostics carry counts and error codes only — never rule text, tokens or messages.
+   */
+  async resolvePromptContext(input: PromptContextInput): Promise<ProjectMemoryPromptResolution> {
+    const diagnostics: ProjectMemoryPromptDiagnostics = {
+      activeRules: 0,
+      safeRules: 0,
+      selectedRules: 0,
+    };
+    const skip = (
+      reason: ProjectMemorySkipReason,
+      error?: unknown,
+    ): ProjectMemoryPromptResolution => ({
+      status: 'skipped',
+      reason,
+      diagnostics: { ...diagnostics, ...(error ? { errorCode: safeErrorCode(error) } : {}) },
+    });
+
     let owner: string;
     let repository: string;
     try {
       ({ owner, repository } = this.normalizeRepo(input.owner, input.repository));
+    } catch (error) {
+      return skip('invalid_repository', error);
+    }
+    try {
       await this.workspaceAuthorization.assertAccess({
         userId: input.userId,
         workspaceId: input.workspaceId,
         permission: 'memory:read',
       });
+    } catch (error) {
+      return skip('workspace_permission_denied', error);
+    }
+    try {
       await this.featureGate.require(input.workspaceId, 'PROJECT_MEMORY');
-      await this.assertRepositoryAccess(input.userId, owner, repository);
-    } catch {
-      return null;
+    } catch (error) {
+      return skip('feature_not_available', error);
+    }
+    let access: Awaited<ReturnType<ProjectMemoryService['checkRepositoryAccess']>>;
+    try {
+      access = await this.checkRepositoryAccess(input.userId, owner, repository);
+    } catch (error) {
+      return skip('github_unavailable', error);
+    }
+    if (!access.ok) {
+      return skip(access.reason === 'github_unreachable' ? 'github_unavailable' : access.reason);
     }
 
-    const items = (
-      await this.loadActiveItems(input.userId, owner, repository, input.workspaceId)
-    ).filter((item) => {
+    let loaded: { items: ProjectMemoryItem[]; visibilityById: Map<string, 'workspace' | 'user'> };
+    try {
+      loaded = await this.loadActiveItemsWithVisibility(
+        input.userId,
+        owner,
+        repository,
+        input.workspaceId,
+      );
+    } catch (error) {
+      return skip('retrieval_failed', error);
+    }
+    diagnostics.activeRules = loaded.items.length;
+    if (loaded.items.length === 0) {
+      return skip('no_active_rules');
+    }
+
+    const items = loaded.items.filter((item) => {
       // Defense in depth: rows stored before the current policy are never sent.
       const details = item.value.details ? JSON.stringify(item.value.details) : '';
       return !isUnsafeMemoryRuleText(`${item.value.summary}\n${details}`);
     });
+    diagnostics.safeRules = items.length;
+    if (items.length === 0) {
+      return skip('all_rules_blocked_by_safety_policy');
+    }
+
     const selected = selectRelevantMemory(items, {
       categories: categoryRelevanceForCapability(input.capability),
       pathHints: input.paths ?? [],
       maxItems: PROJECT_MEMORY_MAX_RELEVANT_RULES,
       maxChars: PROJECT_MEMORY_MAX_SUMMARY_CHARS * PROJECT_MEMORY_MAX_RELEVANT_RULES,
     });
+    diagnostics.selectedRules = selected.length;
     if (selected.length === 0) {
-      return null;
+      return skip('no_relevant_rules');
     }
 
     const version = computeMemoryVersion(items);
@@ -770,7 +922,15 @@ export class ProjectMemoryService {
       ),
       '<</PROJECT_MEMORY>>',
     ];
-    return { block: lines.join('\n'), version, ruleIds: selected.map((item) => item.id) };
+    const rules: AppliedProjectMemoryRule[] = selected.map((item) => ({
+      id: item.id,
+      key: item.key,
+      category: item.category,
+      title: displayTitle(item.value.summary),
+      confidence: item.confidence,
+      visibility: loaded.visibilityById.get(item.id) ?? 'workspace',
+    }));
+    return { status: 'applied', block: lines.join('\n'), version, rules, diagnostics };
   }
 
   private async loadActiveItems(
@@ -779,6 +939,16 @@ export class ProjectMemoryService {
     repository: string,
     workspaceId: string,
   ): Promise<ProjectMemoryItem[]> {
+    return (await this.loadActiveItemsWithVisibility(userId, owner, repository, workspaceId)).items;
+  }
+
+  /** Active rules the user may read in this workspace, with each rule's visibility. */
+  private async loadActiveItemsWithVisibility(
+    userId: string,
+    owner: string,
+    repository: string,
+    workspaceId: string,
+  ): Promise<{ items: ProjectMemoryItem[]; visibilityById: Map<string, 'workspace' | 'user'> }> {
     const rows = await this.prisma.projectMemory.findMany({
       where: {
         owner,
@@ -792,7 +962,14 @@ export class ProjectMemoryService {
       },
       orderBy: [{ category: 'asc' }, { key: 'asc' }],
     });
-    return rows.map(toProjectMemoryItem);
+    const visibilityById = new Map<string, 'workspace' | 'user'>(
+      rows.map((row) => [
+        row.id,
+        // Legacy rows without a workspace belong to their author only.
+        row.visibility === 'user' || row.workspaceId === null ? 'user' : 'workspace',
+      ]),
+    );
+    return { items: rows.map(toProjectMemoryItem), visibilityById };
   }
 
   private buildProfile(

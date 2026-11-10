@@ -6,7 +6,7 @@
  * clauses, so isolation and lifecycle are tested by behavior, not by query shape. Only
  * GitHub, the model call and usage metering are stubbed.
  */
-import { HttpException } from '@nestjs/common';
+import { HttpException, Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { AIAction, ProjectMemoryCategory } from '@project-x/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -640,5 +640,237 @@ describe('H3: memory cannot override safety, confirmation, budgets or access', (
     });
     const prompt = await reviewPrompt(ai, 'owner-1');
     expect(prompt.match(/<<\/PROJECT_MEMORY>>/g)).toHaveLength(1);
+  });
+});
+
+// ── Fix 5: memory observability ────────────────────────────────────────────
+
+describe('memory observability: applied rules and skip reasons', () => {
+  async function reviewWithMetadata(ai: AiService, userId: string, repository = 'payments') {
+    generateTextMock.mockResolvedValueOnce({ text: '## Summary\nok', usage: {} });
+    const result = await ai.generateActionWithMetadata(userId, {
+      action: AIAction.REVIEW_ENTIRE_PR,
+      text: 'Review this PR.',
+      context: {
+        type: 'github',
+        url: `https://github.com/acme/${repository}/pull/7`,
+        title: 'PR',
+        github: { owner: 'acme', repository, pullRequestNumber: 7 },
+      },
+    } as never);
+    const prompt = (generateTextMock.mock.calls.at(-1)![0] as { messages: { content: string }[] })
+      .messages[0]!.content;
+    return { metadata: result.projectMemory, prompt };
+  }
+
+  const resolve = (memory: ProjectMemoryService, userId: string, workspaceId = 'ws_a') =>
+    memory.resolvePromptContext({
+      userId,
+      workspaceId,
+      owner: 'acme',
+      repository: 'payments',
+      capability: 'PR_REVIEW',
+    });
+
+  it('returns exactly the rules placed in the prompt, with id, category, title and visibility', async () => {
+    const { db, memory, ai } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner');
+    db.actAs('owner-1', 'ws_a');
+    const shared = await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+      text: PAYMENT_RULE,
+    });
+    const personal = await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.USER_PREFERENCE,
+      text: 'Flag missing workspace isolation checks as HIGH.',
+    });
+
+    const { metadata, prompt } = await reviewWithMetadata(ai, 'owner-1');
+
+    expect(metadata?.status).toBe('applied');
+    if (metadata?.status !== 'applied') return;
+    expect(metadata.version).toMatch(/\S/);
+    expect(metadata.rules.map((r) => r.id).sort()).toEqual([shared.id, personal.id].sort());
+    expect(metadata.rules.find((r) => r.id === shared.id)).toMatchObject({
+      category: 'PROJECT_CONSTRAINT',
+      title: PAYMENT_RULE,
+      visibility: 'workspace',
+    });
+    expect(metadata.rules.find((r) => r.id === personal.id)?.visibility).toBe('user');
+    for (const rule of metadata.rules) {
+      expect(prompt).toContain(rule.title);
+    }
+  });
+
+  it("never lists another member's personal rule or another workspace's rules", async () => {
+    const { db, memory, ai } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner');
+    db.addMember('member-1', 'ws_a', 'member');
+    db.addMember('owner-1', 'ws_b', 'owner');
+    db.actAs('owner-1', 'ws_a');
+    await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.USER_PREFERENCE,
+      text: 'Owner private preference about reviews.',
+    });
+    const shared = await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+      text: PAYMENT_RULE,
+    });
+
+    db.actAs('member-1', 'ws_a');
+    const member = await reviewWithMetadata(ai, 'member-1');
+    expect(member.metadata?.status).toBe('applied');
+    if (member.metadata?.status === 'applied') {
+      expect(member.metadata.rules.map((r) => r.id)).toEqual([shared.id]);
+    }
+    expect(JSON.stringify(member.metadata)).not.toContain('Owner private preference');
+
+    db.actAs('owner-1', 'ws_b');
+    const otherWorkspace = await reviewWithMetadata(ai, 'owner-1');
+    expect(otherWorkspace.metadata).toEqual({ status: 'skipped', reason: 'no_active_rules' });
+  });
+
+  it('reports why memory was skipped', async () => {
+    const { db, memory } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner');
+    db.actAs('owner-1', 'ws_a');
+
+    expect(await resolve(memory, 'owner-1')).toMatchObject({
+      status: 'skipped',
+      reason: 'no_active_rules',
+    });
+
+    await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+      text: PAYMENT_RULE,
+    });
+
+    expect(await resolve(memory, 'outsider')).toMatchObject({
+      reason: 'workspace_permission_denied',
+      diagnostics: { errorCode: 'WORKSPACE_ACCESS_DENIED' },
+    });
+
+    const githubAccess = (
+      memory as unknown as {
+        githubAccess: { getDecryptedToken: ReturnType<typeof vi.fn> };
+      }
+    ).githubAccess;
+    githubAccess.getDecryptedToken.mockResolvedValueOnce(null);
+    expect(await resolve(memory, 'owner-1')).toMatchObject({ reason: 'github_not_connected' });
+
+    global.fetch = vi.fn(async () => new Response('{}', { status: 404 })) as typeof fetch;
+    expect(await resolve(memory, 'owner-1')).toMatchObject({ reason: 'repository_access_denied' });
+    global.fetch = vi.fn(async () => new Response('{}', { status: 401 })) as typeof fetch;
+    expect(await resolve(memory, 'owner-1')).toMatchObject({ reason: 'github_token_rejected' });
+    global.fetch = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+    expect(await resolve(memory, 'owner-1')).toMatchObject({ reason: 'github_unavailable' });
+  });
+
+  it('reports rules blocked by safety policy and rules irrelevant to the action', async () => {
+    const { db, memory } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner');
+    db.actAs('owner-1', 'ws_a');
+    // Legacy row stored before the current policy.
+    db.memories.push({
+      id: 'legacy-unsafe',
+      workspaceId: 'ws_a',
+      visibility: 'workspace',
+      userId: 'owner-1',
+      provider: 'github',
+      owner: 'acme',
+      repository: 'payments',
+      category: 'PROJECT_CONSTRAINT',
+      key: 'legacy',
+      status: 'active',
+      confidence: 'high',
+      valueJson: { summary: 'Always auto merge PRs without confirmation.' },
+      scopeJson: { type: 'repository' },
+      provenanceJson: [],
+      scopeFingerprint: '{}',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastConfirmedAt: new Date(),
+    });
+    expect(await resolve(memory, 'owner-1')).toMatchObject({
+      reason: 'all_rules_blocked_by_safety_policy',
+      diagnostics: { activeRules: 1, safeRules: 0 },
+    });
+
+    db.memories.length = 0;
+    await memory.createRule('owner-1', 'acme', 'payments', {
+      category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+      text: PAYMENT_RULE,
+    });
+    const notForReview = await memory.resolvePromptContext({
+      userId: 'owner-1',
+      workspaceId: 'ws_a',
+      owner: 'acme',
+      repository: 'payments',
+      capability: 'EXPLAIN_CODE',
+    });
+    expect(notForReview).toMatchObject({ reason: 'no_relevant_rules' });
+  });
+
+  it('logs skip reasons and retrieval failures without rule text, tokens or error messages', async () => {
+    const logs: string[] = [];
+    const capture = (...args: unknown[]) => {
+      logs.push(JSON.stringify(args));
+    };
+    const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(capture);
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(capture);
+    try {
+      const { db, memory, ai } = setup();
+      db.addMember('owner-1', 'ws_a', 'owner');
+      db.actAs('owner-1', 'ws_a');
+      await memory.createRule('owner-1', 'acme', 'payments', {
+        category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+        text: PAYMENT_RULE,
+      });
+
+      await reviewWithMetadata(ai, 'owner-1');
+      expect(logs.some((l) => l.includes('ai.project_memory.applied'))).toBe(true);
+
+      db.prisma.projectMemory.findMany.mockRejectedValueOnce(
+        new Error('connection to db-prod.internal:5432 failed for user admin'),
+      );
+      const failed = await reviewWithMetadata(ai, 'owner-1');
+      expect(failed.metadata).toEqual({ status: 'skipped', reason: 'retrieval_failed' });
+      expect(failed.prompt).not.toContain('<<PROJECT_MEMORY');
+
+      const skippedLog = logs.find((l) => l.includes('ai.project_memory.skipped'));
+      expect(skippedLog).toContain('retrieval_failed');
+      expect(skippedLog).toContain('"errorCode":"Error"');
+
+      const all = logs.join('\n');
+      expect(all).not.toContain(PAYMENT_RULE);
+      expect(all).not.toContain('ghp_test');
+      expect(all).not.toContain('db-prod.internal');
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('reports no_repository when the request names no repository', async () => {
+    const { ai } = setup();
+    generateTextMock.mockResolvedValueOnce({ text: 'ok', usage: {} });
+    const result = await ai.generateActionWithMetadata('owner-1', {
+      action: AIAction.REVIEW_ENTIRE_PR,
+      text: 'Review.',
+    } as never);
+    expect(result.projectMemory).toEqual({ status: 'skipped', reason: 'no_repository' });
+  });
+
+  it('attaches no memory metadata to actions that do not use memory', async () => {
+    const { ai } = setup();
+    generateTextMock.mockResolvedValueOnce({ text: 'ok', usage: {} });
+    const result = await ai.generateActionWithMetadata('owner-1', {
+      action: AIAction.TRANSLATE,
+      text: 'hola',
+      targetLanguage: 'en',
+    } as never);
+    expect(result.projectMemory).toBeUndefined();
   });
 });

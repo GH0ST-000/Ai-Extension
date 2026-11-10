@@ -320,7 +320,9 @@ function buildGitHubContext(url: URL, selectedText: string): PageContext {
     if (collected.files.length > 0) {
       github.changedFiles = collected.files;
     }
-    if (collected.truncated || collected.files.length === 0) {
+    // "Truncated" means some files/lines were left out — not "nothing was found". An empty
+    // page diff is reported as empty; the API loads the real diff from GitHub either way.
+    if (collected.truncated && collected.files.length > 0) {
       github.changedFilesTruncated = true;
     }
   }

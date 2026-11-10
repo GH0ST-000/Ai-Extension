@@ -13,9 +13,30 @@ type CachedEntitlements = {
 
 const CACHE_TTL_MS = 30_000;
 
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'past_due', 'paused']);
+
+/** The plan a workspace is entitled to, given its subscription row (or none). */
+export function effectivePlanId(
+  subscription: { planId: string; status: string } | null,
+): ProductPlanId {
+  if (!subscription || !isProductPlanId(subscription.planId)) {
+    return 'free';
+  }
+  if (ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status) || subscription.planId === 'free') {
+    return subscription.planId;
+  }
+  return 'free';
+}
+
 @Injectable()
 export class EntitlementService {
   private readonly cache = new Map<string, CachedEntitlements>();
+  /**
+   * Bumped on every invalidate. A read that started before an invalidate must not
+   * write its (now stale) result back into the cache afterwards.
+   */
+  private readonly generation = new Map<string, number>();
+  private globalGeneration = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -49,34 +70,35 @@ export class EntitlementService {
   }
 
   invalidate(workspaceId: string): void {
+    this.generation.set(workspaceId, (this.generation.get(workspaceId) ?? 0) + 1);
     this.cache.delete(workspaceId);
   }
 
   invalidateAll(): void {
+    this.globalGeneration += 1;
     this.cache.clear();
   }
 
+  private generationOf(workspaceId: string): string {
+    return `${this.globalGeneration}:${this.generation.get(workspaceId) ?? 0}`;
+  }
+
   private async resolve(workspaceId: string): Promise<CachedEntitlements> {
+    const generationAtStart = this.generationOf(workspaceId);
     const subscription = await this.prisma.workspaceSubscription.findUnique({
       where: { workspaceId },
       select: { planId: true, status: true },
     });
 
-    let planId: ProductPlanId = 'free';
-    if (subscription && isProductPlanId(subscription.planId)) {
-      const activeStatuses = new Set(['trialing', 'active', 'past_due', 'paused']);
-      if (activeStatuses.has(subscription.status) || subscription.planId === 'free') {
-        planId = subscription.planId;
-      }
-    }
-
-    const entitlements = getProductPlan(planId).entitlements;
+    const planId = effectivePlanId(subscription);
     const entry: CachedEntitlements = {
       planId,
-      entitlements,
+      entitlements: getProductPlan(planId).entitlements,
       expiresAt: Date.now() + CACHE_TTL_MS,
     };
-    this.cache.set(workspaceId, entry);
+    if (this.generationOf(workspaceId) === generationAtStart) {
+      this.cache.set(workspaceId, entry);
+    }
     return entry;
   }
 }

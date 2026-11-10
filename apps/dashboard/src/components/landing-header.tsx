@@ -36,9 +36,13 @@ export function LandingHeader() {
           <ThemeToggle compact />
           {signedIn ? (
             <>
-              <span className="hidden max-w-[180px] truncate items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1 text-[11px] font-medium text-muted-foreground lg:inline-flex">
+              <span
+                title={user?.email ?? undefined}
+                className="hidden max-w-[240px] items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1 text-[11px] font-medium text-muted-foreground lg:inline-flex"
+              >
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                {user?.email ?? 'Signed in'}
+                {/* Ellipsis must live on a block child: text-overflow does not apply to a flex container's text. */}
+                <span className="min-w-0 truncate">{user?.email ?? 'Signed in'}</span>
               </span>
               <Link
                 href="/app"

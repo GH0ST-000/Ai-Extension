@@ -221,11 +221,23 @@ export interface BillingCheckoutResponse {
   clientToken?: string;
   planId: ProductPlanId;
   billingCycle: BillingCycle;
+  /** True when an existing subscription was switched in place (no checkout to open). */
+  subscriptionUpdated?: boolean;
 }
 
 export interface BillingPortalResponse {
   url: string;
 }
+
+/** A list price as Paddle stores it: amount in the currency's minor units (cents). */
+export interface BillingPrice {
+  amount: string;
+  currencyCode: string;
+}
+
+export type BillingPlanPrices = Partial<
+  Record<Exclude<ProductPlanId, 'free'>, Partial<Record<BillingCycle, BillingPrice>>>
+>;
 
 export interface WorkspaceBillingView {
   subscription: WorkspaceSubscription;
@@ -238,6 +250,8 @@ export interface WorkspaceBillingView {
   };
   paddleClientToken?: string;
   environment?: 'sandbox' | 'production';
+  /** List prices of the paid plans, from the billing provider. */
+  prices?: BillingPlanPrices;
 }
 
 export type WorkspaceErrorCode =

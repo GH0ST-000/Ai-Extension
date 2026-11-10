@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createBillingProvider, SandboxBillingProvider } from './billing-provider';
+import {
+  createBillingProvider,
+  PaddleBillingProvider,
+  SandboxBillingProvider,
+} from './billing-provider';
 
 describe('createBillingProvider', () => {
   it('uses sandbox provider outside production', () => {
@@ -20,6 +24,20 @@ describe('createBillingProvider', () => {
       },
     });
     expect(provider).toBeInstanceOf(SandboxBillingProvider);
+  });
+
+  it('uses the real Paddle sandbox in development when sandbox credentials are set', () => {
+    const provider = createBillingProvider({
+      nodeEnv: 'development',
+      paddle: {
+        environment: 'sandbox',
+        apiKey: 'pdl_sdbx_apikey_test',
+        webhookSecret: 'pdl_ntfset_test',
+        clientToken: '',
+        prices: { proMonthly: '', proYearly: '', teamMonthly: '', teamYearly: '' },
+      },
+    });
+    expect(provider).toBeInstanceOf(PaddleBillingProvider);
   });
 
   it('rejects sandbox paddle config when NODE_ENV is production', () => {

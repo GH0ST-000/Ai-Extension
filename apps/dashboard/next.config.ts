@@ -22,10 +22,12 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  `connect-src 'self' ${apiOrigin} https://*.sentry.io https://*.ingest.sentry.io https://api.paddle.com https://sandbox-api.paddle.com`,
+  `connect-src 'self' ${apiOrigin} https://*.sentry.io https://*.ingest.sentry.io https://api.paddle.com https://sandbox-api.paddle.com https://checkout-service.paddle.com https://sandbox-checkout-service.paddle.com`,
   "img-src 'self' data: blob: https://cdn.paddle.com",
   "font-src 'self' data:",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://cdn.paddle.com",
+  // Paddle.js renders the checkout overlay in an iframe.
+  'frame-src https://buy.paddle.com https://sandbox-buy.paddle.com',
   isProd
     ? "script-src 'self' 'unsafe-inline' https://cdn.paddle.com https://sandbox-cdn.paddle.com"
     : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.paddle.com https://sandbox-cdn.paddle.com",

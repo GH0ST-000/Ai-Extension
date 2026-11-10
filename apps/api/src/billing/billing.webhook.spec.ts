@@ -22,6 +22,7 @@ describe('BillingService webhook security', () => {
       upsert: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(),
     workspaceMembership: {
       count: vi.fn().mockResolvedValue(1),
     },
@@ -68,6 +69,7 @@ describe('BillingService webhook security', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     service = new BillingService(
       prisma as never,
       config as never,

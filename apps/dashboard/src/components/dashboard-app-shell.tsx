@@ -75,9 +75,13 @@ function DashboardShell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
               <ThemeToggle compact />
-              <span className="hidden max-w-[160px] truncate items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1 text-[11px] font-medium text-muted-foreground lg:inline-flex">
+              <span
+                title={user?.email ?? undefined}
+                className="hidden max-w-[240px] items-center gap-2 rounded-full border border-line bg-panel/70 px-3 py-1 text-[11px] font-medium text-muted-foreground lg:inline-flex"
+              >
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                {user?.email ?? 'Account'}
+                {/* Ellipsis must live on a block child: text-overflow does not apply to a flex container's text. */}
+                <span className="min-w-0 truncate">{user?.email ?? 'Account'}</span>
               </span>
               <button
                 type="button"

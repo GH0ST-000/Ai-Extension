@@ -239,6 +239,8 @@ model WorkspaceSubscription {
   currentPeriodStart      DateTime? @map("current_period_start")
   currentPeriodEnd        DateTime? @map("current_period_end")
   cancelAtPeriodEnd       Boolean  @default(false) @map("cancel_at_period_end")
+  /// Paddle's updated_at of the last applied state; older webhooks are ignored.
+  providerUpdatedAt       DateTime? @map("provider_updated_at")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
 

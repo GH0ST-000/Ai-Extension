@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   BillingCycle,
+  BillingPrice,
   ProductPlanId,
   WorkspaceBillingView,
   WorkspaceUsageCounter,
@@ -10,6 +11,12 @@ import type {
 import { DEFAULT_PRODUCT_PLANS } from '@project-x/shared';
 
 import { ApiError } from '../../../lib/api';
+import {
+  closePaddleCheckout,
+  initPaddle,
+  openPaddleCheckout,
+  setPaddleEventHandler,
+} from '../../../lib/paddle';
 import { useWorkspace } from '../../../lib/workspace-context';
 import {
   cancelSubscription,
@@ -59,6 +66,30 @@ function formatUsageCount(count: number, limit: number | null): string {
     return `${count} / Unlimited`;
   }
   return `${count} / ${limit}`;
+}
+
+/** Paddle amounts are in the currency's minor units (cents for USD). */
+function formatPrice(price: BillingPrice): string {
+  const formatter = new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: price.currencyCode,
+  });
+  const digits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+  const value = Number(price.amount) / 10 ** digits;
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: price.currencyCode,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+/** Percentage saved by paying yearly instead of 12 monthly payments, if any. */
+function yearlySavingsPercent(monthly?: BillingPrice, yearly?: BillingPrice): number | null {
+  if (!monthly || !yearly || monthly.currencyCode !== yearly.currencyCode) return null;
+  const fullYear = Number(monthly.amount) * 12;
+  const saved = Math.round((1 - Number(yearly.amount) / fullYear) * 100);
+  return saved > 0 ? saved : null;
 }
 
 function planBlurb(planId: ProductPlanId): string[] {
@@ -134,8 +165,86 @@ export default function BillingPage() {
     void load();
   }, [load]);
 
+  // Paddle.js registers its event callback once per page, so it reads the latest
+  // values through this ref instead of a stale render's closure.
+  const latest = useRef({ workspaceId, load, refreshWorkspace });
+  latest.current = { workspaceId, load, refreshWorkspace };
+  /** Subscription as it was when checkout started; activation = the backend row changes. */
+  const subscriptionBeforeCheckout = useRef<WorkspaceBillingView['subscription'] | null>(null);
+
+  const waitForActivation = useCallback(async () => {
+    const { workspaceId: id, load: reload, refreshWorkspace: refreshWs } = latest.current;
+    const before = subscriptionBeforeCheckout.current;
+    if (!id) return;
+    // The Paddle webhook usually lands a few seconds after checkout.completed.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const view = await getBilling(id);
+        const sub = view.subscription;
+        const changed =
+          !sub.id.startsWith('local-') &&
+          (sub.updatedAt !== before?.updatedAt ||
+            sub.planId !== before?.planId ||
+            sub.status !== before?.status);
+        if (changed) {
+          setBilling(view);
+          await Promise.all([reload(), refreshWs()]);
+          setMessage(`You are now on ${view.plan.name}.`);
+          return;
+        }
+      } catch {
+        // keep polling
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+    }
+    await Promise.all([reload(), refreshWs()]);
+    setMessage('Payment received. Your plan is still activating — refresh in a moment.');
+  }, []);
+
+  const paddleToken = billing?.paddleClientToken;
+  const paddleEnvironment = billing?.environment ?? 'sandbox';
+  useEffect(() => {
+    if (!paddleToken) {
+      return;
+    }
+    void initPaddle({ token: paddleToken, environment: paddleEnvironment }).catch(() =>
+      setError('Unable to load the Paddle checkout.'),
+    );
+  }, [paddleToken, paddleEnvironment]);
+
+  // Registered per mount, so events reach this page instance even after the user
+  // navigated away and back (e.g. signed in as another account) without a reload.
+  useEffect(
+    () =>
+      setPaddleEventHandler((event) => {
+        if (event.name !== 'checkout.completed') {
+          return;
+        }
+        setMessage('Payment received. Activating your plan…');
+        // Let Paddle's success screen show briefly, then return to the page.
+        window.setTimeout(closePaddleCheckout, 2_000);
+        void waitForActivation();
+      }),
+    [waitForActivation],
+  );
+
   async function onCheckout(planId: Exclude<ProductPlanId, 'free'>) {
     if (!workspaceId || !canManage) {
+      return;
+    }
+    const targetPrice = billing?.prices?.[planId]?.[billingCycle];
+    const hasPaidSubscription =
+      billing?.plan.id !== undefined &&
+      billing.plan.id !== 'free' &&
+      !billing.subscription.id.startsWith('local-');
+    if (
+      hasPaidSubscription &&
+      !window.confirm(
+        `Switch this workspace to ${planId === 'team' ? 'Team' : 'Pro'} ` +
+          `(${targetPrice ? `${formatPrice(targetPrice)} / ${billingCycle === 'yearly' ? 'year' : 'month'}` : billingCycle})? ` +
+          'The prorated difference is charged (or credited) to the saved payment method now.',
+      )
+    ) {
       return;
     }
     setBusy(true);
@@ -143,6 +252,18 @@ export default function BillingPage() {
     setError(null);
     try {
       const result = await createCheckout(workspaceId, { planId, billingCycle });
+      if (result.subscriptionUpdated) {
+        await Promise.all([load(), refreshWorkspace()]);
+        setMessage(`Your workspace is now on ${planId === 'team' ? 'Team' : 'Pro'}.`);
+        return;
+      }
+      if (paddleToken && result.transactionId) {
+        subscriptionBeforeCheckout.current = billing?.subscription ?? null;
+        // Real Paddle: open the overlay here instead of leaving for the payment link.
+        await initPaddle({ token: paddleToken, environment: paddleEnvironment });
+        await openPaddleCheckout(result.transactionId);
+        return;
+      }
       if (result.checkoutUrl) {
         window.location.assign(result.checkoutUrl);
         return;
@@ -397,6 +518,14 @@ export default function BillingPage() {
           {DEFAULT_PRODUCT_PLANS.map((item) => {
             const active = item.id === currentPlanId;
             const isPaid = item.id !== 'free';
+            const planPrices = isPaid
+              ? billing?.prices?.[item.id as Exclude<ProductPlanId, 'free'>]
+              : undefined;
+            const price = planPrices?.[billingCycle];
+            const savings =
+              billingCycle === 'yearly'
+                ? yearlySavingsPercent(planPrices?.monthly, planPrices?.yearly)
+                : null;
             return (
               <div
                 key={item.id}
@@ -406,6 +535,21 @@ export default function BillingPage() {
                 ].join(' ')}
               >
                 <p className="font-display text-xl font-semibold text-ink">{item.name}</p>
+                {!isPaid ? (
+                  <p className="mt-2 font-display text-3xl font-semibold text-ink">Free</p>
+                ) : price ? (
+                  <div className="mt-2">
+                    <p className="font-display text-3xl font-semibold text-ink">
+                      {formatPrice(price)}
+                      <span className="ml-1 text-sm font-medium text-muted-foreground">
+                        / {billingCycle === 'yearly' ? 'year' : 'month'}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {savings ? `Save ${savings}% vs monthly · ` : ''}Plus tax where applicable
+                    </p>
+                  </div>
+                ) : null}
                 <ul className="mt-3 space-y-1.5 text-sm text-muted-foreground">
                   {planBlurb(item.id).map((line) => (
                     <li key={line}>{line}</li>

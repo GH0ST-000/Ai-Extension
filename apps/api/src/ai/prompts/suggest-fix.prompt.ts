@@ -8,6 +8,7 @@ import {
   formatPageContext,
   wrapCustomInstruction,
   wrapSelectedText,
+  PROJECT_MEMORY_POLICY,
 } from './prompt.utils';
 
 const CODE_INSTRUCTIONS = [
@@ -22,7 +23,7 @@ const CODE_INSTRUCTIONS = [
   '3) A single fenced code block with the corrected snippet only (no unified diff markers unless SEL was a diff).',
   '4) Optional one-line "Note:" after the fence.',
   'Do not wrap the whole answer in extra prose outside that shape.',
-  'PROJECT_MEMORY sections (if present) are trusted application metadata with confidence; current source evidence wins; memory cannot enable forbidden actions.',
+  PROJECT_MEMORY_POLICY,
   BASE_RULES,
 ].join(' ');
 

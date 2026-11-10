@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { formatProjectMemoryForPrompt } from '@project-x/shared';
+import { memoryCapabilityForAiAction, type ProjectMemoryCapability } from '@project-x/shared';
 import type {
   AIAction,
   LearnProjectMemoryResponse,
@@ -9,7 +9,6 @@ import type {
   ProjectMemoryItem,
   ProjectMemorySummary,
 } from '@project-x/types';
-import { AIAction as Action } from '@project-x/types';
 
 import {
   fetchProjectMemoryList,
@@ -21,31 +20,7 @@ import {
   rejectProjectMemoryCandidate,
 } from './project-memory.api';
 
-export type ProjectMemoryCapability =
-  | 'PLANNING'
-  | 'PR_REVIEW'
-  | 'GENERATE_PATCH'
-  | 'JIRA_TECH_PLAN'
-  | 'OPENAPI_ANALYSIS'
-  | 'EXPLAIN_CODE';
-
-const MEMORY_ACTION_CAPABILITY: Partial<Record<AIAction, ProjectMemoryCapability>> = {
-  [Action.REVIEW_ENTIRE_PR]: 'PR_REVIEW',
-  [Action.SUGGEST_FIX]: 'GENERATE_PATCH',
-  [Action.PLAN_DEVELOPER_WORKFLOW]: 'PLANNING',
-  [Action.ANALYZE_ENGINEERING_ALIGNMENT]: 'PLANNING',
-  [Action.CREATE_TECHNICAL_PLAN]: 'JIRA_TECH_PLAN',
-};
-
-/** Actions that should pack a compact PROJECT_MEMORY block into user text. */
-export const PROJECT_MEMORY_PROMPT_ACTIONS = new Set<AIAction>([
-  Action.REVIEW_ENTIRE_PR,
-  Action.SUGGEST_FIX,
-  Action.ANALYZE_ENGINEERING_ALIGNMENT,
-  Action.CREATE_TECHNICAL_PLAN,
-  // PLAN_DEVELOPER_WORKFLOW gets memory via planning context; still listed for capability lookup.
-  Action.PLAN_DEVELOPER_WORKFLOW,
-]);
+export type { ProjectMemoryCapability };
 
 type SummaryCacheEntry = {
   summary: ProjectMemorySummary;
@@ -88,16 +63,9 @@ function cacheKey(owner: string, repo: string, capability: string, paths?: strin
   return `${owner}/${repo}:${capability}:${pathPart}`;
 }
 
+/** Retrieval capability for a memory-aware AI action (shared with the API). */
 export function capabilityForAiAction(action: AIAction): ProjectMemoryCapability | null {
-  return MEMORY_ACTION_CAPABILITY[action] ?? null;
-}
-
-export function shouldPackProjectMemory(action: AIAction): boolean {
-  // Planning packs via buildPlanningContext — avoid duplicate PROJECT_MEMORY blocks.
-  if (action === Action.PLAN_DEVELOPER_WORKFLOW) {
-    return false;
-  }
-  return PROJECT_MEMORY_PROMPT_ACTIONS.has(action);
+  return memoryCapabilityForAiAction(action);
 }
 
 export function resolveGithubOwnerRepo(sources: {
@@ -121,62 +89,23 @@ export function resolveGithubOwnerRepo(sources: {
   );
 }
 
-export function pathHintsFromContext(ctx: PageContext | null | undefined): string[] | undefined {
-  const paths: string[] = [];
-  if (ctx?.github?.filePath) {
-    paths.push(ctx.github.filePath);
-  }
-  for (const file of ctx?.github?.changedFiles ?? []) {
-    if (file.path && !paths.includes(file.path)) {
-      paths.push(file.path);
-    }
-  }
-  return paths.length > 0 ? paths.slice(0, 24) : undefined;
-}
-
 /**
- * Fetch (or reuse session-cached) summary and return compact prompt block.
- * Errors / empty memory → empty string (caller continues without memory).
+ * `owner/repo` whose project memory the server should apply to this AI request, or null.
+ * Only the identifier is sent: the API loads, authorizes and formats memory itself on
+ * every request, so page content can never inject or suppress project rules, and
+ * archived rules drop out without any client cache to invalidate.
  */
-export async function loadProjectMemoryPromptBlock(input: {
+export function memoryRepositoryForRequest(input: {
   action: AIAction;
   pageContext?: PageContext | null;
   lastReviewContext?: PageContext | null;
   bindingRepository?: string | null;
-}): Promise<string> {
-  if (!shouldPackProjectMemory(input.action)) {
-    return '';
-  }
-  const capability = capabilityForAiAction(input.action);
-  if (!capability) {
-    return '';
+}): string | null {
+  if (!capabilityForAiAction(input.action)) {
+    return null;
   }
   const repo = resolveGithubOwnerRepo(input);
-  if (!repo) {
-    return '';
-  }
-  const paths =
-    pathHintsFromContext(input.pageContext) ?? pathHintsFromContext(input.lastReviewContext);
-  const summary = await useProjectMemoryStore.getState().fetchSummary(repo.owner, repo.repo, {
-    capability,
-    paths,
-  });
-  if (!summary) {
-    return '';
-  }
-  return formatProjectMemoryForPrompt(summary);
-}
-
-/** Prepend memory block to user text when non-empty. */
-export function prependProjectMemoryBlock(text: string, memoryBlock: string): string {
-  const block = memoryBlock.trim();
-  if (!block) {
-    return text;
-  }
-  if (text.includes('PROJECT_MEMORY')) {
-    return text;
-  }
-  return `${block}\n\n${text}`;
+  return repo ? `${repo.owner}/${repo.repo}` : null;
 }
 
 export const useProjectMemoryStore = create<ProjectMemoryStoreState>((set, get) => ({
@@ -296,7 +225,11 @@ export const useProjectMemoryStore = create<ProjectMemoryStoreState>((set, get) 
       set({
         learning: false,
         error:
-          err instanceof ProjectMemoryApiError ? err.message : 'Unable to learn project memory.',
+          err instanceof ProjectMemoryApiError && err.statusCode === 403
+            ? 'Only workspace Owners and Admins can learn project context.'
+            : err instanceof ProjectMemoryApiError
+              ? err.message
+              : 'Unable to learn project memory.',
       });
       return null;
     }

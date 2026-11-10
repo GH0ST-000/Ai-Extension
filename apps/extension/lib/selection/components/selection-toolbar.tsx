@@ -294,7 +294,7 @@ export function SelectionToolbar() {
       return;
     }
     useSelectionToolbarStore.setState({ selectedText: launch.text });
-    void startAction(launch.action);
+    void startAction(launch.action, { memoryRepository: launch.memoryRepository ?? null });
   }, [pendingAiLaunch, consumePendingAiLaunch, startAction]);
 
   useEffect(() => {

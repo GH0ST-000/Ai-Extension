@@ -25,8 +25,9 @@ import type { ExecuteAiActionDto } from './dto/execute-ai-action.dto';
 import type { AiActionRequest } from './interfaces/ai-prompt-definition.interface';
 import { AiModelFactory } from './models/ai-model.factory';
 import { PromptRegistry } from './prompts/prompt.registry';
-import { responseStyleHint } from './prompts/prompt.utils';
-import { redactSensitiveString } from '@project-x/shared';
+import { neutralizeProjectMemoryMarkers, responseStyleHint } from './prompts/prompt.utils';
+import { memoryCapabilityForAiAction, redactSensitiveString } from '@project-x/shared';
+import { ProjectMemoryService } from '../project-memory/project-memory.service';
 
 export interface AiTextStreamHandle {
   pipeTextStreamToResponse: (response: ServerResponse) => Promise<void>;
@@ -66,6 +67,9 @@ export class AiService {
     @Optional()
     @Inject(forwardRef(() => ReliabilityService))
     private readonly reliability?: ReliabilityService,
+    @Optional()
+    @Inject(forwardRef(() => ProjectMemoryService))
+    private readonly projectMemory?: ProjectMemoryService,
   ) {}
 
   async generateAction(userId: string, input: ExecuteAiActionDto): Promise<string> {
@@ -391,15 +395,20 @@ export class AiService {
       ...(input.executionId ? { idempotencyKey: `ai:${input.executionId}:${request.action}` } : {}),
     });
 
-    const prompt = this.promptRegistry.build(request);
+    const built = this.promptRegistry.build(request);
     const promptName = this.promptRegistry.registryNameFor(request.action);
+    const memory = await this.loadProjectMemory(userId, workspaceId, input);
+    const prompt = { ...built, messages: this.withTrustedMemory(built.messages, memory?.block) };
 
-    let contextVersions: ResolvedAiRun['contextVersions'] = {};
+    let contextVersions: ResolvedAiRun['contextVersions'] = memory
+      ? { memoryVersion: memory.version }
+      : {};
     if (input.executionId && this.reliability) {
       try {
         const detail = await this.reliability.getExecution(userId, input.executionId);
         const ctx = detail.contextVersion;
         contextVersions = {
+          ...contextVersions,
           ...(ctx.memoryVersion ? { memoryVersion: ctx.memoryVersion } : {}),
           ...(ctx.systemContextVersion ? { systemContextVersion: ctx.systemContextVersion } : {}),
           ...(ctx.openapiHash ? { openapiVersion: ctx.openapiHash } : {}),
@@ -426,6 +435,76 @@ export class AiService {
 
   private clampTokens(userTokens: number): number {
     return Math.min(2000, Math.max(150, userTokens));
+  }
+
+  /**
+   * Project memory for memory-aware actions, loaded and authorized server-side on every
+   * request. The client only names the repository; it never supplies memory text.
+   */
+  private async loadProjectMemory(
+    userId: string,
+    workspaceId: string,
+    input: ExecuteAiActionDto,
+  ): Promise<{ block: string; version: string } | null> {
+    const capability = memoryCapabilityForAiAction(input.action);
+    if (!capability || !this.projectMemory) {
+      return null;
+    }
+    const github = input.context?.github;
+    const [owner, repository] = input.memoryRepository
+      ? input.memoryRepository.split('/')
+      : [github?.owner ?? undefined, github?.repository ?? undefined];
+    if (!owner || !repository) {
+      return null;
+    }
+    const paths = [
+      ...(github?.filePath ? [github.filePath] : []),
+      ...(github?.changedFiles ?? []).map((file) => file.path).filter(Boolean),
+    ].slice(0, 24);
+    try {
+      return await this.projectMemory.buildPromptContext({
+        userId,
+        workspaceId,
+        owner,
+        repository,
+        capability,
+        paths,
+      });
+    } catch (error) {
+      this.logger.warn({
+        msg: 'ai.project_memory.unavailable',
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Untrusted content must not impersonate project memory: defang look-alikes in every
+   * message, then prepend the server's block (the only trusted memory) to the first one.
+   */
+  private withTrustedMemory(
+    messages: ResolvedAiRun['messages'],
+    memoryBlock: string | undefined,
+  ): ResolvedAiRun['messages'] {
+    let prepended = false;
+    return messages.map((message) => {
+      if (message.role !== 'user') {
+        return message;
+      }
+      const prefix = !prepended && memoryBlock ? `${memoryBlock}\n\n` : '';
+      prepended = prepended || Boolean(prefix);
+      if (typeof message.content === 'string') {
+        return { ...message, content: prefix + neutralizeProjectMemoryMarkers(message.content) };
+      }
+      const parts = message.content.map((part) =>
+        part.type === 'text' ? { ...part, text: neutralizeProjectMemoryMarkers(part.text) } : part,
+      );
+      return {
+        ...message,
+        content: prefix ? [{ type: 'text' as const, text: prefix.trimEnd() }, ...parts] : parts,
+      };
+    });
   }
 
   private toRequest(input: ExecuteAiActionDto, includePageContext: boolean): AiActionRequest {

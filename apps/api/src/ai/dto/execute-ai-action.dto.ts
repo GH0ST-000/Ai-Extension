@@ -13,6 +13,7 @@ import {
   ValidateNested,
   IsEnum,
   IsNumber,
+  Matches,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { AIAction, PAGE_CONTEXT_TYPES } from '@project-x/types';
@@ -385,6 +386,16 @@ export class ExecuteAiActionDto {
   @IsString()
   @MaxLength(128)
   executionId?: string | null;
+
+  /** `owner/repo` whose project memory applies. The server loads and authorizes memory. */
+  @Transform(emptyToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(201)
+  @Matches(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/, {
+    message: 'memoryRepository must be owner/repo',
+  })
+  memoryRepository?: string | null;
 }
 
 export class ErrorClassificationDto {

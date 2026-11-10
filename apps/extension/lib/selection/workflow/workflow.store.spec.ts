@@ -266,7 +266,7 @@ describe('workflow.store', () => {
     expect(state.session).toBeNull();
   });
 
-  it('includes project memory in planning prompt when github is bound', async () => {
+  it('does not pack project memory into the planning prompt; names the bound repo for the server', async () => {
     useWorkflowSessionStore.getState().setGoal('Review this PR for alignment');
     await useWorkflowSessionStore.getState().requestPlan({
       pageSnapshot: {
@@ -284,7 +284,9 @@ describe('workflow.store', () => {
 
     const launch = useWorkflowSessionStore.getState().pendingAiLaunch;
     expect(launch?.action).toBe(AIAction.PLAN_DEVELOPER_WORKFLOW);
-    expect(launch?.text).toContain('PROJECT_MEMORY');
-    expect(launch?.text).toContain('Never merge from the agent');
+    // H1: memory text never travels in client-built (untrusted) prompt text.
+    expect(launch?.text).not.toContain('PROJECT_MEMORY');
+    expect(launch?.text).not.toContain('Never merge from the agent');
+    expect(launch?.memoryRepository).toBe('acme/api');
   });
 });

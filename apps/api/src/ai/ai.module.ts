@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
+import { ProjectMemoryModule } from '../project-memory/project-memory.module';
 import { ReliabilityModule } from '../reliability/reliability.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AiController } from './ai.controller';
@@ -9,7 +10,13 @@ import { AiModelFactory } from './models/ai-model.factory';
 import { PromptRegistry } from './prompts/prompt.registry';
 
 @Module({
-  imports: [AuthModule, SettingsModule, forwardRef(() => ReliabilityModule)],
+  imports: [
+    AuthModule,
+    SettingsModule,
+    forwardRef(() => ReliabilityModule),
+    // ProjectMemoryModule → GithubModule → AiModule closes a cycle.
+    forwardRef(() => ProjectMemoryModule),
+  ],
   controllers: [AiController],
   providers: [AiService, PromptRegistry, AiModelFactory],
   exports: [AiService],

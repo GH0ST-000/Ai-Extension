@@ -15,11 +15,7 @@ export type { FetchProjectMemorySummaryOptions } from './project-memory.api';
 export {
   useProjectMemoryStore,
   capabilityForAiAction,
-  shouldPackProjectMemory,
+  memoryRepositoryForRequest,
   resolveGithubOwnerRepo,
-  pathHintsFromContext,
-  loadProjectMemoryPromptBlock,
-  prependProjectMemoryBlock,
-  PROJECT_MEMORY_PROMPT_ACTIONS,
 } from './project-memory.store';
 export type { ProjectMemoryCapability } from './project-memory.store';

@@ -10,7 +10,7 @@ import {
 } from '../editing';
 import { extractPageContext } from '../context/extract-page-context';
 import { markFirstValue } from '../onboarding/onboarding-api';
-import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
+import { memoryRepositoryForRequest } from '../project-memory';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
 import { ERROR_INTELLIGENCE_ACTIONS, USER_FACING_AI_ERROR } from './constants';
 import {
@@ -58,7 +58,12 @@ type SelectionToolbarState = {
   backToMenu: () => void;
   startAction: (
     action: AIAction,
-    options?: { customPrompt?: string; applyTarget?: SuggestFixApplyTarget | null },
+    options?: {
+      customPrompt?: string;
+      applyTarget?: SuggestFixApplyTarget | null;
+      /** `owner/repo` for server-side project memory when the page itself is not that repo. */
+      memoryRepository?: string | null;
+    },
   ) => Promise<void>;
   retry: () => Promise<void>;
   replaceSelection: () => ReplacementResult;
@@ -317,21 +322,24 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         ? redactedSelection.trim().slice(0, MAX_ERROR_TEXT_CHARACTERS)
         : redactedSelection;
 
-      const memoryBlock = await loadProjectMemoryPromptBlock({
-        action,
-        pageContext,
-        lastReviewContext: get().lastReviewContext,
-        bindingRepository:
-          useWorkflowSessionStore.getState().session?.contextBinding.github?.repository ??
-          useEngineeringSessionStore.getState().binding?.github?.repository ??
-          null,
-      });
-      const textWithMemory = prependProjectMemoryBlock(requestText, memoryBlock);
+      // Project memory is loaded server-side; only name the repository it belongs to.
+      const memoryRepository =
+        options?.memoryRepository ??
+        memoryRepositoryForRequest({
+          action,
+          pageContext,
+          lastReviewContext: get().lastReviewContext,
+          bindingRepository:
+            useWorkflowSessionStore.getState().session?.contextBinding.github?.repository ??
+            useEngineeringSessionStore.getState().binding?.github?.repository ??
+            null,
+        });
 
       const finalText = await streamAiAction(
         buildAiRequest({
           action,
-          text: textWithMemory,
+          text: requestText,
+          memoryRepository,
           customPrompt: prompt,
           context: pageContext,
           errorIntelligence,

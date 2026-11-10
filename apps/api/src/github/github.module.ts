@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 import { AiModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
@@ -13,7 +13,7 @@ import { GithubReviewService } from './github-review.service';
 import { GithubWriteService } from './github-write.service';
 
 @Module({
-  imports: [AuthModule, SettingsModule, GithubAppModule, AiModule],
+  imports: [AuthModule, SettingsModule, GithubAppModule, forwardRef(() => AiModule)],
   controllers: [GithubController],
   providers: [
     GithubWriteService,

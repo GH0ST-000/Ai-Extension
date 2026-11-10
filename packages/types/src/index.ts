@@ -595,6 +595,11 @@ export interface ExecuteAiActionRequest {
   errorIntelligence?: ErrorIntelligenceContext | null;
   /** Day 24 — optional reliability execution linkage for AI audit snapshots. */
   executionId?: string | null;
+  /**
+   * `owner/repo` whose project memory applies to this request. An identifier only: the
+   * server loads, authorizes and formats the memory itself. Clients never send memory text.
+   */
+  memoryRepository?: string | null;
 }
 
 export interface ExecuteAiActionResponse {

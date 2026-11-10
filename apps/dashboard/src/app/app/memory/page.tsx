@@ -25,6 +25,7 @@ import {
   updateProjectMemory,
 } from '../../../lib/api';
 import { StudioSelect } from '../../../components/studio-select';
+import { useWorkspace } from '../../../lib/workspace-context';
 
 const CATEGORY_LABELS: Record<ProjectMemoryCategory, string> = {
   ARCHITECTURE: 'Architecture',
@@ -56,6 +57,18 @@ const CONFIDENCE_STYLES: Record<ProjectMemoryConfidence, string> = {
 
 function apiMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
+}
+
+const MANAGE_DENIED_MESSAGE =
+  'Your role in this workspace can no longer manage shared project memory. Ask an Owner or Admin.';
+
+function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.statusCode === 403;
+}
+
+/** Shared rules need memory:manage; personal preferences belong to their author. */
+function isPersonalItem(item: { category: ProjectMemoryCategory }): boolean {
+  return item.category === Categories.USER_PREFERENCE;
 }
 
 function formatCategory(category: ProjectMemoryCategory): string {
@@ -97,6 +110,9 @@ function profileChipCounts(profile: ProjectProfile | null): { label: string; cou
 function MemoryPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  // UI gating only — the API enforces the same permissions.
+  const { hasPermission, refresh: refreshWorkspace } = useWorkspace();
+  const canManage = hasPermission('memory:manage');
   const [owner, setOwner] = useState(() => searchParams.get('owner')?.trim() ?? '');
   const [repo, setRepo] = useState(() => searchParams.get('repo')?.trim() ?? '');
   const [items, setItems] = useState<ProjectMemoryItem[]>([]);
@@ -210,6 +226,16 @@ function MemoryPageContent() {
     }
   }, [canQuery, ownerTrimmed, repoTrimmed, syncRepoToUrl]);
 
+  /** Mutation failure: explain a 403 (role changed mid-session) and refresh permissions. */
+  function onMutationError(err: unknown, fallback: string) {
+    if (isForbidden(err)) {
+      setError(MANAGE_DENIED_MESSAGE);
+      void refreshWorkspace();
+      return;
+    }
+    setError(apiMessage(err, fallback));
+  }
+
   async function onLoad(event?: FormEvent) {
     event?.preventDefault();
     if (!canQuery) {
@@ -241,7 +267,7 @@ function MemoryPageContent() {
       );
       await refresh();
     } catch (err) {
-      setError(apiMessage(err, 'Unable to learn project context.'));
+      onMutationError(err, 'Unable to learn project context.');
     } finally {
       setLearning(false);
     }
@@ -264,7 +290,7 @@ function MemoryPageContent() {
       setMessage('Project rule saved.');
       await refresh();
     } catch (err) {
-      setError(apiMessage(err, 'Unable to create project rule.'));
+      onMutationError(err, 'Unable to create project rule.');
     } finally {
       setCreating(false);
     }
@@ -282,7 +308,7 @@ function MemoryPageContent() {
       setMessage(status === 'archived' ? 'Memory archived.' : 'Memory marked disputed.');
       await refresh();
     } catch (err) {
-      setError(apiMessage(err, 'Unable to update memory.'));
+      onMutationError(err, 'Unable to update memory.');
     } finally {
       setBusyId(null);
     }
@@ -303,7 +329,7 @@ function MemoryPageContent() {
       setMessage(`Cleared ${result.archived} memor${result.archived === 1 ? 'y' : 'ies'}.`);
       await refresh();
     } catch (err) {
-      setError(apiMessage(err, 'Unable to clear project memory.'));
+      onMutationError(err, 'Unable to clear project memory.');
     } finally {
       setClearing(false);
     }
@@ -321,7 +347,7 @@ function MemoryPageContent() {
       setMessage('Candidate remembered.');
       await refresh();
     } catch (err) {
-      setError(apiMessage(err, 'Unable to confirm candidate.'));
+      onMutationError(err, 'Unable to confirm candidate.');
     } finally {
       setBusyId(null);
     }
@@ -338,20 +364,29 @@ function MemoryPageContent() {
       setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
       setMessage('Candidate dismissed.');
     } catch (err) {
-      setError(apiMessage(err, 'Unable to reject candidate.'));
+      onMutationError(err, 'Unable to reject candidate.');
     } finally {
       setBusyId(null);
     }
   }
 
+  // Members may only save personal preferences; shared categories need memory:manage.
   const categoryOptions = useMemo(
     () =>
-      EXPLICIT_PROJECT_RULE_CATEGORIES.map((category) => ({
+      EXPLICIT_PROJECT_RULE_CATEGORIES.filter(
+        (category) => canManage || category === Categories.USER_PREFERENCE,
+      ).map((category) => ({
         value: category,
         label: formatCategory(category),
       })),
-    [],
+    [canManage],
   );
+
+  useEffect(() => {
+    if (!canManage && ruleCategory !== Categories.USER_PREFERENCE) {
+      setRuleCategory(Categories.USER_PREFERENCE);
+    }
+  }, [canManage, ruleCategory]);
 
   const emptyLearned = loaded && !loading && activeItems.length === 0 && !error;
 
@@ -416,7 +451,12 @@ function MemoryPageContent() {
             </button>
             <button
               type="button"
-              disabled={learning || !canQuery}
+              disabled={learning || !canQuery || !canManage}
+              title={
+                canManage
+                  ? undefined
+                  : 'Only workspace Owners and Admins can learn project context.'
+              }
               onClick={() => {
                 void onLearn();
               }}
@@ -509,28 +549,34 @@ function MemoryPageContent() {
                           {item.value.summary}
                         </p>
                       </div>
-                      <div className="flex shrink-0 flex-wrap gap-2">
-                        <button
-                          type="button"
-                          disabled={busyId === item.id}
-                          onClick={() => {
-                            void onStatus(item, 'archived');
-                          }}
-                          className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
-                        >
-                          Archive
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId === item.id}
-                          onClick={() => {
-                            void onStatus(item, 'disputed');
-                          }}
-                          className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
-                        >
-                          Dispute
-                        </button>
-                      </div>
+                      {canManage || isPersonalItem(item) ? (
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={busyId === item.id}
+                            onClick={() => {
+                              void onStatus(item, 'archived');
+                            }}
+                            className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                          >
+                            Archive
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === item.id}
+                            onClick={() => {
+                              void onStatus(item, 'disputed');
+                            }}
+                            className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                          >
+                            Dispute
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="shrink-0 text-xs text-muted-foreground">
+                          Managed by Owners and Admins
+                        </p>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -577,7 +623,12 @@ function MemoryPageContent() {
                   <div className="flex shrink-0 flex-wrap gap-2">
                     <button
                       type="button"
-                      disabled={busyId === candidate.id}
+                      disabled={busyId === candidate.id || !canManage}
+                      title={
+                        canManage
+                          ? undefined
+                          : 'Only workspace Owners and Admins can save shared memory.'
+                      }
                       onClick={() => {
                         void onRemember(candidate);
                       }}
@@ -618,6 +669,12 @@ function MemoryPageContent() {
               onChange={setRuleCategory}
               className="sm:max-w-xs"
             />
+            {!canManage ? (
+              <p className="text-xs text-muted-foreground">
+                Your role can save personal preferences, which apply only to your own reviews.
+                Shared project rules are managed by workspace Owners and Admins.
+              </p>
+            ) : null}
             <div>
               <label htmlFor="rule-text" className="text-sm font-semibold text-ink">
                 Rule
@@ -639,7 +696,7 @@ function MemoryPageContent() {
               disabled={creating || !canQuery || ruleText.trim().length === 0}
               className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
             >
-              {creating ? 'Saving…' : 'Save rule'}
+              {creating ? 'Saving…' : canManage ? 'Save rule' : 'Save preference'}
             </button>
           </div>
         </form>
@@ -653,7 +710,11 @@ function MemoryPageContent() {
           <p className="text-sm text-muted-foreground">
             Archives all memory for this repository. Requires an explicit confirmation.
           </p>
-          {!showClearDialog ? (
+          {!canManage ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Only workspace Owners and Admins can clear shared project memory.
+            </p>
+          ) : !showClearDialog ? (
             <button
               type="button"
               disabled={!canQuery || !loaded}

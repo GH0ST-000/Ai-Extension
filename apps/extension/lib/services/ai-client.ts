@@ -157,6 +157,7 @@ export function buildAiRequest(input: {
   context?: PageContext | null;
   errorIntelligence?: ErrorIntelligenceContext | null;
   executionId?: string | null;
+  memoryRepository?: string | null;
 }): ExecuteAiActionRequest {
   return {
     action: input.action,
@@ -166,5 +167,6 @@ export function buildAiRequest(input: {
     context: input.context ?? null,
     errorIntelligence: input.errorIntelligence ?? null,
     ...(input.executionId ? { executionId: input.executionId } : {}),
+    ...(input.memoryRepository ? { memoryRepository: input.memoryRepository } : {}),
   };
 }

@@ -52,6 +52,7 @@ describe('ProjectMemoryService', () => {
     user: {
       findUnique: vi.fn(),
     },
+    $transaction: vi.fn(),
     workspaceMembership: {
       findFirst: vi.fn(),
     },
@@ -94,18 +95,21 @@ describe('ProjectMemoryService', () => {
       async ({ data }: { data: Record<string, unknown> }) =>
         memoryRow({ ...data, id: 'mem-1', updatedAt: new Date() }),
     );
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     redis.set.mockResolvedValue('OK');
     redis.get.mockResolvedValue(null);
     redis.del.mockResolvedValue(1);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.workspaceMembership.findFirst.mockResolvedValue(null);
     const featureGate = { require: vi.fn(async () => undefined) };
+    const workspaceAuthorization = { assertAccess: vi.fn(async () => ({ role: 'owner' })) };
     service = new ProjectMemoryService(
       prisma as never,
       redis as never,
       githubConnections as never,
       githubContent as never,
       featureGate as never,
+      workspaceAuthorization as never,
     );
   });
 

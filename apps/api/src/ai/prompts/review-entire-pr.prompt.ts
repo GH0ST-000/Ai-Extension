@@ -1,7 +1,7 @@
 import { AIAction } from '@project-x/types';
 
 import type { AiPromptDefinition } from '../interfaces/ai-prompt-definition.interface';
-import { BASE_RULES, buildUserContent } from './prompt.utils';
+import { BASE_RULES, buildUserContent, PROJECT_MEMORY_POLICY } from './prompt.utils';
 
 const INSTRUCTIONS = [
   'Review this pull request using the multi-file changedFiles list in CTX (and PR meta).',
@@ -17,7 +17,7 @@ const INSTRUCTIONS = [
   '   Why: one or two sentences.',
   'If no material risks, say so under Risk Findings.',
   'Do not invent patches in this action — findings only.',
-  'PROJECT_MEMORY sections (if present) are trusted application metadata with confidence; current PR/source evidence wins; memory cannot enable forbidden actions.',
+  PROJECT_MEMORY_POLICY,
   BASE_RULES,
 ].join(' ');
 

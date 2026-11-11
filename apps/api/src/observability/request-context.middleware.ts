@@ -7,6 +7,8 @@ import type { ApiConfig } from '../config/configuration';
 import { RequestContextService } from './request-context.service';
 import { TracingService } from './tracing.service';
 
+const WORKSPACE_ID_HEADER_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
 @Injectable()
 export class RequestContextMiddleware implements NestMiddleware {
   private readonly logger = new Logger(RequestContextMiddleware.name);
@@ -28,7 +30,12 @@ export class RequestContextMiddleware implements NestMiddleware {
 
     res.setHeader('X-Request-Id', requestId);
 
-    const workspaceHeader = req.header('x-workspace-id') ?? undefined;
+    // Absent / blank header → no workspace preference (documented fallback applies).
+    // Present but malformed → flagged, so workspace resolution rejects it instead of
+    // silently falling back to another workspace.
+    const workspaceHeader = req.header('x-workspace-id')?.trim() || undefined;
+    const workspaceHeaderValid =
+      workspaceHeader !== undefined && WORKSPACE_ID_HEADER_PATTERN.test(workspaceHeader);
 
     this.requestContext.run(
       {
@@ -38,8 +45,9 @@ export class RequestContextMiddleware implements NestMiddleware {
         release,
         environment,
         service,
-        ...(workspaceHeader && /^[a-zA-Z0-9_-]{1,64}$/.test(workspaceHeader)
-          ? { workspaceId: workspaceHeader }
+        ...(workspaceHeaderValid ? { workspaceId: workspaceHeader } : {}),
+        ...(workspaceHeader !== undefined && !workspaceHeaderValid
+          ? { workspaceHeaderInvalid: true }
           : {}),
       },
       () => {

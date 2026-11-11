@@ -19,6 +19,7 @@ import {
   confirmMemoryCandidate,
   createProjectMemoryRule,
   getProjectMemoryProfile,
+  isWorkspaceSelectionError,
   learnProjectMemory,
   listProjectMemory,
   rejectMemoryCandidate,
@@ -62,8 +63,35 @@ function apiMessage(err: unknown, fallback: string): string {
 const MANAGE_DENIED_MESSAGE =
   'Your role in this workspace can no longer manage shared project memory. Ask an Owner or Admin.';
 
+const WORKSPACE_SELECTION_MESSAGE =
+  'The selected workspace is no longer available to you. Nothing was changed. Your workspace list has been refreshed — check the workspace switcher and try again.';
+
 function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && err.statusCode === 403;
+}
+
+/** Active and archived lists are fetched separately; archived rules never mix into active. */
+async function fetchMemory(owner: string, repo: string) {
+  const [list, archived, profile] = await Promise.all([
+    listProjectMemory(owner, repo),
+    listProjectMemory(owner, repo, 'archived'),
+    getProjectMemoryProfile(owner, repo),
+  ]);
+  return { list, archived: archived.items, profile };
+}
+
+/** Same (category, key, scope) slot — reactivating supersedes the rule currently in it. */
+function sameSlot(a: ProjectMemoryItem, b: ProjectMemoryItem): boolean {
+  return (
+    a.category === b.category &&
+    a.key === b.key &&
+    JSON.stringify(a.scope) === JSON.stringify(b.scope)
+  );
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
 }
 
 /** Shared rules need memory:manage; personal preferences belong to their author. */
@@ -116,6 +144,8 @@ function MemoryPageContent() {
   const [owner, setOwner] = useState(() => searchParams.get('owner')?.trim() ?? '');
   const [repo, setRepo] = useState(() => searchParams.get('repo')?.trim() ?? '');
   const [items, setItems] = useState<ProjectMemoryItem[]>([]);
+  const [archivedItems, setArchivedItems] = useState<ProjectMemoryItem[]>([]);
+  const [confirmReactivateId, setConfirmReactivateId] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProjectProfile | null>(null);
   const [candidates, setCandidates] = useState<ProjectMemoryCandidate[]>([]);
   const [memoryVersion, setMemoryVersion] = useState<string | null>(null);
@@ -142,6 +172,26 @@ function MemoryPageContent() {
   const grouped = useMemo(() => groupByCategory(activeItems), [activeItems]);
   const chips = useMemo(() => profileChipCounts(profile), [profile]);
 
+  /**
+   * The API rejected the selected workspace (stale, removed, or invalid) instead of silently
+   * using another one. Re-bootstrap so the switcher reflects a workspace the user can access.
+   */
+  const onWorkspaceSelectionError = useCallback(() => {
+    setError(WORKSPACE_SELECTION_MESSAGE);
+    void refreshWorkspace().catch(() => undefined);
+  }, [refreshWorkspace]);
+
+  const onLoadError = useCallback(
+    (err: unknown) => {
+      if (isWorkspaceSelectionError(err)) {
+        onWorkspaceSelectionError();
+        return;
+      }
+      setError(apiMessage(err, 'Unable to load project memory.'));
+    },
+    [onWorkspaceSelectionError],
+  );
+
   useEffect(() => {
     const qOwner = searchParams.get('owner')?.trim() ?? '';
     const qRepo = searchParams.get('repo')?.trim() ?? '';
@@ -155,24 +205,23 @@ function MemoryPageContent() {
       setLoading(true);
       setError(null);
       try {
-        const [list, nextProfile] = await Promise.all([
-          listProjectMemory(qOwner, qRepo),
-          getProjectMemoryProfile(qOwner, qRepo),
-        ]);
+        const next = await fetchMemory(qOwner, qRepo);
         if (cancelled) {
           return;
         }
-        setItems(list.items);
-        setMemoryVersion(list.memoryVersion);
-        setProfile(nextProfile);
+        setItems(next.list.items);
+        setArchivedItems(next.archived);
+        setMemoryVersion(next.list.memoryVersion);
+        setProfile(next.profile);
         setLoaded(true);
       } catch (err) {
         if (!cancelled) {
           setLoaded(true);
           setItems([]);
+          setArchivedItems([]);
           setProfile(null);
           setMemoryVersion(null);
-          setError(apiMessage(err, 'Unable to load project memory.'));
+          onLoadError(err);
         }
       } finally {
         if (!cancelled) {
@@ -185,7 +234,7 @@ function MemoryPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, [searchParams, onLoadError]);
 
   const syncRepoToUrl = useCallback(
     (nextOwner: string, nextRepo: string) => {
@@ -206,28 +255,31 @@ function MemoryPageContent() {
     setError(null);
     setMessage(null);
     try {
-      const [list, nextProfile] = await Promise.all([
-        listProjectMemory(ownerTrimmed, repoTrimmed),
-        getProjectMemoryProfile(ownerTrimmed, repoTrimmed),
-      ]);
-      setItems(list.items);
-      setMemoryVersion(list.memoryVersion);
-      setProfile(nextProfile);
+      const next = await fetchMemory(ownerTrimmed, repoTrimmed);
+      setItems(next.list.items);
+      setArchivedItems(next.archived);
+      setMemoryVersion(next.list.memoryVersion);
+      setProfile(next.profile);
       setLoaded(true);
       syncRepoToUrl(ownerTrimmed, repoTrimmed);
     } catch (err) {
       setLoaded(true);
       setItems([]);
+      setArchivedItems([]);
       setProfile(null);
       setMemoryVersion(null);
-      setError(apiMessage(err, 'Unable to load project memory.'));
+      onLoadError(err);
     } finally {
       setLoading(false);
     }
-  }, [canQuery, ownerTrimmed, repoTrimmed, syncRepoToUrl]);
+  }, [canQuery, ownerTrimmed, repoTrimmed, syncRepoToUrl, onLoadError]);
 
   /** Mutation failure: explain a 403 (role changed mid-session) and refresh permissions. */
   function onMutationError(err: unknown, fallback: string) {
+    if (isWorkspaceSelectionError(err)) {
+      onWorkspaceSelectionError();
+      return;
+    }
     if (isForbidden(err)) {
       setError(MANAGE_DENIED_MESSAGE);
       void refreshWorkspace();
@@ -309,6 +361,27 @@ function MemoryPageContent() {
       await refresh();
     } catch (err) {
       onMutationError(err, 'Unable to update memory.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Archived → active. The API re-checks role (shared rules) or authorship (preferences). */
+  async function onReactivate(item: ProjectMemoryItem) {
+    if (!canQuery || item.status !== 'archived') {
+      return;
+    }
+    setBusyId(item.id);
+    setError(null);
+    setMessage(null);
+    try {
+      await updateProjectMemory(ownerTrimmed, repoTrimmed, item.id, { status: 'active' });
+      setConfirmReactivateId(null);
+      setMessage('Memory reactivated.');
+      await refresh();
+    } catch (err) {
+      setConfirmReactivateId(null);
+      onMutationError(err, 'Unable to reactivate memory.');
     } finally {
       setBusyId(null);
     }
@@ -589,6 +662,131 @@ function MemoryPageContent() {
           </div>
         ) : null}
       </section>
+
+      {loaded ? (
+        <section className="rise-in-delay-2 space-y-3" aria-labelledby="archived-memory-heading">
+          <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+            <h2
+              id="archived-memory-heading"
+              className="font-display text-lg font-semibold tracking-tight"
+            >
+              Archived memory
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {archivedItems.length} archived item{archivedItems.length === 1 ? '' : 's'}
+            </p>
+          </div>
+
+          {archivedItems.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-line bg-panel/40 px-5 py-6 text-sm text-muted-foreground">
+              No archived memory. Archived rules are kept here and are never sent to AI until
+              reactivated.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">
+              <p className="border-b border-line/80 px-5 py-3 text-xs text-muted-foreground">
+                Archived rules are excluded from AI context.{' '}
+                {canManage
+                  ? 'Reactivating a shared rule applies it to every workspace member again.'
+                  : 'You can reactivate your own preferences. Shared rules are reactivated by Owners and Admins.'}
+              </p>
+              <ul className="divide-y divide-line/80">
+                {archivedItems.map((item) => {
+                  const canReactivate = canManage || isPersonalItem(item);
+                  const replaces = activeItems.find((active) => sameSlot(active, item));
+                  const confirming = confirmReactivateId === item.id;
+                  const archivedOn = formatDate(item.updatedAt);
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-ink">{item.key}</p>
+                          <span className="rounded-lg border border-line bg-mist px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {formatCategory(item.category)}
+                          </span>
+                          <span className="rounded-lg border border-line bg-panel px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Archived
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                          {item.value.summary}
+                        </p>
+                        {archivedOn ? (
+                          <p className="mt-1 text-xs text-muted-foreground/90">
+                            Last updated {archivedOn}
+                          </p>
+                        ) : null}
+                        {confirming ? (
+                          <div
+                            role="alertdialog"
+                            aria-label={`Reactivate ${item.key}`}
+                            className="mt-3 space-y-3 rounded-2xl border border-line bg-mist/60 p-3"
+                          >
+                            <p className="text-sm text-ink">
+                              {replaces ? (
+                                <>
+                                  This replaces the active rule{' '}
+                                  <span className="font-semibold">“{replaces.value.summary}”</span>,
+                                  which will be marked superseded.
+                                </>
+                              ) : isPersonalItem(item) ? (
+                                'This preference will apply to your own reviews again.'
+                              ) : (
+                                'This rule will be included in AI context for every member of this workspace.'
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={busyId === item.id}
+                                onClick={() => {
+                                  void onReactivate(item);
+                                }}
+                                className="rounded-xl bg-ink px-3 py-1.5 text-xs font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
+                              >
+                                {busyId === item.id ? 'Reactivating…' : 'Confirm reactivate'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busyId === item.id}
+                                onClick={() => setConfirmReactivateId(null)}
+                                className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      {canReactivate ? (
+                        confirming ? null : (
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={busyId !== null}
+                              onClick={() => setConfirmReactivateId(item.id)}
+                              className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
+                            >
+                              Reactivate
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <p className="shrink-0 text-xs text-muted-foreground">
+                          Managed by Owners and Admins
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {candidates.length > 0 ? (
         <section className="rise-in-delay-2 space-y-3">

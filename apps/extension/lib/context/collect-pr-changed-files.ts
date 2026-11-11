@@ -14,16 +14,31 @@ export type CollectChangedFilesResult = {
   truncated: boolean;
 };
 
+/** Attributes GitHub's classic and React diff views use to carry a file path. */
+const PATH_ATTRS = ['data-path', 'data-tagsearch-path', 'data-file-path'] as const;
+const PATH_ATTR_SELECTOR = PATH_ATTRS.map((attr) => `[${attr}]`).join(', ');
+
+function readPathAttr(el: Element | null | undefined): string | undefined {
+  if (!el) return undefined;
+  for (const attr of PATH_ATTRS) {
+    const value = el.getAttribute(attr)?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
 function readFilePathFromContainer(container: Element): string | undefined {
   const pathEl =
-    container.querySelector('[data-path]') ||
+    container.querySelector(PATH_ATTR_SELECTOR) ||
     container.querySelector('a[title][href*="/blob/"], a[title][href*="/pull/"]') ||
     container.querySelector('.file-info a') ||
     container.querySelector('.Truncate-text') ||
-    container.querySelector('[class*="DiffFileHeader"] a');
+    container.querySelector('[class*="DiffFileHeader"] a') ||
+    // React "Files changed" view: header link to the file anchor, path in <code>.
+    container.querySelector('h3 a[href^="#diff-"], [class*="file-header"] a[href^="#diff-"]') ||
+    container.querySelector('h3 code');
 
-  const fromAttr =
-    container.getAttribute('data-path')?.trim() || pathEl?.getAttribute?.('data-path')?.trim();
+  const fromAttr = readPathAttr(container) || readPathAttr(pathEl);
   if (fromAttr) {
     return fromAttr;
   }
@@ -33,7 +48,11 @@ function readFilePathFromContainer(container: Element): string | undefined {
     return title;
   }
 
-  const text = pathEl?.textContent?.replace(/\s+/g, ' ').trim();
+  // Strip invisible direction marks GitHub wraps around paths in the React view.
+  const text = pathEl?.textContent
+    ?.replace(/[‎‏‪-‮]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text && text.includes('/') && text.length < 400) {
     return text;
   }
@@ -41,10 +60,20 @@ function readFilePathFromContainer(container: Element): string | undefined {
   return undefined;
 }
 
+function diffMarker(el: Element): string {
+  const row = el.closest('td, .blob-code, [data-code-marker], .diff-text-cell');
+  const marker = row?.getAttribute('data-code-marker');
+  if (marker) return marker;
+  const classes = `${row?.className ?? ''} ${el.className ?? ''}`;
+  if (/\b(blob-code-addition|addition)\b/.test(classes)) return '+';
+  if (/\b(blob-code-deletion|deletion)\b/.test(classes)) return '-';
+  return '';
+}
+
 function readExcerptFromContainer(container: Element): string | undefined {
   const lineNodes = Array.from(
     container.querySelectorAll(
-      '.blob-code-inner, td.blob-code-addition, td.blob-code-deletion, [data-code-text]',
+      '.blob-code-inner, td.blob-code-addition, td.blob-code-deletion, [data-code-text], .diff-text-cell code, code.diff-text',
     ),
   ).slice(0, MAX_PR_FILE_LINES);
 
@@ -53,14 +82,7 @@ function readExcerptFromContainer(container: Element): string | undefined {
   }
 
   const preferDiff = lineNodes.filter((el) => {
-    const row = el.closest('td, .blob-code, [data-code-marker]');
-    const marker =
-      row?.getAttribute('data-code-marker') ||
-      (row?.classList.contains('blob-code-addition')
-        ? '+'
-        : row?.classList.contains('blob-code-deletion')
-          ? '-'
-          : '');
+    const marker = diffMarker(el);
     const text = el.textContent ?? '';
     return marker === '+' || marker === '-' || /^[+-]/.test(text.trim());
   });
@@ -87,14 +109,18 @@ export function collectPullRequestChangedFiles(
 ): CollectChangedFilesResult {
   const containers = Array.from(
     root.querySelectorAll(
-      '.js-file, .file.js-file, [data-file-type], .js-diff-progressive-container .file, diff-layout .file',
+      '.js-file, .file.js-file, [data-file-type], .js-diff-progressive-container .file, diff-layout .file, [data-tagsearch-path], div[data-file-path], div[id^="diff-"]',
     ),
   );
 
-  // Fallback: unique data-path headers without full file containers.
-  const pathOnly = Array.from(root.querySelectorAll('[data-path]'))
-    .map((el) => el.getAttribute('data-path')?.trim())
-    .filter((value): value is string => Boolean(value));
+  // Fallback: unique path headers without full file containers.
+  const pathOnly = [
+    ...new Set(
+      Array.from(root.querySelectorAll(PATH_ATTR_SELECTOR))
+        .map((el) => readPathAttr(el))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
 
   const seen = new Set<string>();
   const files: PageContextChangedFile[] = [];
@@ -132,40 +158,42 @@ export function collectPullRequestChangedFiles(
     files.push(entry);
   };
 
-  if (containers.length > 0) {
-    for (const container of containers) {
-      if (files.length >= MAX_PR_CHANGED_FILES) {
-        truncated = true;
-        break;
-      }
-      const path = readFilePathFromContainer(container);
-      if (!path) {
-        continue;
-      }
-      tryAdd(path, readExcerptFromContainer(container));
-      if (totalChars >= MAX_PR_CHANGED_FILES_TOTAL_CHARS) {
-        truncated = true;
-        break;
-      }
+  for (const container of containers) {
+    if (files.length >= MAX_PR_CHANGED_FILES) {
+      truncated = true;
+      break;
     }
-  } else {
+    const path = readFilePathFromContainer(container);
+    if (!path) {
+      continue;
+    }
+    tryAdd(path, readExcerptFromContainer(container));
+    if (totalChars >= MAX_PR_CHANGED_FILES_TOTAL_CHARS) {
+      truncated = true;
+      break;
+    }
+  }
+
+  // Containers matched but none yielded a path (unknown layout): use header paths so the
+  // review at least knows which files changed, instead of reporting zero files.
+  if (files.length === 0) {
     for (const path of pathOnly) {
       tryAdd(path);
       if (files.length >= MAX_PR_CHANGED_FILES) {
-        truncated = true;
         break;
       }
     }
   }
 
-  const uniqueHeaderPaths = new Set(pathOnly);
-  if (uniqueHeaderPaths.size > files.length) {
+  const unseenHeaderPaths = pathOnly.filter((path) => !seen.has(path));
+  if (files.length > 0 && unseenHeaderPaths.length > 0) {
     truncated = true;
   }
 
   return { files, truncated };
 }
 
+/** PR diff tab: classic `/files` and the newer `/changes` route. */
 export function isPullRequestFilesTab(pathname: string): boolean {
-  return /\/pull\/\d+\/files(?:\/|$)/i.test(pathname);
+  return /\/pull\/\d+\/(?:files|changes)(?:\/|$)/i.test(pathname);
 }

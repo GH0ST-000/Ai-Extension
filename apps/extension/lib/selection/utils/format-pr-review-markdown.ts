@@ -1,5 +1,11 @@
 import type { PRReviewFinding, PRReviewReport } from '@project-x/types';
 
+import { formatFindingsCountLabel, formatReviewedFilesLabel } from './build-pr-review-report';
+
+function riskLabel(report: PRReviewReport): string {
+  return report.completeness?.complete === false ? 'INCOMPLETE' : report.riskLevel.toUpperCase();
+}
+
 export type PrFindingDisposition = 'reviewed' | 'ignored';
 
 export type PrFindingDispositionMap = Readonly<Record<string, PrFindingDisposition>>;
@@ -77,10 +83,10 @@ export function buildPrReviewHandoffSummary(
 
   return [
     `PR ${prLabel} in ${report.repository.owner}/${report.repository.name}`,
-    `Overall risk: ${report.riskLevel.toUpperCase()}`,
-    `Findings: ${report.stats.findings} total · ${report.stats.high} high · ${report.stats.medium} medium · ${report.stats.low} low`,
+    `Overall risk: ${riskLabel(report)}`,
+    `Findings: ${formatFindingsCountLabel(report)} · ${report.stats.high} high · ${report.stats.medium} medium · ${report.stats.low} low`,
     `Session: ${open} open · ${reviewed} reviewed · ${ignored} ignored`,
-    `Files analyzed: ${report.stats.analyzedFiles}${report.reviewScope?.truncated ? ' (truncated scope)' : ''}`,
+    `Files: ${formatReviewedFilesLabel(report)}${report.reviewScope?.truncated ? ' (partial diff)' : ''}`,
   ].join('\n');
 }
 
@@ -101,8 +107,15 @@ export function formatPrReviewMarkdown(
   parts.push(`# Review Report — ${report.repository.owner}/${report.repository.name}`);
   parts.push('');
   parts.push(prHeading);
-  parts.push(`Risk level: **${report.riskLevel.toUpperCase()}**`);
+  parts.push(`Risk level: **${riskLabel(report)}**`);
   parts.push('');
+  if (report.completeness?.complete === false) {
+    parts.push('> **Incomplete review** — do not treat as a clean PR.');
+    for (const reason of report.completeness.reasons) {
+      parts.push(`> - ${reason}`);
+    }
+    parts.push('');
+  }
 
   if (options.includeHandoffSummary !== false) {
     parts.push('## Handoff summary');
@@ -117,12 +130,14 @@ export function formatPrReviewMarkdown(
   parts.push('## Stats');
   parts.push(
     [
-      `- Analyzed files: ${report.stats.analyzedFiles}`,
-      `- Findings: ${report.stats.findings}`,
+      `- Files: ${formatReviewedFilesLabel(report)}`,
+      `- Findings: ${formatFindingsCountLabel(report)}`,
       `- High: ${report.stats.high}`,
       `- Medium: ${report.stats.medium}`,
       `- Low: ${report.stats.low}`,
-      report.reviewScope?.truncated ? '- Scope: truncated (not all files loaded)' : null,
+      report.reviewScope?.truncated
+        ? '- Scope: partial (not every file or line was reviewed)'
+        : null,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -157,8 +172,11 @@ export function buildPrReviewCommentDraft(
   const lines: string[] = [
     `### Project X review — ${report.repository.owner}/${report.repository.name} #${report.pullRequest.number}`,
     '',
-    `**Risk:** ${report.riskLevel.toUpperCase()}`,
+    `**Risk:** ${riskLabel(report)}`,
     '',
+    ...(report.completeness?.complete === false
+      ? ['> Incomplete review — not every risk may be listed.', '']
+      : []),
     report.overview,
     '',
   ];

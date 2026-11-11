@@ -141,6 +141,7 @@ export {
   computeMemoryVersion,
   selectRelevantMemory,
   formatProjectMemoryForPrompt,
+  memoryCapabilityForAiAction,
   buildProjectConstraintContext,
   validateMemoryValue,
   validateScope,
@@ -151,6 +152,7 @@ export {
 export type {
   EvaluateCandidateInput,
   ExtractConfigFile,
+  ProjectMemoryCapability,
   SelectRelevantMemoryOptions,
   ValidateResult,
   ValidatedCreateRule,

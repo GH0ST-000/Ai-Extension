@@ -127,7 +127,79 @@ export interface PageContextGitHub {
   changedFilesTruncated?: boolean;
   /** True when the URL looks like the PR Files tab. */
   filesTab?: boolean;
+  /**
+   * Total files changed in the PR when known (server-side, from the GitHub API).
+   * Distinguishes "N of M reviewed" from an empty diff.
+   */
+  changedFilesTotal?: number;
+  /** Where `changedFiles` came from: GitHub API (authoritative) or the page DOM (best-effort). */
+  changedFilesSource?: PRReviewDiffSource;
 }
+
+/** Origin of the diff a PR review was run on. */
+export type PRReviewDiffSource = 'github_api' | 'page';
+
+/**
+ * Review scope the API actually sent to the model for REVIEW_ENTIRE_PR.
+ * Returned in the `X-PR-Review-Scope` response header (JSON).
+ */
+export interface PRReviewScope {
+  source: PRReviewDiffSource;
+  /** Files changed in the PR, or null when unknown (page fallback). */
+  totalFiles: number | null;
+  /** Files whose diff (or part of it) was sent to the model. */
+  analyzedFiles: number;
+  /** Files listed but not analyzed: over budget, binary, generated, or no patch. */
+  skippedFiles: number;
+  /** True when some files or some diff lines were not sent. */
+  truncated: boolean;
+}
+
+export const PR_REVIEW_SCOPE_HEADER = 'X-PR-Review-Scope';
+
+/** Error code returned (HTTP 422) when no diff could be loaded; the AI is not called. */
+export const PR_DIFF_UNAVAILABLE_CODE = 'PR_DIFF_UNAVAILABLE';
+
+/** Marker the API appends when a PR review stream ended early (token limit / provider error). */
+export const PR_REVIEW_INCOMPLETE_MARKER = '[[px:review-incomplete';
+
+/**
+ * Project memory metadata for an AI response, returned in the `X-Project-Memory` header as
+ * base64url(UTF-8 JSON). Lists only rules the requesting user is authorized to read in the
+ * acting workspace — exactly the rules placed in the prompt.
+ */
+export const PROJECT_MEMORY_METADATA_HEADER = 'X-Project-Memory';
+
+/** Why no project memory reached the prompt. Codes only — never rule text or secrets. */
+export type ProjectMemorySkipReason =
+  | 'no_repository'
+  | 'invalid_repository'
+  | 'memory_service_unavailable'
+  | 'workspace_permission_denied'
+  | 'feature_not_available'
+  | 'github_not_connected'
+  | 'github_token_rejected'
+  | 'repository_access_denied'
+  | 'github_unavailable'
+  | 'retrieval_failed'
+  | 'no_active_rules'
+  | 'all_rules_blocked_by_safety_policy'
+  | 'no_relevant_rules';
+
+export interface AppliedProjectMemoryRule {
+  id: string;
+  key: string;
+  category: ProjectMemoryCategory;
+  /** Rule text shortened for display (the requester can already read the full rule). */
+  title: string;
+  confidence: ProjectMemoryConfidence;
+  /** `user` = personal rule visible only to its author; `workspace` = shared rule. */
+  visibility: 'workspace' | 'user';
+}
+
+export type ProjectMemoryPromptMetadata =
+  | { status: 'applied'; version: string; rules: AppliedProjectMemoryRule[] }
+  | { status: 'skipped'; reason: ProjectMemorySkipReason };
 
 export type JiraPageType = 'issue' | 'board' | 'backlog' | 'search' | 'project' | 'unknown';
 
@@ -595,6 +667,11 @@ export interface ExecuteAiActionRequest {
   errorIntelligence?: ErrorIntelligenceContext | null;
   /** Day 24 — optional reliability execution linkage for AI audit snapshots. */
   executionId?: string | null;
+  /**
+   * `owner/repo` whose project memory applies to this request. An identifier only: the
+   * server loads, authorizes and formats the memory itself. Clients never send memory text.
+   */
+  memoryRepository?: string | null;
 }
 
 export interface ExecuteAiActionResponse {
@@ -602,11 +679,16 @@ export interface ExecuteAiActionResponse {
   data: {
     action: AIAction;
     result: string;
+    /** REVIEW_ENTIRE_PR: the diff scope sent to the model. */
+    reviewScope?: PRReviewScope;
+    /** Memory-aware actions: rules applied to the prompt, or why none were. */
+    projectMemory?: ProjectMemoryPromptMetadata;
   };
 }
 
 /** Day 10 — structured PR review artifact (client-built from Day 9 markdown). */
-export type PRReviewRiskLevel = 'high' | 'medium' | 'low';
+/** `unknown` = the review is incomplete or still streaming; never shown as LOW. */
+export type PRReviewRiskLevel = 'high' | 'medium' | 'low' | 'unknown';
 
 export type PRReviewFindingSeverity = 'high' | 'medium' | 'low';
 
@@ -648,6 +730,18 @@ export interface PRReviewReport {
   reviewScope?: {
     truncated: boolean;
     partialFailureCount: number;
+    /** Files changed in the PR when known. */
+    totalFiles?: number | null;
+    source?: PRReviewDiffSource;
+  };
+  /**
+   * False when the model output is not a complete, well-formed review (cut off, missing
+   * the Risk Findings section, or unparseable findings). "0 findings" is only meaningful
+   * when `complete` is true.
+   */
+  completeness?: {
+    complete: boolean;
+    reasons: string[];
   };
 }
 

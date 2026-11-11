@@ -70,6 +70,14 @@ export const apiEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(600),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * Output-token budget for REVIEW_ENTIRE_PR only (other actions keep the per-user setting,
+   * 150–2000). A multi-file review with numbered findings does not fit in 600 tokens.
+   * Upper bound is gpt-4o-mini's 16,384 max output; usage quotas are per action, unaffected.
+   */
+  AI_PR_REVIEW_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(500).max(16_384).default(4_096),
+  /** Request timeout for REVIEW_ENTIRE_PR; the 30s default is too short for ~4k output tokens. */
+  AI_PR_REVIEW_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(300_000).default(120_000),
   AI_MAX_INPUT_CHARACTERS: z.coerce.number().int().positive().default(12_000),
   /** Comma-separated exact origins (dashboard + chrome-extension://ID). */
   AI_CORS_ORIGINS: z.string().optional().default(''),

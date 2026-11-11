@@ -248,6 +248,7 @@ chrome.runtime.onConnect.addListener((port) => {
               type: 'DONE',
               status: result.status,
               bodyText: result.bodyText,
+              headers: result.headers,
             });
           }
         } catch (error) {

@@ -122,7 +122,7 @@ async function bootstrap(): Promise<void> {
       'X-Project-X-Client',
       'Paddle-Signature',
     ],
-    exposedHeaders: ['X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-PR-Review-Scope', 'X-Project-Memory'],
     maxAge: 600,
   });
 

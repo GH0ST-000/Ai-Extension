@@ -2,7 +2,9 @@ export {
   isKnownProjectMemoryCategory,
   PROJECT_MEMORY_CATEGORY_VALUES,
   categoryRelevanceForCapability,
+  memoryCapabilityForAiAction,
 } from './categories';
+export type { ProjectMemoryCapability } from './categories';
 
 export { containsSensitiveMemoryContent, redactForMemoryLog } from './secrets';
 

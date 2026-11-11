@@ -140,12 +140,23 @@ function startRefresh(): Promise<boolean> {
 
 export class ApiError extends Error {
   readonly statusCode: number;
+  /** Machine-readable API error code (e.g. WORKSPACE_CONTEXT_UNAVAILABLE), when provided. */
+  readonly code?: string;
 
-  constructor(message: string, statusCode: number) {
+  constructor(message: string, statusCode: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
+    this.code = code;
   }
+}
+
+/** The selected workspace (X-Workspace-Id) is malformed, stale, or no longer accessible. */
+export function isWorkspaceSelectionError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.code === 'WORKSPACE_CONTEXT_UNAVAILABLE' || err.code === 'WORKSPACE_ID_INVALID')
+  );
 }
 
 export type WorkspaceIdGetter = () => string | null | undefined;
@@ -175,19 +186,25 @@ export type TerminusHealthResponse = {
   details?: Record<string, { status: ServiceHealthStatus }>;
 };
 
-async function parseErrorMessage(response: Response): Promise<string> {
+async function parseErrorBody(response: Response): Promise<{ message: string; code?: string }> {
   try {
-    const body = (await response.json()) as { message?: string | string[] };
+    const body = (await response.json()) as { message?: string | string[]; code?: unknown };
+    const code = typeof body.code === 'string' ? body.code : undefined;
     if (Array.isArray(body.message)) {
-      return body.message.join(', ');
+      return { message: body.message.join(', '), code };
     }
     if (typeof body.message === 'string' && body.message.trim()) {
-      return body.message;
+      return { message: body.message, code };
     }
+    return { message: 'Request failed.', code };
   } catch {
     // ignore
   }
-  return 'Request failed.';
+  return { message: 'Request failed.' };
+}
+
+async function parseErrorMessage(response: Response): Promise<string> {
+  return (await parseErrorBody(response)).message;
 }
 
 export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
@@ -242,7 +259,8 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
-    throw new ApiError(await parseErrorMessage(response), response.status);
+    const parsed = await parseErrorBody(response);
+    throw new ApiError(parsed.message, response.status, parsed.code);
   }
 
   if (response.status === 204) {
@@ -371,11 +389,14 @@ export type CreateProjectMemoryRuleBody = Omit<
   'owner' | 'repository'
 >;
 
+/** Active memory by default; pass `'archived'` to list archived rules separately. */
 export async function listProjectMemory(
   owner: string,
   repo: string,
+  status?: 'active' | 'archived',
 ): Promise<ListProjectMemoryResponse> {
-  return apiFetch<ListProjectMemoryResponse>(projectMemoryPath(owner, repo));
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiFetch<ListProjectMemoryResponse>(projectMemoryPath(owner, repo, query));
 }
 
 export async function getProjectMemoryProfile(

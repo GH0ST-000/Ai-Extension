@@ -26,11 +26,13 @@ export function workspaceException(
       return new NotFoundException(body);
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
+    case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':
     case 'FEATURE_NOT_AVAILABLE':
       return new ForbiddenException(body);
+    case 'WORKSPACE_ID_INVALID':
     case 'WORKSPACE_LIMIT_REACHED':
     case 'WORKSPACE_MEMBER_LIMIT_REACHED':
     case 'WORKSPACE_INVITATION_INVALID':
@@ -57,6 +59,7 @@ function statusForCode(code: WorkspaceErrorCode): number {
       return HttpStatus.NOT_FOUND;
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
+    case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':

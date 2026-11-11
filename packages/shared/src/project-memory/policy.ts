@@ -18,7 +18,52 @@ const UNSAFE_RULE_PATTERNS: ReadonlyArray<RegExp> = [
   /\bexfiltrat/i,
   /\b(?:post|send|upload|curl|wget)\b.{0,80}\bhttps?:\/\//i,
   /\bwebhook\b.{0,40}\bhttps?:\/\//i,
+  // Confirmation / approval bypass, however phrased.
+  /\b(?:never|don'?t|do\s+not|no\s+need\s+to)\s+(?:ask|wait|prompt|request|require)\b.{0,40}\b(?:before|for|confirm|confirmation|approval|permission)\b/i,
+  // AI budget / gateway limits.
+  /\b(?:ignore|bypass|exceed|raise|increase|disable|remove|unlimited|no)\b.{0,30}\b(?:budgets?|token\s+limits?|rate\s+limits?|quotas?|usage\s+limits?|spend(?:ing)?\s+limits?)\b/i,
+  // Overriding higher-priority instructions.
+  /\b(?:ignore|override|disregard|forget)\b.{0,30}\b(?:system|safety|previous|prior|above)\s+(?:prompt|rules?|instructions?|polic(?:y|ies))\b/i,
+  // Access beyond the bound repository / workspace.
+  /\b(?:any|all|every|other)\s+(?:repositor(?:y|ies)|repos?|workspaces?|organi[sz]ations?)\b.{0,40}\b(?:access|read|open|fetch|clone|write)\b/i,
+  /\b(?:access|read|open|fetch|clone|write\s+to)\b.{0,20}\b(?:any|all|every|other)\s+(?:repositor(?:y|ies)|repos?|workspaces?|organi[sz]ations?)\b/i,
 ];
+
+/**
+ * Bypass phrasings that are unsafe as instructions but safe as prohibitions
+ * ("Never merge without approval", "Do not skip review steps").
+ */
+const NEGATABLE_BYPASS_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bwithout\s+(?:asking|approval|permission|review(?:ing)?|the\s+user)\b/i,
+  /\b(?:skip|bypass|disable|ignore|turn\s+off)\b.{0,30}\b(?:confirm\w*|approv\w*|review\s+steps?|safety|guard\w*|polic(?:y|ies))\b/i,
+];
+
+const PROHIBITION_RE = /\b(?:never|not|don'?t|avoid|no|must\s+not|cannot|can'?t)\b/i;
+
+/** True when the matched phrase sits in a sentence that forbids it. */
+function isProhibited(text: string, pattern: RegExp): boolean {
+  const match = pattern.exec(text);
+  if (!match) return false;
+  const sentenceStart = Math.max(
+    text.lastIndexOf('.', match.index),
+    text.lastIndexOf('!', match.index),
+    text.lastIndexOf('\n', match.index),
+  );
+  return PROHIBITION_RE.test(text.slice(sentenceStart + 1, match.index));
+}
+
+/**
+ * Requests to disclose secrets. Prohibitions ("Never print tokens") are fine and must not
+ * be rejected, so these only count when the verb is not negated.
+ */
+const SECRET_DISCLOSURE_RE =
+  /\b(reveal|print|output|show|display|include|disclose|expose|return|echo|dump|share)\b.{0,40}\b(secrets?|tokens?|credentials?|passwords?|api[ _-]?keys?|private\s+keys?|\.env\b|env(?:ironment)?\s+(?:files?|variables?))/i;
+const NEGATED_DISCLOSURE_RE =
+  /\b(?:never|not|don'?t|avoid|no)\s+(?:\w+\s+){0,2}(?:reveal|print|output|show|display|include|disclose|expose|return|echo|dump|share)\b/i;
+
+function requestsSecretDisclosure(text: string): boolean {
+  return SECRET_DISCLOSURE_RE.test(text) && !NEGATED_DISCLOSURE_RE.test(text);
+}
 
 const DETERMINISTIC_AUTO_ACCEPT_KEYS = new Set([
   'tooling.package_manager',
@@ -48,6 +93,8 @@ export type EvaluateCandidateInput = {
 export function isUnsafeMemoryRuleText(text: string): boolean {
   if (!text.trim()) return false;
   if (containsSensitiveMemoryContent(text)) return true;
+  if (requestsSecretDisclosure(text)) return true;
+  if (NEGATABLE_BYPASS_PATTERNS.some((p) => p.test(text) && !isProhibited(text, p))) return true;
   return UNSAFE_RULE_PATTERNS.some((pattern) => pattern.test(text));
 }
 

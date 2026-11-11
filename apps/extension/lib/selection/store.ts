@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { firstValueTypeForAiAction } from '@project-x/shared';
-import { AIAction, type PageContext } from '@project-x/types';
+import {
+  AIAction,
+  type PageContext,
+  type PRReviewScope,
+  type ProjectMemoryPromptMetadata,
+} from '@project-x/types';
 
 import {
   captureEditableSelectionSnapshot,
@@ -10,7 +15,7 @@ import {
 } from '../editing';
 import { extractPageContext } from '../context/extract-page-context';
 import { markFirstValue } from '../onboarding/onboarding-api';
-import { loadProjectMemoryPromptBlock, prependProjectMemoryBlock } from '../project-memory';
+import { memoryRepositoryForRequest } from '../project-memory';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
 import { ERROR_INTELLIGENCE_ACTIONS, USER_FACING_AI_ERROR } from './constants';
 import {
@@ -43,6 +48,10 @@ type SelectionToolbarState = {
   abortController: AbortController | null;
   /** Page context captured for the latest REVIEW_ENTIRE_PR run. */
   lastReviewContext: PageContext | null;
+  /** Diff scope the API reviewed for the latest REVIEW_ENTIRE_PR run (from the response). */
+  lastReviewScope: PRReviewScope | null;
+  /** Project memory rules the API applied to the latest REVIEW_ENTIRE_PR prompt. */
+  lastReviewMemory: ProjectMemoryPromptMetadata | null;
   /** Trusted Apply Fix destination captured when launching SUGGEST_FIX from a PR finding. */
   suggestFixApplyTarget: SuggestFixApplyTarget | null;
   /** Session-only finding dispositions (cleared on dismiss / new PR review). */
@@ -58,7 +67,12 @@ type SelectionToolbarState = {
   backToMenu: () => void;
   startAction: (
     action: AIAction,
-    options?: { customPrompt?: string; applyTarget?: SuggestFixApplyTarget | null },
+    options?: {
+      customPrompt?: string;
+      applyTarget?: SuggestFixApplyTarget | null;
+      /** `owner/repo` for server-side project memory when the page itself is not that repo. */
+      memoryRepository?: string | null;
+    },
   ) => Promise<void>;
   retry: () => Promise<void>;
   replaceSelection: () => ReplacementResult;
@@ -80,6 +94,8 @@ const INITIAL_STATE = {
   requestId: 0,
   abortController: null as AbortController | null,
   lastReviewContext: null as PageContext | null,
+  lastReviewScope: null as PRReviewScope | null,
+  lastReviewMemory: null as ProjectMemoryPromptMetadata | null,
   suggestFixApplyTarget: null as SuggestFixApplyTarget | null,
   findingDispositions: {} as Record<string, PrFindingDisposition>,
   findingFilter: 'all' as PrFindingFilter,
@@ -283,6 +299,8 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
             findingDispositions: {},
             findingFilter: 'all' as const,
             lastReviewContext: null,
+            lastReviewScope: null,
+            lastReviewMemory: null,
             suggestFixApplyTarget: null,
           }
         : action === AIAction.SUGGEST_FIX
@@ -317,21 +335,24 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         ? redactedSelection.trim().slice(0, MAX_ERROR_TEXT_CHARACTERS)
         : redactedSelection;
 
-      const memoryBlock = await loadProjectMemoryPromptBlock({
-        action,
-        pageContext,
-        lastReviewContext: get().lastReviewContext,
-        bindingRepository:
-          useWorkflowSessionStore.getState().session?.contextBinding.github?.repository ??
-          useEngineeringSessionStore.getState().binding?.github?.repository ??
-          null,
-      });
-      const textWithMemory = prependProjectMemoryBlock(requestText, memoryBlock);
+      // Project memory is loaded server-side; only name the repository it belongs to.
+      const memoryRepository =
+        options?.memoryRepository ??
+        memoryRepositoryForRequest({
+          action,
+          pageContext,
+          lastReviewContext: get().lastReviewContext,
+          bindingRepository:
+            useWorkflowSessionStore.getState().session?.contextBinding.github?.repository ??
+            useEngineeringSessionStore.getState().binding?.github?.repository ??
+            null,
+        });
 
       const finalText = await streamAiAction(
         buildAiRequest({
           action,
-          text: textWithMemory,
+          text: requestText,
+          memoryRepository,
           customPrompt: prompt,
           context: pageContext,
           errorIntelligence,
@@ -339,6 +360,16 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
         }),
         {
           signal: abortController.signal,
+          onReviewScope: (scope) => {
+            if (get().requestId === requestId && action === AIAction.REVIEW_ENTIRE_PR) {
+              set({ lastReviewScope: scope });
+            }
+          },
+          onProjectMemory: (metadata) => {
+            if (get().requestId === requestId && action === AIAction.REVIEW_ENTIRE_PR) {
+              set({ lastReviewMemory: metadata });
+            }
+          },
           onChunk: (chunk) => {
             const current = get();
             if (current.requestId !== requestId) {

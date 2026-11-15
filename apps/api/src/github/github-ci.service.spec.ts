@@ -41,6 +41,53 @@ describe('GithubCiService', () => {
     }) as typeof fetch;
   }
 
+  describe('job log redirects and Actions detection (CodeQL: incomplete URL substring sanitization)', () => {
+    const logs = (svc: GithubCiService) =>
+      (
+        svc as unknown as {
+          fetchActionsJobLogsBounded: (i: {
+            token: string;
+            owner: string;
+            repository: string;
+            jobId: number;
+          }) => Promise<string | null>;
+        }
+      ).fetchActionsJobLogsBounded({ token: 't', owner: 'acme', repository: 'pay', jobId: 7 });
+    const redirectTo = (location: string) => () =>
+      new Response(null, { status: 302, headers: { location } });
+
+    it.each([
+      'https://evil.example/logs?next=githubusercontent.com',
+      'https://githubusercontent.com.evil.example/logs',
+      'https://evil.example/githubusercontent.com/logs',
+      'http://pipelines.actions.githubusercontent.com/logs', // not https
+    ])('never follows a log redirect to %s', async (location) => {
+      mockFetchSequence([redirectTo(location)]);
+      expect(await logs(service)).toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('follows a log redirect to a genuine GitHub host', async () => {
+      mockFetchSequence([
+        redirectTo('https://pipelines.actions.githubusercontent.com/serviceHosts/x/logs/7'),
+        () => new Response('step 1 failed'),
+      ]);
+      expect(await logs(service)).toBe('step 1 failed');
+    });
+
+    it('detects GitHub Actions jobs by hostname, not by substring', () => {
+      const looks = (detailsUrl: string) =>
+        (
+          service as unknown as {
+            looksLikeGitHubActions: (c: { source?: string; detailsUrl?: string }) => boolean;
+          }
+        ).looksLikeGitHubActions({ source: 'third-party', detailsUrl });
+      expect(looks('https://github.com/acme/pay/runs/1/job/2')).toBe(true);
+      expect(looks('https://evil.example/?u=github.com/x/job/1')).toBe(false);
+      expect(looks('https://github.com.evil.example/x/job/1')).toBe(false);
+    });
+  });
+
   it('lists checks bound to trusted PR head SHA', async () => {
     mockFetchSequence([
       () =>

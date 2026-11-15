@@ -575,7 +575,8 @@ export class GithubCiService {
       source.includes('github actions') ||
       source === 'github-actions' ||
       url.includes('/actions/runs/') ||
-      (url.includes('github.com') && url.includes('/job/'))
+      // Hostname check, not a substring: `https://evil.example/?github.com/job/1` is not GitHub.
+      (isTrustedGitHubDetailsUrl(url) && url.includes('/job/'))
     );
   }
 
@@ -663,8 +664,9 @@ export class GithubCiService {
       if (!location || !isSafeHttpsUrl(location)) {
         return null;
       }
-      // Only follow redirects to GitHub-controlled hosts
-      if (!isTrustedGitHubDetailsUrl(location) && !location.includes('githubusercontent.com')) {
+      // Only follow redirects to GitHub-controlled hosts (exact host / subdomain match on the
+      // parsed hostname; a substring test would accept e.g. `https://evil.example/?githubusercontent.com`).
+      if (!isTrustedGitHubDetailsUrl(location)) {
         return null;
       }
       try {

@@ -6,8 +6,6 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { createHash } from 'node:crypto';
-
 import { Prisma } from '@prisma/client';
 import type {
   PRReviewDiffSource,
@@ -67,8 +65,8 @@ export const HISTORY_SCAN_MAX_GITHUB_CHECKS = 20;
 const HISTORY_SCAN_BATCH = 100;
 /**
  * Repository access cache (Redis). Keys are bound to workspace + viewer + repository + the
- * identity of the GitHub credential that produced the answer (installation id, or a
- * fingerprint of the personal token), so removing / suspending / relinking the App or
+ * identity of the GitHub credential that produced the answer (installation id, or the
+ * personal token's connection version — never anything derived from a token), so removing / suspending / relinking the App or
  * disconnecting / replacing a token invalidates every cached answer immediately.
  * The TTL only bounds revocations made on GitHub itself (repository removed from the
  * installation, collaborator removed) while the credential stays the same — and it only
@@ -550,17 +548,21 @@ export class PrReviewHistoryService {
     owner: string,
     repository: string,
   ): Promise<RepositoryAccess> {
-    let resolved: Awaited<ReturnType<GithubAccessService['resolveApiTokenWithIdentity']>>;
+    // The identity (non-secret) and the token are resolved separately so no secret ever flows
+    // into the cache key. The answer is cached only if the credential identity is the same
+    // before and after the lookup, i.e. it was produced by the credential the key names.
+    let identity: string | null;
+    let token: string | null;
     try {
-      resolved = await this.githubAccess.resolveApiTokenWithIdentity(userId, workspaceId);
+      identity = await this.githubAccess.resolveCredentialIdentity(userId, workspaceId);
+      token = identity
+        ? ((await this.githubAccess.resolveApiToken(userId, workspaceId))?.token ?? null)
+        : null;
     } catch {
       return 'unavailable';
     }
     // No credential: denied, and nothing to cache (there is no identity to bind it to).
-    if (!resolved) return 'denied';
-    const { token } = resolved;
-    // Cached under the identity of the credential actually used for this lookup.
-    const cacheKey = accessCacheKey(workspaceId, userId, resolved.identity, owner, repository);
+    if (!identity || !token) return 'denied';
     let response: Response;
     try {
       response = await fetch(
@@ -579,15 +581,45 @@ export class PrReviewHistoryService {
     } catch {
       return 'unavailable';
     }
-    if (response.ok) {
-      await this.cacheSet(cacheKey, 'allowed', ACCESS_ALLOWED_TTL_S);
-      return 'allowed';
+    const result: RepositoryAccess = response.ok
+      ? 'allowed'
+      : response.status === 401 || response.status === 403 || response.status === 404
+        ? 'denied'
+        : 'unavailable';
+    if (result !== 'unavailable') {
+      await this.cacheIfCredentialUnchanged(
+        userId,
+        workspaceId,
+        identity,
+        owner,
+        repository,
+        result,
+      );
     }
-    if (response.status === 401 || response.status === 403 || response.status === 404) {
-      await this.cacheSet(cacheKey, 'denied', ACCESS_DENIED_TTL_S);
-      return 'denied';
+    return result;
+  }
+
+  private async cacheIfCredentialUnchanged(
+    userId: string,
+    workspaceId: string,
+    identity: string,
+    owner: string,
+    repository: string,
+    result: 'allowed' | 'denied',
+  ): Promise<void> {
+    let after: string | null;
+    try {
+      after = await this.githubAccess.resolveCredentialIdentity(userId, workspaceId);
+    } catch {
+      return;
     }
-    return 'unavailable';
+    // The credential changed while GitHub was being asked: the answer belongs to neither key.
+    if (after !== identity) return;
+    await this.cacheSet(
+      accessCacheKey(workspaceId, userId, identity, owner, repository),
+      result,
+      result === 'allowed' ? ACCESS_ALLOWED_TTL_S : ACCESS_DENIED_TTL_S,
+    );
   }
 
   private async cacheGet(key: string): Promise<string | null> {
@@ -622,7 +654,10 @@ function repoKey(row: { owner: string; repository: string }): string {
   return `${row.owner}/${row.repository}`;
 }
 
-/** Hashed so no component (ids, names, token fingerprint) can collide or be read from Redis. */
+/**
+ * Every component is non-secret (ids, installation id / connection version, repository) — no
+ * hashing needed. Components are URI-encoded so none can contain the separator and collide.
+ */
 function accessCacheKey(
   workspaceId: string,
   userId: string,
@@ -630,18 +665,16 @@ function accessCacheKey(
   owner: string,
   repository: string,
 ): string {
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        workspaceId,
-        userId,
-        identity,
-        owner.toLowerCase(),
-        repository.toLowerCase(),
-      ]),
-    )
-    .digest('hex');
-  return `px:prh:access:v2:${digest}`;
+  return [
+    'px:prh:access:v3',
+    workspaceId,
+    userId,
+    identity,
+    owner.toLowerCase(),
+    repository.toLowerCase(),
+  ]
+    .map((part, i) => (i === 0 ? part : encodeURIComponent(part)))
+    .join(':');
 }
 
 function afterCursor(

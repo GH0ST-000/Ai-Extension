@@ -152,10 +152,6 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
         // Like the real service: a non-secret row version that changes on every replacement.
         getConnectionVersion: async (userId: string) =>
           PATS[userId] ? patVersion(userId, PATS[userId]!) : null,
-        getDecryptedTokenWithVersion: async (userId: string) =>
-          PATS[userId]
-            ? { token: PATS[userId]!, version: patVersion(userId, PATS[userId]!) }
-            : null,
       } as never,
     );
     // TTL-aware Redis stand-in; `cacheClock.offsetMs` moves time forward for expiry tests.
@@ -1456,10 +1452,12 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     await listIds(users.owner!, ws);
     const keys = [...cache.store.keys()];
     expect(keys).toHaveLength(1);
-    expect(keys[0]).toMatch(/^px:prh:access:v2:[0-9a-f]{64}$/);
-    for (const plain of [PATS[users.owner!]!, users.owner!, ws, 'acme', 'app']) {
-      expect(keys[0]).not.toContain(plain);
-    }
+    // Plain, non-secret components (ids, connection version, repository): no token, and no
+    // hashing of anything credential-derived.
+    expect(keys[0]).toMatch(/^px:prh:access:v3:/);
+    expect(keys[0]).not.toContain(PATS[users.owner!]!);
+    expect(keys[0]).not.toMatch(/ghp_|ghs_/);
+    expect(keys[0]).toContain(':pat%3Aconn_');
   });
 
   it('GitHubConnection version (real table): changes on replace, gone on disconnect, new on reconnect', async () => {
@@ -1476,10 +1474,7 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     });
     const first = await connections.getConnectionVersion(userId);
     expect(first).toMatch(/^c[a-z0-9]+:\d+$/);
-    expect(await connections.getDecryptedTokenWithVersion(userId)).toEqual({
-      token: 'ghp_first_value',
-      version: first,
-    });
+    expect(await connections.getDecryptedToken(userId)).toBe('ghp_first_value');
     await new Promise((r) => setTimeout(r, 5));
     // Same write the settings flow performs when a token is replaced (upsert → update).
     await prisma.gitHubConnection.update({
@@ -1497,6 +1492,28 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     expect(third).not.toBe(second); // same token reconnected → new row, new version
     for (const version of [first, second, third]) {
       expect(version).not.toMatch(/ghp_/);
+    }
+  });
+
+  it('an answer is not cached when the credential changes during the GitHub lookup', async () => {
+    const { ws, users } = await seed({ roles: { owner: 'owner' }, withPat: ['owner'] });
+    const id = await reportIn(ws, users.owner!);
+    const userId = users.owner!;
+    const original = PATS[userId]!;
+    // While GitHub is being asked (with the original token), the user replaces the token.
+    const realFetchStub = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('https://api.github.com/'))
+        PATS[userId] = `ghp_none_${Date.now()}`;
+      return realFetchStub(input, init);
+    }) as typeof fetch;
+    try {
+      cache.store.clear();
+      expect(await openStatus(userId, ws, id)).toBe(200); // answered for the original token
+      expect(cache.store.size).toBe(0); // …but not cached under either identity
+    } finally {
+      globalThis.fetch = realFetchStub;
+      PATS[userId] = original;
     }
   });
 });

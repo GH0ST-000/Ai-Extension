@@ -59,56 +59,26 @@ export class GithubAccessService {
     return null;
   }
 
-  /** {@link resolveApiToken} plus the identity of the credential that was used. */
-  async resolveApiTokenWithIdentity(
-    userId: string,
-    explicitWorkspaceId?: string,
-  ): Promise<(ResolvedGitHubApiToken & { identity: GitHubCredentialIdentity }) | null> {
-    const resolved = await this.resolveCredential(userId, explicitWorkspaceId, true);
-    return resolved
-      ? { token: resolved.token!, source: resolved.source, identity: resolved.identity }
-      : null;
-  }
-
   /**
-   * Identity of the credential {@link resolveApiToken} would use right now (same precedence),
-   * without minting an installation token. Null when there is no usable credential.
+   * Identity of the credential {@link resolveApiToken} would use right now (same precedence).
+   * Never touches a secret: no installation token is minted and no personal token is
+   * decrypted. Null when there is no usable credential.
    */
   async resolveCredentialIdentity(
     userId: string,
     explicitWorkspaceId?: string,
   ): Promise<GitHubCredentialIdentity | null> {
-    return (await this.resolveCredential(userId, explicitWorkspaceId, false))?.identity ?? null;
-  }
-
-  private async resolveCredential(
-    userId: string,
-    explicitWorkspaceId: string | undefined,
-    mint: boolean,
-  ): Promise<{
-    token: string | null;
-    source: GitHubApiTokenSource;
-    identity: GitHubCredentialIdentity;
-  } | null> {
     const workspaceId = await this.resolveWorkspaceId(userId, explicitWorkspaceId);
 
     if (this.appTokens.isAppAuthEnabled()) {
       const installationId = await this.installations.getActiveInstallationId(workspaceId);
       if (installationId) {
-        const token = mint
-          ? await this.appTokens.mintInstallationAccessToken(installationId)
-          : null;
-        return { token, source: 'installation', identity: `installation:${installationId}` };
+        return `installation:${installationId}`;
       }
     }
 
-    if (mint) {
-      const pat = await this.patConnections.getDecryptedTokenWithVersion(userId);
-      return pat ? { token: pat.token, source: 'pat', identity: `pat:${pat.version}` } : null;
-    }
-    // Identity only: no decryption needed.
     const version = await this.patConnections.getConnectionVersion(userId);
-    return version ? { token: null, source: 'pat', identity: `pat:${version}` } : null;
+    return version ? `pat:${version}` : null;
   }
 
   /** @deprecated Prefer {@link resolveApiToken} — kept for tests migrating off PAT-only. */

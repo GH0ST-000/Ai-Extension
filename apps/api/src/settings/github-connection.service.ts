@@ -108,22 +108,6 @@ export class GithubConnectionService {
     return row ? connectionVersion(row) : null;
   }
 
-  /** {@link getDecryptedToken} plus the version of the same row (read once, consistent). */
-  async getDecryptedTokenWithVersion(
-    userId: string,
-  ): Promise<{ token: string; version: string } | null> {
-    const row = await this.prisma.gitHubConnection.findUnique({
-      where: { userId },
-    });
-    if (!row) {
-      return null;
-    }
-    return {
-      token: decryptSecret(row.tokenCiphertext, this.getEncryptionKey()),
-      version: connectionVersion(row),
-    };
-  }
-
   private getEncryptionKey(): string {
     return this.config.getOrThrow<string>('secrets.encryptionKey');
   }

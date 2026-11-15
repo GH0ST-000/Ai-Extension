@@ -16,7 +16,6 @@ describe('GithubAccessService', () => {
   const patConnections = {
     getDecryptedToken: vi.fn(),
     getConnectionVersion: vi.fn(),
-    getDecryptedTokenWithVersion: vi.fn(),
   };
 
   let service: GithubAccessService;
@@ -71,33 +70,15 @@ describe('GithubAccessService', () => {
         'installation:987654',
       );
       expect(appTokens.mintInstallationAccessToken).not.toHaveBeenCalled();
-      appTokens.mintInstallationAccessToken.mockResolvedValue('ghs_x');
-      expect(await service.resolveApiTokenWithIdentity('user_1', 'ws_team')).toEqual({
-        token: 'ghs_x',
-        source: 'installation',
-        identity: 'installation:987654',
-      });
     });
 
     it('PAT: identity is the connection version — never derived from the token', async () => {
       installations.getActiveInstallationId.mockResolvedValue(null);
       patConnections.getConnectionVersion.mockResolvedValue('conn_1:1000');
       expect(await service.resolveCredentialIdentity('user_1')).toBe('pat:conn_1:1000');
-      // Identity-only resolution never decrypts the token.
+      // Identity resolution never decrypts the token (no secret is involved at all).
       expect(patConnections.getDecryptedToken).not.toHaveBeenCalled();
-      expect(patConnections.getDecryptedTokenWithVersion).not.toHaveBeenCalled();
-
-      patConnections.getDecryptedTokenWithVersion.mockResolvedValue({
-        token: 'ghp_secret_value',
-        version: 'conn_1:1000',
-      });
-      const resolved = await service.resolveApiTokenWithIdentity('user_1');
-      expect(resolved).toEqual({
-        token: 'ghp_secret_value',
-        source: 'pat',
-        identity: 'pat:conn_1:1000',
-      });
-      expect(resolved!.identity).not.toContain('ghp_secret_value');
+      expect(await service.resolveCredentialIdentity('user_1')).not.toMatch(/ghp_/);
 
       // Replaced token → new version; disconnected → no identity.
       patConnections.getConnectionVersion.mockResolvedValue('conn_1:2000');

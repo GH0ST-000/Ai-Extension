@@ -1,4 +1,4 @@
-import { PROMPT_INJECTION_GUARD } from '@project-x/shared';
+import { PROMPT_INJECTION_GUARD, escapeRegExp } from '@project-x/shared';
 import { z } from 'zod';
 
 import { PAGE_CONTEXT_CLOSE, PAGE_CONTEXT_OPEN } from '../constants/ai.constants';
@@ -536,7 +536,7 @@ function functionBody(dep: ResolvedDependency): { body: CodeLine[]; base: number
  */
 function runsOnMainPath(parent: ResolvedDependency, childName: string): boolean {
   const short = childName.split('.').pop()!;
-  const call = new RegExp(String.raw`\b${short.replace(/[$]/g, '\\$')}\s*(?:<[^>]*>)?\(`);
+  const call = new RegExp(String.raw`\b${escapeRegExp(short)}\s*(?:<[^>]*>)?\(`);
   const { body, base } = functionBody(parent);
   if (body.length === 0) return false;
   for (const l of body) {
@@ -644,7 +644,7 @@ function tenantFromAuthorization(
   line: number,
   name: string,
 ): boolean {
-  const esc = name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(name);
   const assign = new RegExp(
     String.raw`(?:\b(?:const|let|var)\s+(?:\{[^}]*\b${esc}\b[^}]*\}|${esc})|(?<![\w$.])${esc})\s*(?::[^=]+)?=(?![=>])`,
   );
@@ -828,7 +828,7 @@ function securityRefutationGap(
     if (/OrThrow\b|OrFail\b/.test(stmt)) return true;
     const name = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/.exec(stmt)?.[1];
     if (!name) return false;
-    const uses = new RegExp(String.raw`(?<![\w$.])${name.replace(/[$]/g, '\\$')}(?![\w$])`);
+    const uses = new RegExp(String.raw`(?<![\w$.])${escapeRegExp(name)}(?![\w$])`);
     return guards.some(
       (x) =>
         x.kind === 'exit' &&
@@ -1248,7 +1248,7 @@ function stateReads(lines: string[]): string[] {
 }
 
 function writerShown(name: string, provided: ProvidedCode): boolean {
-  const esc = name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(name);
   const writer = new RegExp(
     String.raw`\.${esc}\s*=(?![=>])|\b(?:run|patch|set|enterWith|setItem)\s*\([^)]*['"]?\b${esc}\b`,
   );
@@ -1569,7 +1569,7 @@ function guardText(text: string, conditionLine: number, exitLine: number): strin
   const inits: string[] = [];
   for (const name of new Set(names)) {
     const decl = new RegExp(
-      String.raw`\b(?:const|let|var)\s+(?:\{[^}]*\b${name.replace(/[$]/g, '\\$')}\b[^}]*\}|${name.replace(/[$]/g, '\\$')})\b[^=]*=\s*(.*)$`,
+      String.raw`\b(?:const|let|var)\s+(?:\{[^}]*\b${escapeRegExp(name)}\b[^}]*\}|${escapeRegExp(name)})\b[^=]*=\s*(.*)$`,
     );
     for (let i = conditionLine - 2; i >= 0; i -= 1) {
       const m = decl.exec(lines[i]!);

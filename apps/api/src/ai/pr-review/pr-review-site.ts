@@ -13,6 +13,7 @@
  * shown, and then only when every line from the enclosing function's start to the site is
  * present (so execution order can be established).
  */
+import { escapeRegExp } from '@project-x/shared';
 import ts from 'typescript';
 
 export type SiteKind = 'executable' | 'closing' | 'blank' | 'comment' | 'import' | 'type_only';
@@ -804,7 +805,7 @@ export function whereBindingAt(path: string, text: string, line: number): WhereB
 
 /** Top-level arguments of the call to `callee` on a line (null when not closed on it). */
 export function callArguments(lineText: string, callee: string): string[] | null {
-  const esc = callee.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(callee);
   const m = new RegExp(String.raw`(?<![\w$])${esc}\s*(?:<[^>()]*>)?\(`).exec(lineText);
   if (!m) return null;
   const args: string[] = [];

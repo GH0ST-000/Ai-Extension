@@ -20,7 +20,7 @@
  * code, not from function names. ≤ 6 functions per verification, ≤ 16 dependency files per
  * review (review-scoped cache, separate from the batch context budget), cycle detection.
  */
-import { redactSensitiveString } from '@project-x/shared';
+import { redactSensitiveString, escapeRegExp } from '@project-x/shared';
 
 import { type CodeLine, type CodeSection, type FileContentProvider } from './pr-review-context';
 import { executionPathRanks } from './pr-review-site';
@@ -495,7 +495,7 @@ function stripCode(text: string): string {
 }
 
 function escapeRe(name: string): string {
-  return name.replace(/[$]/g, '\\$');
+  return escapeRegExp(name);
 }
 
 type NumberedLine = { n: number | null; text: string };
@@ -701,7 +701,7 @@ function importsOf(text: string): Map<string, { specifier: string; imported: str
 }
 
 function fieldType(text: string, field: string): string | null {
-  const esc = field.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(field);
   const m = new RegExp(
     String.raw`(?:private|public|protected|readonly)\s+(?:readonly\s+)?${esc}\s*[?!]?\s*:\s*([A-Z][\w$]*)`,
   ).exec(text);
@@ -787,7 +787,7 @@ function opensBody(lines: string[], i: number): boolean {
 
 /** Lines [start, end) of `class Name { … }` in a module, when declared there. */
 function classBody(lines: string[], name: string): { from: number; to: number } | null {
-  const esc = name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(name);
   const decl = new RegExp(
     String.raw`^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+${esc}\b`,
   );
@@ -818,7 +818,7 @@ function definitionRange(
   /** Class whose method is wanted: search only its body when the class is declared here. */
   owner?: string,
 ): { start: number; end: number; complete: boolean } | null {
-  const esc = name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(name);
   const def = new RegExp(
     String.raw`^\s*(?:export\s+)?(?:default\s+)?(?:(?:public|private|protected|static|readonly|override|async)\s+)*(?:function\s*\*?\s*)?${esc}\s*(?:<[^>]*>)?\s*\(|^\s*(?:export\s+)?(?:const|let)\s+${esc}\s*(?::[^=]+)?=\s*(?:async\s+)?(?:\(|function|[A-Za-z_$][\w$]*\s*=>)`,
   );
@@ -1007,7 +1007,7 @@ function edgeRank(e: EdgeKind): number {
  */
 function buildsThrownError(call: Call): boolean {
   if (/^throw\b/.test(call.site.text)) return true;
-  const esc = call.name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(call.name);
   return new RegExp(String.raw`\bthrow\s+(?:new\s+)?(?:[\w$]+\.)*${esc}\s*[<(]`).test(
     stripCode(call.site.text),
   );

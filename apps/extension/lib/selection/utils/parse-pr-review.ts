@@ -1,3 +1,4 @@
+import { escapeRegExp } from '@project-x/shared';
 import { PR_REVIEW_INCOMPLETE_MARKER, type PRReviewCoverage } from '@project-x/types';
 
 import { stripPrReviewTrailers } from './pr-review-coverage';
@@ -63,7 +64,7 @@ const SECTION_HEADING_RE =
 const NO_RISKS_RE =
   /\bno\s+(?:material\s+|significant\s+|notable\s+)?(?:risks?|issues?|findings?)\b/i;
 const INCOMPLETE_MARKER_RE = new RegExp(
-  String.raw`\s*${PR_REVIEW_INCOMPLETE_MARKER.replace(/[[\]]/g, '\\$&')}\s+reason=([a-z-]+)\]\]\s*$`,
+  String.raw`\s*${escapeRegExp(PR_REVIEW_INCOMPLETE_MARKER)}\s+reason=([a-z-]+)\]\]\s*$`,
   'i',
 );
 

@@ -1,3 +1,4 @@
+import { escapeRegExp } from '../regexp';
 import type {
   ProjectConstraintContext,
   ProjectMemoryCandidateRecommendation,
@@ -237,8 +238,4 @@ export function projectRulesCannotEnableForbidden(
     }
   }
   return true;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

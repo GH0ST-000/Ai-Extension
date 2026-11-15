@@ -3,6 +3,7 @@
  * finding validation and renderer. Only the model (`ai.generateText`), GitHub HTTP, usage
  * storage and project memory retrieval are doubles.
  */
+import { escapeRegExp } from '@project-x/shared';
 import {
   HttpException,
   ServiceUnavailableException,
@@ -99,9 +100,9 @@ const ok = (findings: unknown[] = [], summary = 'Batch looks fine.') => ({
 
 /** Pull the coverage manifest out of the rendered response. */
 function coverageOf(text: string): PRReviewCoverage {
-  const m = new RegExp(
-    `${PR_REVIEW_COVERAGE_MARKER.replace(/[[\]]/g, '\\$&')} ([A-Za-z0-9_-]+)\\]\\]`,
-  ).exec(text);
+  const m = new RegExp(`${escapeRegExp(PR_REVIEW_COVERAGE_MARKER)} ([A-Za-z0-9_-]+)\\]\\]`).exec(
+    text,
+  );
   expect(m).not.toBeNull();
   return JSON.parse(Buffer.from(m![1]!, 'base64url').toString('utf8')) as PRReviewCoverage;
 }

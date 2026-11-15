@@ -1,3 +1,4 @@
+import { escapeRegExp } from '@project-x/shared';
 import {
   PR_REVIEW_COVERAGE_MARKER,
   PR_REVIEW_FILE_STATUSES,
@@ -9,12 +10,11 @@ import {
   type PRReviewRiskLevel,
 } from '@project-x/types';
 
-const escape = (s: string) => s.replace(/[[\]]/g, '\\$&');
 const COVERAGE_RE = new RegExp(
-  String.raw`\s*${escape(PR_REVIEW_COVERAGE_MARKER)}\s+([A-Za-z0-9_-]+)\]\]\s*$`,
+  String.raw`\s*${escapeRegExp(PR_REVIEW_COVERAGE_MARKER)}\s+([A-Za-z0-9_-]+)\]\]\s*$`,
 );
 const INCOMPLETE_RE = new RegExp(
-  String.raw`\s*${escape(PR_REVIEW_INCOMPLETE_MARKER)}\s+reason=([a-z-]+)\]\]\s*$`,
+  String.raw`\s*${escapeRegExp(PR_REVIEW_INCOMPLETE_MARKER)}\s+reason=([a-z-]+)\]\]\s*$`,
   'i',
 );
 

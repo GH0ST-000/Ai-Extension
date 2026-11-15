@@ -4,6 +4,7 @@
  * fetched at the PR head SHA (same workspace-scoped GitHub credentials as the diff); nothing
  * here changes what counts as evidence — context is for understanding only.
  */
+import { escapeRegExp } from '@project-x/shared';
 import type { DiffLine } from './diff-hunks';
 
 /** Loads a file's full text at the PR head, or null (binary, too large, limit reached, error). */
@@ -125,7 +126,7 @@ function opensDefinitionBody(lines: string[], i: number): boolean {
 }
 
 export function findDefinition(fileLines: string[], name: string, maxLines = 60): LineRange | null {
-  const escaped = name.replace(/[$]/g, '\\$');
+  const escaped = escapeRegExp(name);
   const def = new RegExp(
     String.raw`^\s*(?:export\s+)?(?:default\s+)?(?:(?:public|private|protected|static|readonly|override|async)\s+)*(?:function\s+)?${escaped}\s*(?:<[^>]*>)?\s*\(|^\s*(?:export\s+)?(?:const|let)\s+${escaped}\s*(?::[^=]+)?=`,
   );
@@ -455,7 +456,7 @@ export function definitionPathsInDiff(
   name: string,
   diffLinesByPath: Map<string, DiffLine[]>,
 ): string[] {
-  const escaped = name.replace(/[$]/g, '\\$');
+  const escaped = escapeRegExp(name);
   const def = new RegExp(
     String.raw`(?:^|\s)(?:export\s+)?(?:(?:public|private|protected|static|readonly|override|async)\s+)*(?:function\s+)?${escaped}\s*(?:<[^>]*>)?\s*\([^)]*\)?\s*(?::[^{=]+)?\{?\s*$|(?:const|let)\s+${escaped}\s*(?::[^=]+)?=`,
   );

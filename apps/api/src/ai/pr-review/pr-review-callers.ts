@@ -7,7 +7,7 @@
  * the review's existing authorized, cached context provider. A call site is shown as
  * context; it does not prove the path runs. Nothing here logs source.
  */
-import { redactSensitiveString } from '@project-x/shared';
+import { redactSensitiveString, escapeRegExp } from '@project-x/shared';
 
 import type { DiffLine } from './diff-hunks';
 import { trimSection, type CodeSection, type FileContentProvider } from './pr-review-context';
@@ -47,7 +47,7 @@ export async function findCallers(input: {
   if (!input.name || input.name.length < 3) {
     return { status: 'unavailable', sections: [], found: 0 };
   }
-  const esc = input.name.replace(/[$]/g, '\\$');
+  const esc = escapeRegExp(input.name);
   const call = new RegExp(String.raw`(?<![\w$])${esc}\s*(?:<[^>()]*>)?\(`);
   // A definition, not a call: `function name(`, `const name =`, or a method signature whose
   // parameter list closes on the line and opens a body (`name(a: T): R {`). A bare call at

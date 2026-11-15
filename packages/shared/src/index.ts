@@ -421,3 +421,5 @@ export {
 } from './security';
 
 export * from './notifications';
+
+export { escapeRegExp } from './regexp';

@@ -98,7 +98,7 @@ export class AiController {
   @Post('actions')
   @HttpCode(200)
   async generateAction(@CurrentUser() user: AuthRequestUser, @Body() body: ExecuteAiActionDto) {
-    const { text, reviewScope, projectMemory, operationId, replayed } =
+    const { text, reviewScope, projectMemory, operationId, replayed, reviewHistory } =
       await this.aiService.generateActionWithMetadata(user.id, body);
     return {
       success: true as const,
@@ -109,6 +109,8 @@ export class AiController {
         ...(projectMemory ? { projectMemory } : {}),
         ...(operationId ? { operationId } : {}),
         ...(replayed ? { replayed: true } : {}),
+        // Database-confirmed history status (`saved` only when PostgreSQL returned the row).
+        ...(reviewHistory ? { reviewHistory } : {}),
       },
     };
   }

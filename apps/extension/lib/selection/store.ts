@@ -55,6 +55,8 @@ type SelectionToolbarState = {
   lastReviewMemory: ProjectMemoryPromptMetadata | null;
   /** Memory setting the latest REVIEW_ENTIRE_PR was sent with (reused by retry). */
   lastReviewMemoryMode: ProjectMemoryMode | null;
+  /** Server operation id of the latest REVIEW_ENTIRE_PR (used to confirm it was saved). */
+  lastReviewOperationId: string | null;
   /** Trusted Apply Fix destination captured when launching SUGGEST_FIX from a PR finding. */
   suggestFixApplyTarget: SuggestFixApplyTarget | null;
   /** Session-only finding dispositions (cleared on dismiss / new PR review). */
@@ -102,6 +104,7 @@ const INITIAL_STATE = {
   lastReviewScope: null as PRReviewScope | null,
   lastReviewMemory: null as ProjectMemoryPromptMetadata | null,
   lastReviewMemoryMode: null as ProjectMemoryMode | null,
+  lastReviewOperationId: null as string | null,
   suggestFixApplyTarget: null as SuggestFixApplyTarget | null,
   findingDispositions: {} as Record<string, PrFindingDisposition>,
   findingFilter: 'all' as PrFindingFilter,
@@ -312,6 +315,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
             lastReviewScope: null,
             lastReviewMemory: null,
             lastReviewMemoryMode: projectMemoryMode ?? null,
+            lastReviewOperationId: null,
             suggestFixApplyTarget: null,
           }
         : action === AIAction.SUGGEST_FIX
@@ -380,6 +384,11 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           onProjectMemory: (metadata) => {
             if (get().requestId === requestId && action === AIAction.REVIEW_ENTIRE_PR) {
               set({ lastReviewMemory: metadata });
+            }
+          },
+          onOperationId: (operationId) => {
+            if (get().requestId === requestId && action === AIAction.REVIEW_ENTIRE_PR) {
+              set({ lastReviewOperationId: operationId });
             }
           },
           onChunk: (chunk) => {

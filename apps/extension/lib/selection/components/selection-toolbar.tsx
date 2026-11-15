@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AnimatePresence } from 'framer-motion';
-import { AIAction, type PRReviewFinding } from '@project-x/types';
+import { AIAction, type PRReviewFinding, type PrReviewReportDetail } from '@project-x/types';
 
 import {
   AI_ACTIONS,
@@ -40,6 +40,9 @@ import { ErrorPanel } from './error-panel';
 import { FloatingTriggerButton } from './floating-trigger-button';
 import { LoadingPanel } from './loading-panel';
 import { ResultPanel } from './result-panel';
+import { ReviewHistoryStatus } from './review-history-status';
+import { SavedPrReviewButton } from './saved-pr-review-button';
+import { SavedPrReviewPanel } from './saved-pr-review-panel';
 import { CiEntryButton, CiPanel, useGithubCiStore } from '../ci';
 import {
   EngineeringContextBanner,
@@ -91,6 +94,7 @@ export function SelectionToolbar() {
   const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
   const lastReviewScope = useSelectionToolbarStore((s) => s.lastReviewScope);
   const lastReviewMemory = useSelectionToolbarStore((s) => s.lastReviewMemory);
+  const lastReviewOperationId = useSelectionToolbarStore((s) => s.lastReviewOperationId);
   const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
   const findingDispositions = useSelectionToolbarStore((s) => s.findingDispositions);
   const suggestFixApplyTarget = useSelectionToolbarStore((s) => s.suggestFixApplyTarget);
@@ -107,6 +111,9 @@ export function SelectionToolbar() {
   const editableSnapshot = useSelectionToolbarStore((s) => s.editableSnapshot);
   const canReplace = Boolean(editableSnapshot);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
+  /** Saved (history) review shown over the current UI; the current review stays mounted. */
+  const [savedReview, setSavedReview] = useState<PrReviewReportDetail | null>(null);
+  const currentWorkspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const ciView = useGithubCiStore((s) => s.view);
   const multiRepoPanelOpen = useMultiRepoStore((s) => s.panelOpen);
   const workflowOpenPanelHint = useWorkflowSessionStore((s) => s.openPanelHint);
@@ -627,7 +634,10 @@ export function SelectionToolbar() {
   );
 
   useEffect(() => {
-    if (!assistantOpen || assistant.status !== 'menu') {
+    // Shortcuts belong to the visible action menu only. While a saved (historical) review is
+    // shown the menu is hidden, so no key may start an AI action, use credits or replace the
+    // current review behind it.
+    if (!assistantOpen || assistant.status !== 'menu' || savedReview) {
       return;
     }
 
@@ -654,269 +664,316 @@ export function SelectionToolbar() {
 
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [assistant.status, assistantOpen, handleSelectAction]);
+  }, [assistant.status, assistantOpen, handleSelectAction, savedReview]);
 
   const visible = phase !== 'hidden' && Boolean(anchorRect);
+
+  useEffect(() => {
+    if (phase === 'hidden') setSavedReview(null);
+  }, [phase]);
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[2147483646]">
       {visible ? (
         <div ref={refs.setFloating} style={floatingStyles} className="pointer-events-auto">
-          <AnimatePresence mode="wait">
-            {phase === 'trigger' ? (
-              <FloatingTriggerButton key="trigger" compact={compactTrigger} onOpen={openMenu} />
-            ) : null}
+          {savedReview ? (
+            <SavedPrReviewPanel
+              report={savedReview}
+              workspaceId={currentWorkspaceId}
+              backLabel={
+                assistant.status === 'streaming' || assistant.status === 'success'
+                  ? 'Back to current review'
+                  : 'Back'
+              }
+              onBack={() => setSavedReview(null)}
+            />
+          ) : null}
+          {/* Hidden, not unmounted, while a saved review is open: the current review keeps its
+              state (content, filters, scroll) and is shown again unchanged on Back. */}
+          <div className={savedReview ? 'hidden' : undefined}>
+            <AnimatePresence mode="wait">
+              {phase === 'trigger' ? (
+                <FloatingTriggerButton key="trigger" compact={compactTrigger} onOpen={openMenu} />
+              ) : null}
 
-            {phase === 'assistant' && assistant.status === 'menu' ? (
-              <div key="menu" className="space-y-1">
-                <ContextualHint
-                  hintId="ask-ai-first"
-                  title="Select text → Ask AI"
-                  body="Choose an action. Ranked Smart Actions put the most useful ones first."
-                />
-                {pageSnapshot?.type === 'github' && pageSnapshot.github?.pullRequestNumber ? (
+              {phase === 'assistant' && assistant.status === 'menu' ? (
+                <div key="menu" className="space-y-1">
                   <ContextualHint
-                    hintId="review-pr-first"
-                    title="Review this PR with Project X"
-                    body="Use Review PR for a scoped report. Writes still need your confirmation."
+                    hintId="ask-ai-first"
+                    title="Select text → Ask AI"
+                    body="Choose an action. Ranked Smart Actions put the most useful ones first."
                   />
-                ) : null}
-                <EngineeringContextBanner sessions={engineeringSessions} />
-                {multiRepoPanelOpen || workflowOpenPanelHint === 'multi-repo' ? (
-                  <MultiRepoPanel sessions={engineeringSessions} />
-                ) : null}
-                <ActionMenu
-                  actions={rankedActions}
-                  onSelect={handleSelectAction}
-                  pageType={pageSnapshot?.type ?? null}
-                  hasOpenApi={Boolean(openApiContext || openApiContract)}
-                  hasJiraIssue={Boolean(effectiveJiraKey || githubJiraKeys.length === 1)}
-                  hasGithub={Boolean(pageSnapshot?.type === 'github' || prCiDestination)}
-                  githubSlot={
-                    prCiDestination || pageSnapshot?.type === 'github' ? (
-                      <div className="space-y-1 px-1 py-1">
-                        {prCiDestination ? (
+                  {pageSnapshot?.type === 'github' && pageSnapshot.github?.pullRequestNumber ? (
+                    <ContextualHint
+                      hintId="review-pr-first"
+                      title="Review this PR with Project X"
+                      body="Use Review PR for a scoped report. Writes still need your confirmation."
+                    />
+                  ) : null}
+                  <EngineeringContextBanner sessions={engineeringSessions} />
+                  {multiRepoPanelOpen || workflowOpenPanelHint === 'multi-repo' ? (
+                    <MultiRepoPanel sessions={engineeringSessions} />
+                  ) : null}
+                  <ActionMenu
+                    actions={rankedActions}
+                    onSelect={handleSelectAction}
+                    pageType={pageSnapshot?.type ?? null}
+                    hasOpenApi={Boolean(openApiContext || openApiContract)}
+                    hasJiraIssue={Boolean(effectiveJiraKey || githubJiraKeys.length === 1)}
+                    hasGithub={Boolean(pageSnapshot?.type === 'github' || prCiDestination)}
+                    githubSlot={
+                      prCiDestination || pageSnapshot?.type === 'github' ? (
+                        <div className="space-y-1 px-1 py-1">
+                          {prCiDestination ? (
+                            <div className="px-1 py-1">
+                              <PrReviewMemoryToggle />
+                            </div>
+                          ) : null}
+                          {prCiDestination ? (
+                            <SavedPrReviewButton
+                              owner={prCiDestination.owner}
+                              repository={prCiDestination.repository}
+                              pullRequestNumber={prCiDestination.pullRequestNumber}
+                              onOpen={setSavedReview}
+                            />
+                          ) : null}
+                          {prCiDestination ? (
+                            <div className="px-1 py-1">
+                              <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
+                            </div>
+                          ) : null}
+                          {prCiDestination ? (
+                            <PrOpenApiChangesButton
+                              embedded
+                              owner={prCiDestination.owner}
+                              repository={prCiDestination.repository}
+                              pullRequestNumber={prCiDestination.pullRequestNumber}
+                              changedFilePaths={(prCiDestination.changedFiles ?? []).map(
+                                (f) => f.path,
+                              )}
+                            />
+                          ) : null}
                           <div className="px-1 py-1">
-                            <PrReviewMemoryToggle />
+                            <button
+                              type="button"
+                              onClick={() => useMultiRepoStore.getState().setPanelOpen(true)}
+                              className="w-full rounded-lg bg-icon px-2.5 py-1.5 text-left text-[12px] font-semibold text-primary hover:bg-hover"
+                            >
+                              Multi-Repo · Systems
+                            </button>
                           </div>
-                        ) : null}
-                        {prCiDestination ? (
-                          <div className="px-1 py-1">
-                            <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
-                          </div>
-                        ) : null}
-                        {prCiDestination ? (
-                          <PrOpenApiChangesButton
-                            embedded
-                            owner={prCiDestination.owner}
-                            repository={prCiDestination.repository}
-                            pullRequestNumber={prCiDestination.pullRequestNumber}
-                            changedFilePaths={(prCiDestination.changedFiles ?? []).map(
-                              (f) => f.path,
-                            )}
-                          />
-                        ) : null}
-                        <div className="px-1 py-1">
-                          <button
-                            type="button"
-                            onClick={() => useMultiRepoStore.getState().setPanelOpen(true)}
-                            className="w-full rounded-lg bg-icon px-2.5 py-1.5 text-left text-[12px] font-semibold text-primary hover:bg-hover"
-                          >
-                            Multi-Repo · Systems
-                          </button>
                         </div>
-                      </div>
-                    ) : null
-                  }
-                  jiraSlot={
-                    effectiveJiraKey ? (
-                      <JiraIssuePanel
-                        embedded
-                        issueKey={effectiveJiraKey}
-                        siteHost={effectiveJiraHost}
-                        comparisonStale={comparisonStale(comparisonHeadToken)}
-                        onCompareWithPr={
-                          lastReviewContext?.github?.pullRequestNumber ||
-                          pageSnapshot?.github?.pullRequestNumber
-                            ? handleCompareJiraWithPr
-                            : undefined
-                        }
-                        relatedPrLabel={
-                          lastReviewContext?.github?.pullRequestNumber
-                            ? `GitHub PR #${lastReviewContext.github.pullRequestNumber} in session`
-                            : pageSnapshot?.github?.pullRequestNumber
-                              ? `GitHub PR #${pageSnapshot.github.pullRequestNumber}`
+                      ) : null
+                    }
+                    jiraSlot={
+                      effectiveJiraKey ? (
+                        <JiraIssuePanel
+                          embedded
+                          issueKey={effectiveJiraKey}
+                          siteHost={effectiveJiraHost}
+                          comparisonStale={comparisonStale(comparisonHeadToken)}
+                          onCompareWithPr={
+                            lastReviewContext?.github?.pullRequestNumber ||
+                            pageSnapshot?.github?.pullRequestNumber
+                              ? handleCompareJiraWithPr
+                              : undefined
+                          }
+                          relatedPrLabel={
+                            lastReviewContext?.github?.pullRequestNumber
+                              ? `GitHub PR #${lastReviewContext.github.pullRequestNumber} in session`
+                              : pageSnapshot?.github?.pullRequestNumber
+                                ? `GitHub PR #${pageSnapshot.github.pullRequestNumber}`
+                                : null
+                          }
+                        />
+                      ) : githubJiraKeys.length === 1 ? (
+                        <JiraIssuePanel
+                          embedded
+                          issueKey={githubJiraKeys[0]!}
+                          comparisonStale={comparisonStale(comparisonHeadToken)}
+                          onCompareWithPr={
+                            pageSnapshot?.github?.pullRequestNumber
+                              ? handleCompareJiraWithPr
+                              : undefined
+                          }
+                          relatedPrLabel={
+                            pageSnapshot?.github?.pullRequestNumber
+                              ? `GitHub PR #${pageSnapshot.github.pullRequestNumber} (key in title/body/branch)`
                               : null
-                        }
-                      />
-                    ) : githubJiraKeys.length === 1 ? (
-                      <JiraIssuePanel
-                        embedded
-                        issueKey={githubJiraKeys[0]!}
-                        comparisonStale={comparisonStale(comparisonHeadToken)}
-                        onCompareWithPr={
-                          pageSnapshot?.github?.pullRequestNumber
-                            ? handleCompareJiraWithPr
-                            : undefined
-                        }
-                        relatedPrLabel={
-                          pageSnapshot?.github?.pullRequestNumber
-                            ? `GitHub PR #${pageSnapshot.github.pullRequestNumber} (key in title/body/branch)`
-                            : null
-                        }
-                      />
-                    ) : githubJiraKeys.length > 1 ? (
-                      <p className="px-3 py-3 text-[11px] text-secondary">
-                        Multiple Jira keys detected ({githubJiraKeys.join(', ')}). Open a single
-                        issue to continue.
-                      </p>
-                    ) : null
-                  }
-                  apiSlot={
-                    openApiContext ? (
-                      <OpenApiPanel
-                        pageOpenApi={openApiContext}
-                        onCompareWithJira={handleCompareApiWithJira}
-                      />
-                    ) : null
-                  }
-                  workflowSlot={<WorkflowPanel sessions={engineeringSessions} />}
+                          }
+                        />
+                      ) : githubJiraKeys.length > 1 ? (
+                        <p className="px-3 py-3 text-[11px] text-secondary">
+                          Multiple Jira keys detected ({githubJiraKeys.join(', ')}). Open a single
+                          issue to continue.
+                        </p>
+                      ) : null
+                    }
+                    apiSlot={
+                      openApiContext ? (
+                        <OpenApiPanel
+                          pageOpenApi={openApiContext}
+                          onCompareWithJira={handleCompareApiWithJira}
+                        />
+                      ) : null
+                    }
+                    workflowSlot={<WorkflowPanel sessions={engineeringSessions} />}
+                  />
+                  {ciView !== 'closed' ? <CiPanel /> : null}
+                </div>
+              ) : null}
+
+              {phase === 'assistant' && assistant.status === 'custom-prompt' ? (
+                <CustomPromptPanel
+                  key="custom-prompt"
+                  value={customPrompt}
+                  onChange={setCustomPromptInput}
+                  onSubmit={() => {
+                    void startAction(AIAction.CUSTOM, { customPrompt });
+                  }}
+                  onBack={backToMenu}
+                  onClose={dismiss}
                 />
-                {ciView !== 'closed' ? <CiPanel /> : null}
-              </div>
-            ) : null}
+              ) : null}
 
-            {phase === 'assistant' && assistant.status === 'custom-prompt' ? (
-              <CustomPromptPanel
-                key="custom-prompt"
-                value={customPrompt}
-                onChange={setCustomPromptInput}
-                onSubmit={() => {
-                  void startAction(AIAction.CUSTOM, { customPrompt });
-                }}
-                onBack={backToMenu}
-                onClose={dismiss}
-              />
-            ) : null}
+              {phase === 'assistant' && assistant.status === 'loading' ? (
+                <LoadingPanel key="loading" action={assistant.action} onClose={dismiss} />
+              ) : null}
 
-            {phase === 'assistant' && assistant.status === 'loading' ? (
-              <LoadingPanel key="loading" action={assistant.action} onClose={dismiss} />
-            ) : null}
+              {phase === 'assistant' &&
+              (assistant.status === 'streaming' || assistant.status === 'success') ? (
+                <ResultPanel
+                  key="result"
+                  action={assistant.action}
+                  content={assistant.content}
+                  streaming={assistant.status === 'streaming'}
+                  canReplace={
+                    canReplace &&
+                    assistant.status === 'success' &&
+                    !DIAGNOSTIC_AI_ACTIONS.has(assistant.action)
+                  }
+                  staleMessage={
+                    assistant.action === AIAction.ANALYZE_ENGINEERING_ALIGNMENT && engineeringStale
+                      ? 'Sources changed since this analysis was generated. Retry to refresh.'
+                      : null
+                  }
+                  reviewContext={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
+                  }
+                  reviewScope={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewScope : null
+                  }
+                  reviewMemory={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewMemory : null
+                  }
+                  findingFilter={findingFilter}
+                  findingDispositions={findingDispositions}
+                  onCopy={handleCopy}
+                  onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
+                  onCopyFullReview={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR
+                      ? handleCopyFullReview
+                      : undefined
+                  }
+                  onCopySummary={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopySummary : undefined
+                  }
+                  onCopyCommentDraft={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR
+                      ? handleCopyCommentDraft
+                      : undefined
+                  }
+                  onPostComment={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
+                      ? handlePostComment
+                      : undefined
+                  }
+                  githubConnected={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR ||
+                    assistant.action === AIAction.SUGGEST_FIX
+                      ? githubConnected
+                      : null
+                  }
+                  applyTarget={
+                    assistant.action === AIAction.SUGGEST_FIX ? suggestFixApplyTarget : null
+                  }
+                  onSuggestFix={
+                    assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
+                      ? handleSuggestFix
+                      : undefined
+                  }
+                  onSuggestFixForFinding={
+                    assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
+                      ? handleSuggestFixForFinding
+                      : undefined
+                  }
+                  onFindingFilterChange={setFindingFilter}
+                  onSetFindingDisposition={setFindingDisposition}
+                  onReplace={() => {
+                    const result = replaceSelection();
+                    return {
+                      ok: result.ok,
+                      message: result.ok ? undefined : result.message,
+                    };
+                  }}
+                  onRetry={() => {
+                    void retry();
+                  }}
+                  onBack={backToMenu}
+                  onClose={dismiss}
+                />
+              ) : null}
 
-            {phase === 'assistant' &&
-            (assistant.status === 'streaming' || assistant.status === 'success') ? (
-              <ResultPanel
-                key="result"
-                action={assistant.action}
-                content={assistant.content}
-                streaming={assistant.status === 'streaming'}
-                canReplace={
-                  canReplace &&
-                  assistant.status === 'success' &&
-                  !DIAGNOSTIC_AI_ACTIONS.has(assistant.action)
-                }
-                staleMessage={
-                  assistant.action === AIAction.ANALYZE_ENGINEERING_ALIGNMENT && engineeringStale
-                    ? 'Sources changed since this analysis was generated. Retry to refresh.'
-                    : null
-                }
-                reviewContext={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
-                }
-                reviewScope={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewScope : null
-                }
-                reviewMemory={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewMemory : null
-                }
-                findingFilter={findingFilter}
-                findingDispositions={findingDispositions}
-                onCopy={handleCopy}
-                onCopyFix={assistant.action === AIAction.SUGGEST_FIX ? handleCopyFix : undefined}
-                onCopyFullReview={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopyFullReview : undefined
-                }
-                onCopySummary={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? handleCopySummary : undefined
-                }
-                onCopyCommentDraft={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR
-                    ? handleCopyCommentDraft
-                    : undefined
-                }
-                onPostComment={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
-                    ? handlePostComment
-                    : undefined
-                }
-                githubConnected={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR ||
-                  assistant.action === AIAction.SUGGEST_FIX
-                    ? githubConnected
-                    : null
-                }
-                applyTarget={
-                  assistant.action === AIAction.SUGGEST_FIX ? suggestFixApplyTarget : null
-                }
-                onSuggestFix={
-                  assistant.action === AIAction.REVIEW_CODE && assistant.status === 'success'
-                    ? handleSuggestFix
-                    : undefined
-                }
-                onSuggestFixForFinding={
-                  assistant.action === AIAction.REVIEW_ENTIRE_PR && assistant.status === 'success'
-                    ? handleSuggestFixForFinding
-                    : undefined
-                }
-                onFindingFilterChange={setFindingFilter}
-                onSetFindingDisposition={setFindingDisposition}
-                onReplace={() => {
-                  const result = replaceSelection();
-                  return {
-                    ok: result.ok,
-                    message: result.ok ? undefined : result.message,
-                  };
-                }}
-                onRetry={() => {
-                  void retry();
-                }}
-                onBack={backToMenu}
-                onClose={dismiss}
-              />
-            ) : null}
+              {phase === 'assistant' &&
+              (assistant.status === 'streaming' || assistant.status === 'success') &&
+              ciView !== 'closed' ? (
+                <CiPanel key="ci-panel" />
+              ) : null}
 
-            {phase === 'assistant' &&
-            (assistant.status === 'streaming' || assistant.status === 'success') &&
-            ciView !== 'closed' ? (
-              <CiPanel key="ci-panel" />
-            ) : null}
+              {phase === 'assistant' &&
+              (assistant.status === 'streaming' || assistant.status === 'success') &&
+              assistant.action === AIAction.REVIEW_ENTIRE_PR &&
+              prCiDestination &&
+              ciView === 'closed' ? (
+                <div key="ci-entry" className="mt-1">
+                  <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
+                </div>
+              ) : null}
 
-            {phase === 'assistant' &&
-            (assistant.status === 'streaming' || assistant.status === 'success') &&
-            assistant.action === AIAction.REVIEW_ENTIRE_PR &&
-            prCiDestination &&
-            ciView === 'closed' ? (
-              <div key="ci-entry" className="mt-1">
-                <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
-              </div>
-            ) : null}
+              {phase === 'assistant' &&
+              assistant.status === 'success' &&
+              assistant.action === AIAction.REVIEW_ENTIRE_PR &&
+              prCiDestination ? (
+                <div key="saved-review-entry" className="mt-1">
+                  {lastReviewOperationId ? (
+                    <ReviewHistoryStatus operationId={lastReviewOperationId} />
+                  ) : null}
+                  <SavedPrReviewButton
+                    owner={prCiDestination.owner}
+                    repository={prCiDestination.repository}
+                    pullRequestNumber={prCiDestination.pullRequestNumber}
+                    onOpen={setSavedReview}
+                  />
+                </div>
+              ) : null}
 
-            {phase === 'assistant' && assistant.status === 'error' ? (
-              <ErrorPanel
-                key="error"
-                action={assistant.action}
-                message={assistant.message}
-                code={assistant.code}
-                requestId={assistant.referenceId}
-                unauthorized={assistant.unauthorized}
-                onRetry={() => {
-                  void retry();
-                }}
-                onBack={backToMenu}
-                onClose={dismiss}
-              />
-            ) : null}
-          </AnimatePresence>
+              {phase === 'assistant' && assistant.status === 'error' ? (
+                <ErrorPanel
+                  key="error"
+                  action={assistant.action}
+                  message={assistant.message}
+                  code={assistant.code}
+                  requestId={assistant.referenceId}
+                  unauthorized={assistant.unauthorized}
+                  onRetry={() => {
+                    void retry();
+                  }}
+                  onBack={backToMenu}
+                  onClose={dismiss}
+                />
+              ) : null}
+            </AnimatePresence>
+          </div>
         </div>
       ) : null}
     </div>

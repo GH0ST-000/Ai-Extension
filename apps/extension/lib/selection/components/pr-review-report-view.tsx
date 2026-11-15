@@ -249,6 +249,13 @@ type PrReviewReportViewProps = {
   onCopyCommentDraft?: () => Promise<boolean>;
   onPostComment?: (body: string) => Promise<PostPrCommentResult>;
   githubConnected?: boolean | null;
+  /**
+   * Saved (historical) review: display only. Nothing here may change the live review, create
+   * or edit a GitHub review draft, start an AI action or write to GitHub — Add to Review, the
+   * draft chip / workspace, Suggest Fix and Post to GitHub are not rendered and the review
+   * draft store is never written. Finding dispositions stay with the parent's callbacks.
+   */
+  readOnly?: boolean;
 };
 
 export function PrReviewReportView({
@@ -259,12 +266,17 @@ export function PrReviewReportView({
   dispositions,
   onFilterChange,
   onSetDisposition,
-  onSuggestFixForFinding,
+  onSuggestFixForFinding: onSuggestFixForFindingProp,
   onCopySummary,
   onCopyCommentDraft,
-  onPostComment,
+  onPostComment: onPostCommentProp,
   githubConnected = null,
+  readOnly = false,
 }: PrReviewReportViewProps) {
+  // Read-only mode drops every action that can invoke AI or write to GitHub, whatever the
+  // parent passed.
+  const onSuggestFixForFinding = readOnly ? undefined : onSuggestFixForFindingProp;
+  const onPostComment = readOnly ? undefined : onPostCommentProp;
   const [showHandoff, setShowHandoff] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [copiedComment, setCopiedComment] = useState(false);
@@ -285,13 +297,22 @@ export function PrReviewReportView({
   );
 
   useEffect(() => {
+    // The live review owns the draft; a saved review must not mark or otherwise change it.
+    if (readOnly) {
+      return;
+    }
     const ctx = extractPageContext();
     markStaleIfDestinationMismatch({
       owner: ctx.github?.owner,
       repository: ctx.github?.repository,
       pullRequestNumber: ctx.github?.pullRequestNumber,
     });
-  }, [markStaleIfDestinationMismatch, report.pullRequest.number, report.repository.owner]);
+  }, [
+    markStaleIfDestinationMismatch,
+    readOnly,
+    report.pullRequest.number,
+    report.repository.owner,
+  ]);
 
   // Clear draft when a brand-new report destination appears after prior success cleanup
   useEffect(() => {
@@ -325,16 +346,20 @@ export function PrReviewReportView({
 
   const draftFindingIds = useMemo(() => {
     const ids = new Set<string>();
+    // A saved review is unrelated to the live draft, even when finding ids coincide.
+    if (readOnly) {
+      return ids;
+    }
     for (const comment of draft?.comments ?? []) {
       if (comment.findingId && !comment.removed) {
         ids.add(comment.findingId);
       }
     }
     return ids;
-  }, [draft]);
+  }, [draft, readOnly]);
 
   const activeDraftCount = draft ? activeDraftComments(draft).length : 0;
-  const showDraftWorkspace = phase !== 'report';
+  const showDraftWorkspace = !readOnly && phase !== 'report';
 
   const canPost =
     Boolean(onPostComment) &&
@@ -527,12 +552,14 @@ export function PrReviewReportView({
             Post to GitHub
           </button>
         ) : null}
-        <ReviewDraftChip
-          count={activeDraftCount}
-          onOpen={() => {
-            setPhase('editing');
-          }}
-        />
+        {readOnly ? null : (
+          <ReviewDraftChip
+            count={activeDraftCount}
+            onOpen={() => {
+              setPhase('editing');
+            }}
+          />
+        )}
       </div>
 
       {showHandoff ? (
@@ -703,11 +730,12 @@ export function PrReviewReportView({
                         </button>
                       </>
                     )}
-                    {!ignored ? (
+                    {!ignored && !readOnly ? (
                       <button
                         type="button"
                         disabled={inDraft}
                         onClick={() => {
+                          if (readOnly) return;
                           const result = addFinding(report, finding);
                           setAddMessage(
                             result.ok

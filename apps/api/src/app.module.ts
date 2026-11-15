@@ -17,6 +17,7 @@ import { GithubAppModule } from './github-app/github-app.module';
 import { JiraModule } from './jira/jira.module';
 import { OpenApiModule } from './openapi/openapi.module';
 import { ProjectMemoryModule } from './project-memory/project-memory.module';
+import { PrReviewHistoryModule } from './pr-review-history/pr-review-history.module';
 import { MultiRepoModule } from './multi-repo/multi-repo.module';
 import { ReliabilityModule } from './reliability/reliability.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
@@ -103,6 +104,7 @@ import { SecurityModule } from './common/security/security.module';
     JiraModule,
     OpenApiModule,
     ProjectMemoryModule,
+    PrReviewHistoryModule,
     MultiRepoModule,
     ReliabilityModule,
     EntitlementsModule,

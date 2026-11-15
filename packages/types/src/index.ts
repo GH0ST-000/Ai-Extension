@@ -3638,3 +3638,4 @@ export interface ListWorkflowExecutionsResponse {
 
 export * from './saas';
 export * from './observability';
+export * from './pr-review-history';

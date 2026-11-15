@@ -59,4 +59,44 @@ describe('GithubAccessService', () => {
 
     expect(resolved).toBeNull();
   });
+
+  describe('credential identity (binds cached authorization to the credential used)', () => {
+    it('installation: identified by installation id, without minting a token', async () => {
+      installations.getActiveInstallationId.mockResolvedValue('987654');
+      expect(await service.resolveCredentialIdentity('user_1', 'ws_team')).toBe(
+        'installation:987654',
+      );
+      expect(appTokens.mintInstallationAccessToken).not.toHaveBeenCalled();
+      appTokens.mintInstallationAccessToken.mockResolvedValue('ghs_x');
+      expect(await service.resolveApiTokenWithIdentity('user_1', 'ws_team')).toEqual({
+        token: 'ghs_x',
+        source: 'installation',
+        identity: 'installation:987654',
+      });
+    });
+
+    it('PAT: a stable fingerprint that changes when the token is replaced and never contains it', async () => {
+      installations.getActiveInstallationId.mockResolvedValue(null);
+      patConnections.getDecryptedToken.mockResolvedValue('ghp_first_token_value');
+      const first = await service.resolveCredentialIdentity('user_1');
+      expect(first).toMatch(/^pat:[0-9a-f]{32}$/);
+      expect(first).not.toContain('ghp_first_token_value');
+      expect(await service.resolveCredentialIdentity('user_1')).toBe(first);
+      patConnections.getDecryptedToken.mockResolvedValue('ghp_second_token_value');
+      expect(await service.resolveCredentialIdentity('user_1')).not.toBe(first);
+    });
+
+    it('same precedence as resolveApiToken: installation removed → PAT identity; nothing → null', async () => {
+      installations.getActiveInstallationId.mockResolvedValue('1');
+      patConnections.getDecryptedToken.mockResolvedValue('ghp_p');
+      expect(await service.resolveCredentialIdentity('user_1')).toBe('installation:1');
+      installations.getActiveInstallationId.mockResolvedValue(null);
+      expect(await service.resolveCredentialIdentity('user_1')).toMatch(/^pat:/);
+      patConnections.getDecryptedToken.mockResolvedValue(null);
+      expect(await service.resolveCredentialIdentity('user_1')).toBeNull();
+      appTokens.isAppAuthEnabled.mockReturnValue(false);
+      installations.getActiveInstallationId.mockResolvedValue('1');
+      expect(await service.resolveCredentialIdentity('user_1')).toBeNull();
+    });
+  });
 });

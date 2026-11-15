@@ -111,4 +111,20 @@ describe('AI client lost-response retries', () => {
     expect((error as Error).message).toMatch(/still running/);
     expect(pendingRetryOperationId(request)).toBe(OP);
   });
+
+  it('reports the server operation id to the caller (used to confirm the saved history)', async () => {
+    const seen: string[] = [];
+    stream({ operationId: OP, chunks: ['done'] });
+    await streamAiAction(request, {
+      onChunk: () => undefined,
+      onOperationId: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([OP]);
+    stream({ chunks: ['no id'] });
+    await streamAiAction(request, {
+      onChunk: () => undefined,
+      onOperationId: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([OP]);
+  });
 });

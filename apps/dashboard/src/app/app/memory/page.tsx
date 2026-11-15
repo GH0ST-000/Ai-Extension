@@ -30,6 +30,7 @@ import { StudioSelect } from '../../../components/studio-select';
 import { fetchMemory, memorySourceLabel } from './memory-data';
 import { runMemoryMutation, WORKSPACE_SELECTION_MESSAGE } from './memory-notifications';
 import { useWorkspace } from '../../../lib/workspace-context';
+import { MemoryActivity } from './memory-activity';
 
 const CATEGORY_LABELS: Record<ProjectMemoryCategory, string> = {
   ARCHITECTURE: 'Architecture',
@@ -134,7 +135,12 @@ function MemoryPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   // UI gating only — the API enforces the same permissions.
-  const { hasPermission, refresh: refreshWorkspace } = useWorkspace();
+  const {
+    hasPermission,
+    refresh: refreshWorkspace,
+    currentWorkspaceId,
+    workspaceRevision,
+  } = useWorkspace();
   const canManage = hasPermission('memory:manage');
   const [owner, setOwner] = useState(() => searchParams.get('owner')?.trim() ?? '');
   const [repo, setRepo] = useState(() => searchParams.get('repo')?.trim() ?? '');
@@ -142,6 +148,8 @@ function MemoryPageContent() {
   const [archivedItems, setArchivedItems] = useState<ProjectMemoryItem[]>([]);
   const [disputedItems, setDisputedItems] = useState<ProjectMemoryItem[]>([]);
   const [confirmReactivateId, setConfirmReactivateId] = useState<string | null>(null);
+  /** Rule whose history the Activity section shows (null = all activity). */
+  const [historyRule, setHistoryRule] = useState<{ id: string; key: string } | null>(null);
   const [profile, setProfile] = useState<ProjectProfile | null>(null);
   const [candidates, setCandidates] = useState<ProjectMemoryCandidate[]>([]);
   const [memoryVersion, setMemoryVersion] = useState<string | null>(null);
@@ -286,6 +294,22 @@ function MemoryPageContent() {
     },
   };
   const repoLabel = `${ownerTrimmed}/${repoTrimmed}`;
+
+  function showHistory(item: ProjectMemoryItem) {
+    setHistoryRule({ id: item.id, key: item.key });
+    if (typeof document !== 'undefined') {
+      document.getElementById('memory-activity-heading')?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+
+  // Activity follows the repository that is loaded (synced to the URL), not the input fields.
+  const loadedOwner = searchParams.get('owner')?.trim() ?? '';
+  const loadedRepo = searchParams.get('repo')?.trim() ?? '';
+
+  useEffect(() => {
+    // A rule id from another workspace or repository must not stay selected.
+    setHistoryRule(null);
+  }, [workspaceRevision, loadedOwner, loadedRepo]);
 
   async function onLoad(event?: FormEvent) {
     event?.preventDefault();
@@ -747,6 +771,14 @@ function MemoryPageContent() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-semibold text-ink">{item.key}</p>
+                          <button
+                            type="button"
+                            onClick={() => showHistory(item)}
+                            aria-label={`History of ${item.key}`}
+                            className="rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-accent hover:underline"
+                          >
+                            History
+                          </button>
                           <span
                             className={[
                               'rounded-lg border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
@@ -907,6 +939,14 @@ function MemoryPageContent() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-semibold text-ink">{item.key}</p>
+                          <button
+                            type="button"
+                            onClick={() => showHistory(item)}
+                            aria-label={`History of ${item.key}`}
+                            className="rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-accent hover:underline"
+                          >
+                            History
+                          </button>
                           <span className="rounded-lg border border-line bg-mist px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             {formatCategory(item.category)}
                           </span>
@@ -1050,6 +1090,14 @@ function MemoryPageContent() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-semibold text-ink">{item.key}</p>
+                          <button
+                            type="button"
+                            onClick={() => showHistory(item)}
+                            aria-label={`History of ${item.key}`}
+                            className="rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-accent hover:underline"
+                          >
+                            History
+                          </button>
                           <span className="rounded-lg border border-line bg-mist px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             {formatCategory(item.category)}
                           </span>
@@ -1196,6 +1244,19 @@ function MemoryPageContent() {
             </ul>
           </div>
         </section>
+      ) : null}
+
+      {loaded && loadedOwner && loadedRepo ? (
+        <MemoryActivity
+          workspaceId={currentWorkspaceId}
+          workspaceRevision={workspaceRevision}
+          owner={loadedOwner}
+          repository={loadedRepo}
+          ruleId={historyRule?.id ?? null}
+          ruleLabel={historyRule?.key ?? null}
+          onClearRule={() => setHistoryRule(null)}
+          refreshKey={memoryVersion}
+        />
       ) : null}
 
       <section className="rise-in-delay-2 space-y-3">

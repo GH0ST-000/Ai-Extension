@@ -52,6 +52,10 @@ describe('ProjectMemoryService', () => {
     user: {
       findUnique: vi.fn(),
     },
+    // Audit events are appended in the same transaction as every memory write.
+    projectMemoryAuditEvent: {
+      createMany: vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
+    },
     $transaction: vi.fn(),
     // Advisory lock taken by every memory write (no-op here).
     $queryRaw: vi.fn(async () => []),

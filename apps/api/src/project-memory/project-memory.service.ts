@@ -1,4 +1,4 @@
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger, Optional } from '@nestjs/common';
 import type { ProjectMemory as ProjectMemoryRow, Prisma } from '@prisma/client';
 import {
   categoryRelevanceForCapability,
@@ -12,6 +12,8 @@ import {
 } from '@project-x/shared';
 import type {
   AppliedProjectMemoryRule,
+  ProjectMemoryAuditActorType,
+  ProjectMemoryAuditReason,
   ProjectMemorySkipReason,
   WorkspacePermission,
   LearnProjectMemoryResponse,
@@ -43,6 +45,13 @@ import { FeatureGate } from '../entitlements/feature-gate';
 import { RedisService } from '../redis/redis.service';
 import { GithubAccessService } from '../github-app/github-access.service';
 import { WorkspaceAuthorizationService } from '../workspaces/workspace-authorization.service';
+import { RequestContextService } from '../observability/request-context.service';
+import {
+  recordMemoryAudit,
+  statusEventType,
+  type MemoryAuditActor,
+  type MemoryAuditEventInput,
+} from './project-memory-audit';
 import { projectMemoryException } from './project-memory.errors';
 import { scopeFingerprint, toProjectMemoryItem } from './project-memory.mapper';
 
@@ -112,6 +121,8 @@ type PersistInput = {
    * Throws {@link DisputedFactBlocked}.
    */
   respectDisputes?: boolean;
+  /** Audit attribution: a direct user action, or an automatic change (Learn). */
+  audit: { actorType: ProjectMemoryAuditActorType; reason: ProjectMemoryAuditReason };
 };
 
 /** Learn must not auto-store this fact because of a dispute (see `respectDisputes`). */
@@ -228,7 +239,13 @@ export class ProjectMemoryService {
     private readonly githubContent: GithubContentService,
     private readonly featureGate: FeatureGate,
     private readonly workspaceAuthorization: WorkspaceAuthorizationService,
+    @Optional() private readonly requestContext?: RequestContextService,
   ) {}
+
+  private auditActor(userId: string, type: ProjectMemoryAuditActorType): MemoryAuditActor {
+    const requestId = this.requestContext?.get()?.requestId;
+    return { userId, type, ...(requestId ? { requestId } : {}) };
+  }
 
   async list(
     userId: string,
@@ -381,6 +398,7 @@ export class ProjectMemoryService {
       provenance,
       freshness: { strategy: 'manual', lastValidatedAt: now },
       inferred: false,
+      audit: { actorType: 'user', reason: 'user_rule' },
     });
 
     return toProjectMemoryItem(result);
@@ -401,7 +419,12 @@ export class ProjectMemoryService {
     },
   ): Promise<ProjectMemoryItem> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    const { existing } = await this.findItemForMutation(userId, owner, repository, memoryId);
+    const { existing, workspaceId } = await this.findItemForMutation(
+      userId,
+      owner,
+      repository,
+      memoryId,
+    );
 
     const data: Prisma.ProjectMemoryUpdateInput = {};
     const textEdit = body.text !== undefined || body.value !== undefined;
@@ -526,10 +549,11 @@ export class ProjectMemoryService {
             explicitRule: this.hasUserExplicitProvenance(existing.provenanceJson),
           });
         }
+        const events: MemoryAuditEventInput[] = [];
         if (finalStatus === 'active') {
           // One active fact per (category, key, scope) in its visibility: re-activating or
           // re-scoping a rule supersedes whatever currently holds that slot.
-          await tx.projectMemory.updateMany({
+          const displaced = await tx.projectMemory.findMany({
             where: {
               id: { not: existing.id },
               owner,
@@ -544,10 +568,47 @@ export class ProjectMemoryService {
                 ? { userId: existing.userId }
                 : {}),
             },
-            data: { status: 'superseded' },
+          });
+          if (displaced.length > 0) {
+            await tx.projectMemory.updateMany({
+              where: { id: { in: displaced.map((row) => row.id) } },
+              data: { status: 'superseded' },
+            });
+          }
+          for (const row of displaced) {
+            events.push({
+              eventType: 'rule_superseded',
+              actorType: 'system',
+              reason: 'slot_reactivated',
+              previous: row,
+              row: { ...row, status: 'superseded' },
+              relatedMemoryId: existing.id,
+            });
+          }
+        }
+        const saved = await tx.projectMemory.update({ where: { id: existing.id }, data });
+        const contentChanged =
+          JSON.stringify(current.valueJson) !== JSON.stringify(saved.valueJson) ||
+          JSON.stringify(current.scopeJson) !== JSON.stringify(saved.scopeJson);
+        if (contentChanged) {
+          events.push({
+            eventType: 'rule_edited',
+            reason: 'user_rule',
+            previous: current,
+            row: saved,
           });
         }
-        return tx.projectMemory.update({ where: { id: existing.id }, data });
+        const statusEvent = statusEventType(current.status, saved.status);
+        if (statusEvent) {
+          events.push({
+            eventType: statusEvent,
+            reason: 'status_change',
+            previous: current,
+            row: saved,
+          });
+        }
+        await recordMemoryAudit(tx, workspaceId, this.auditActor(userId, 'user'), events);
+        return saved;
       })
       .catch(rethrowActiveSlotConflict);
     return toProjectMemoryItem(updated);
@@ -560,11 +621,33 @@ export class ProjectMemoryService {
     memoryId: string,
   ): Promise<{ archived: true; id: string }> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    const { existing } = await this.findItemForMutation(userId, owner, repository, memoryId);
+    const { existing, workspaceId } = await this.findItemForMutation(
+      userId,
+      owner,
+      repository,
+      memoryId,
+    );
 
-    await this.prisma.projectMemory.update({
-      where: { id: existing.id },
-      data: { status: 'archived' },
+    // Same repository serialization as every other memory write, so the audit event and the
+    // status change are committed together and in order.
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockRepository(tx, existing.workspaceId, owner, repository, existing.userId);
+      const current = await tx.projectMemory.findUnique({ where: { id: existing.id } });
+      if (!current) {
+        throw projectMemoryException(
+          'PROJECT_MEMORY_ITEM_NOT_FOUND',
+          'Project memory item was not found.',
+        );
+      }
+      const saved = await tx.projectMemory.update({
+        where: { id: existing.id },
+        data: { status: 'archived' },
+      });
+      if (current.status !== 'archived') {
+        await recordMemoryAudit(tx, workspaceId, this.auditActor(userId, 'user'), [
+          { eventType: 'rule_archived', reason: 'status_change', previous: current, row: saved },
+        ]);
+      }
     });
     return { archived: true, id: existing.id };
   }
@@ -586,23 +669,44 @@ export class ProjectMemoryService {
     const workspaceId = await this.authorize(userId, 'memory:manage');
     await this.assertRepositoryAccess(userId, owner, repository);
 
-    const result = await this.prisma.projectMemory.updateMany({
-      where: {
-        owner,
-        repository,
-        status: { not: 'archived' },
-        // All shared rules of this workspace (any author), plus the caller's own personal
-        // and pre-workspace rows. Other members' personal preferences are not touched.
-        OR: [
-          { workspaceId, visibility: 'workspace' },
-          { workspaceId, visibility: 'user', userId },
-          { workspaceId: null, userId },
-        ],
-      },
-      data: { status: 'archived' },
+    const archived = await this.prisma.$transaction(async (tx) => {
+      // Workspace rows and the caller's pre-workspace rows are serialized by different keys.
+      await this.lockRepository(tx, workspaceId, owner, repository, userId);
+      await this.lockRepository(tx, null, owner, repository, userId);
+      const rows = await tx.projectMemory.findMany({
+        where: {
+          owner,
+          repository,
+          status: { not: 'archived' },
+          // All shared rules of this workspace (any author), plus the caller's own personal
+          // and pre-workspace rows. Other members' personal preferences are not touched.
+          OR: [
+            { workspaceId, visibility: 'workspace' },
+            { workspaceId, visibility: 'user', userId },
+            { workspaceId: null, userId },
+          ],
+        },
+      });
+      if (rows.length === 0) return 0;
+      await tx.projectMemory.updateMany({
+        where: { id: { in: rows.map((row) => row.id) } },
+        data: { status: 'archived' },
+      });
+      await recordMemoryAudit(
+        tx,
+        workspaceId,
+        this.auditActor(userId, 'user'),
+        rows.map((row) => ({
+          eventType: 'rule_archived' as const,
+          reason: 'repository_cleared' as const,
+          previous: row,
+          row: { ...row, status: 'archived' },
+        })),
+      );
+      return rows.length;
     });
 
-    return { archived: result.count };
+    return { archived };
   }
 
   async learn(
@@ -699,6 +803,8 @@ export class ProjectMemoryService {
           },
           inferred: true,
           respectDisputes: true,
+          // Learn stores extracted facts automatically (started by the user).
+          audit: { actorType: 'system', reason: 'learned' },
         });
         if (row.supersedesMemoryId) {
           supersededIds.push(row.supersedesMemoryId);
@@ -783,6 +889,7 @@ export class ProjectMemoryService {
       provenance,
       freshness: { strategy: 'manual', lastValidatedAt: now },
       inferred: false,
+      audit: { actorType: 'user', reason: 'candidate_confirmed' },
     });
 
     await this.deleteCandidate(userId, owner, repository, candidateId);
@@ -1287,9 +1394,11 @@ export class ProjectMemoryService {
     const valueSummary = input.value.summary.trim();
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
     const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
+    const actor = this.auditActor(input.userId, input.audit.actorType);
 
     return this.prisma
       .$transaction(async (tx) => {
+        let supersededRow: ProjectMemoryRow | null = null;
         await this.lockRepository(tx, workspaceId, input.owner, input.repository, input.userId);
         const existing = await tx.projectMemory.findFirst({
           where: {
@@ -1338,7 +1447,7 @@ export class ProjectMemoryService {
               existing.provenanceJson,
               input.provenance,
             );
-            return tx.projectMemory.update({
+            const refreshed = await tx.projectMemory.update({
               where: { id: existing.id },
               data: {
                 lastConfirmedAt: new Date(),
@@ -1349,9 +1458,18 @@ export class ProjectMemoryService {
                   : {}),
               },
             });
+            await recordMemoryAudit(tx, workspaceId, actor, [
+              {
+                eventType: 'rule_reconfirmed',
+                reason: input.audit.reason,
+                previous: existing,
+                row: refreshed,
+              },
+            ]);
+            return refreshed;
           }
           // Conflict: supersede the old fact and create the new one in the same transaction.
-          await tx.projectMemory.update({
+          supersededRow = await tx.projectMemory.update({
             where: { id: existing.id },
             data: { status: 'superseded' },
           });
@@ -1365,7 +1483,7 @@ export class ProjectMemoryService {
           visibility,
           explicitRule: input.explicitRule,
         });
-        return tx.projectMemory.create({
+        const created = await tx.projectMemory.create({
           data: {
             userId: input.userId,
             workspaceId,
@@ -1388,6 +1506,27 @@ export class ProjectMemoryService {
             lastConfirmedAt: new Date(),
           },
         });
+        await recordMemoryAudit(tx, workspaceId, actor, [
+          ...(existing && supersededRow
+            ? [
+                {
+                  eventType: 'rule_superseded' as const,
+                  actorType: 'system' as const,
+                  reason: 'replaced_by_new_rule' as const,
+                  previous: existing,
+                  row: supersededRow,
+                  relatedMemoryId: created.id,
+                },
+              ]
+            : []),
+          {
+            eventType: 'rule_created',
+            reason: input.audit.reason,
+            row: created,
+            relatedMemoryId: existing?.id ?? null,
+          },
+        ]);
+        return created;
       })
       .catch(rethrowActiveSlotConflict);
   }

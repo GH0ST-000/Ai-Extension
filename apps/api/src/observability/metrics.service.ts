@@ -52,6 +52,9 @@ export class MetricsService implements OnModuleDestroy {
   private readonly projectMemoryOperations: Counter;
   private readonly projectMemoryRefreshDuration: Histogram;
   private readonly projectMemoryConflicts: Counter;
+  private readonly prReviewHistoryWrites: Counter;
+  private readonly prReviewHistoryWriteDuration: Histogram;
+  private readonly prReviewHistoryAccessChecks: Counter;
   private readonly multiRepoAnalyses: Counter;
   private readonly multiRepoReposAnalyzed: Histogram;
   private readonly multiRepoAnalysisDuration: Histogram;
@@ -336,6 +339,27 @@ export class MetricsService implements OnModuleDestroy {
       name: 'project_memory_operations_total',
       help: 'Project memory operations',
       labelNames: ['operation', 'status'],
+      registers: [this.registry],
+    });
+
+    this.prReviewHistoryWrites = new Counter({
+      name: 'pr_review_history_writes_total',
+      help: 'PR review history snapshot writes by confirmed outcome',
+      labelNames: ['outcome', 'review_status'],
+      registers: [this.registry],
+    });
+
+    this.prReviewHistoryWriteDuration = new Histogram({
+      name: 'pr_review_history_write_duration_seconds',
+      help: 'PR review history snapshot write duration',
+      buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+      registers: [this.registry],
+    });
+
+    this.prReviewHistoryAccessChecks = new Counter({
+      name: 'pr_review_history_access_checks_total',
+      help: 'Repository access checks for PR review history reads',
+      labelNames: ['source', 'result'],
       registers: [this.registry],
     });
 
@@ -689,6 +713,27 @@ export class MetricsService implements OnModuleDestroy {
 
   recordAgentGoalOutcome(status: string): void {
     this.safeIncrement(() => this.agentGoalOutcomes.inc({ status: status.slice(0, 32) }));
+  }
+
+  /** outcome: created | duplicate | failed | unconfirmed. */
+  recordPrReviewHistoryWrite(outcome: string, reviewStatus: string, durationSeconds: number): void {
+    this.safeIncrement(() => {
+      this.prReviewHistoryWrites.inc({
+        outcome: outcome.slice(0, 32),
+        review_status: reviewStatus.slice(0, 32),
+      });
+      this.prReviewHistoryWriteDuration.observe(durationSeconds);
+    });
+  }
+
+  /** source: cache | github; result: allowed | denied | unavailable. */
+  recordPrReviewHistoryAccessCheck(source: string, result: string): void {
+    this.safeIncrement(() =>
+      this.prReviewHistoryAccessChecks.inc({
+        source: source.slice(0, 16),
+        result: result.slice(0, 16),
+      }),
+    );
   }
 
   recordProjectMemory(operation: string, status: string, durationSeconds?: number): void {

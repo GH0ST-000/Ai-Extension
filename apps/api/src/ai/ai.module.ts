@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { GithubAppModule } from '../github-app/github-app.module';
+import { PrReviewHistoryModule } from '../pr-review-history/pr-review-history.module';
 import { ProjectMemoryModule } from '../project-memory/project-memory.module';
 import { ReliabilityModule } from '../reliability/reliability.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -17,6 +18,7 @@ import { PromptRegistry } from './prompts/prompt.registry';
     AuthModule,
     SettingsModule,
     GithubAppModule,
+    PrReviewHistoryModule,
     forwardRef(() => ReliabilityModule),
     // ProjectMemoryModule → GithubModule → AiModule closes a cycle.
     forwardRef(() => ProjectMemoryModule),

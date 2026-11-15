@@ -95,6 +95,19 @@ export class GithubConnectionService {
     return decryptSecret(row.tokenCiphertext, this.getEncryptionKey());
   }
 
+  /**
+   * Non-secret version of the stored connection: `<row id>:<updatedAt ms>`. Changes when the
+   * token is replaced (upsert bumps `updatedAt`) and disappears on disconnect; a reconnect
+   * gets a new row id. Never derived from the token itself.
+   */
+  async getConnectionVersion(userId: string): Promise<string | null> {
+    const row = await this.prisma.gitHubConnection.findUnique({
+      where: { userId },
+      select: { id: true, updatedAt: true },
+    });
+    return row ? connectionVersion(row) : null;
+  }
+
   private getEncryptionKey(): string {
     return this.config.getOrThrow<string>('secrets.encryptionKey');
   }
@@ -138,4 +151,8 @@ export class GithubConnectionService {
 
     return { id: body.id, login: body.login };
   }
+}
+
+function connectionVersion(row: { id: string; updatedAt: Date }): string {
+  return `${row.id}:${row.updatedAt.getTime()}`;
 }

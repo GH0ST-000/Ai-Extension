@@ -21,6 +21,7 @@ const PRIMARY_TABS: readonly MobileTab[] = [
 ] as const;
 
 const MORE_HREFS = new Set([
+  '/app/reviews',
   '/app/reliability',
   '/app/workspace',
   '/app/workspace/members',

@@ -59,6 +59,8 @@ export type StreamAiActionHandlers = {
   onReviewScope?: (scope: PRReviewScope) => void;
   /** Project memory rules applied to the prompt, or why none were. */
   onProjectMemory?: (metadata: ProjectMemoryPromptMetadata) => void;
+  /** Server operation id (REVIEW_ENTIRE_PR: identifies its saved history snapshot). */
+  onOperationId?: (operationId: string) => void;
 };
 
 const MEMORY_SKIP_REASONS: ReadonlySet<string> = new Set<ProjectMemorySkipReason>([
@@ -250,7 +252,7 @@ export async function streamAiAction(
   request: ExecuteAiActionRequest,
   handlers: StreamAiActionHandlers,
 ): Promise<string> {
-  const { onChunk, signal, onReviewScope, onProjectMemory } = handlers;
+  const { onChunk, signal, onReviewScope, onProjectMemory, onOperationId } = handlers;
   if (!(await hasAuthSession())) {
     throw new AiClientError(USER_FACING_AUTH_ERROR, { unauthorized: true });
   }
@@ -280,6 +282,7 @@ export async function streamAiAction(
         // Known as soon as the response starts, so a stream cut off later can be retried.
         const operationId = headers.get(AI_OPERATION_ID_HEADER);
         if (operationId) unfinishedOperations.set(key, { operationId, at: Date.now() });
+        if (operationId) onOperationId?.(operationId);
       },
     );
   } catch (error) {

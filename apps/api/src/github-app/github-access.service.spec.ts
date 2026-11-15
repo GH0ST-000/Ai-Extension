@@ -13,7 +13,10 @@ describe('GithubAccessService', () => {
     mintInstallationAccessToken: vi.fn(),
   };
   const installations = { getActiveInstallationId: vi.fn() };
-  const patConnections = { getDecryptedToken: vi.fn() };
+  const patConnections = {
+    getDecryptedToken: vi.fn(),
+    getConnectionVersion: vi.fn(),
+  };
 
   let service: GithubAccessService;
 
@@ -58,5 +61,43 @@ describe('GithubAccessService', () => {
     const resolved = await service.resolveApiToken('user_1');
 
     expect(resolved).toBeNull();
+  });
+
+  describe('credential identity (binds cached authorization to the credential used)', () => {
+    it('installation: identified by installation id, without minting a token', async () => {
+      installations.getActiveInstallationId.mockResolvedValue('987654');
+      expect(await service.resolveCredentialIdentity('user_1', 'ws_team')).toBe(
+        'installation:987654',
+      );
+      expect(appTokens.mintInstallationAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('PAT: identity is the connection version — never derived from the token', async () => {
+      installations.getActiveInstallationId.mockResolvedValue(null);
+      patConnections.getConnectionVersion.mockResolvedValue('conn_1:1000');
+      expect(await service.resolveCredentialIdentity('user_1')).toBe('pat:conn_1:1000');
+      // Identity resolution never decrypts the token (no secret is involved at all).
+      expect(patConnections.getDecryptedToken).not.toHaveBeenCalled();
+      expect(await service.resolveCredentialIdentity('user_1')).not.toMatch(/ghp_/);
+
+      // Replaced token → new version; disconnected → no identity.
+      patConnections.getConnectionVersion.mockResolvedValue('conn_1:2000');
+      expect(await service.resolveCredentialIdentity('user_1')).toBe('pat:conn_1:2000');
+      patConnections.getConnectionVersion.mockResolvedValue(null);
+      expect(await service.resolveCredentialIdentity('user_1')).toBeNull();
+    });
+
+    it('same precedence as resolveApiToken: installation removed → PAT identity; nothing → null', async () => {
+      installations.getActiveInstallationId.mockResolvedValue('1');
+      patConnections.getConnectionVersion.mockResolvedValue('conn_1:1');
+      expect(await service.resolveCredentialIdentity('user_1')).toBe('installation:1');
+      installations.getActiveInstallationId.mockResolvedValue(null);
+      expect(await service.resolveCredentialIdentity('user_1')).toBe('pat:conn_1:1');
+      patConnections.getConnectionVersion.mockResolvedValue(null);
+      expect(await service.resolveCredentialIdentity('user_1')).toBeNull();
+      appTokens.isAppAuthEnabled.mockReturnValue(false);
+      installations.getActiveInstallationId.mockResolvedValue('1');
+      expect(await service.resolveCredentialIdentity('user_1')).toBeNull();
+    });
   });
 });

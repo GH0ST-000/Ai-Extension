@@ -39,12 +39,14 @@ import {
   PROJECT_MEMORY_METADATA_HEADER,
   type PageContextGitHub,
   type PRReviewCoverage,
+  type PrReviewHistoryPersistence,
   type PRReviewScope,
   type ProjectMemoryPromptMetadata,
   type ProjectMemorySkipReason,
   AI_OPERATION_ID_HEADER,
   AI_OPERATION_REPLAYED_HEADER,
 } from '@project-x/types';
+import { PrReviewHistoryService } from '../pr-review-history/pr-review-history.service';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
 import {
   batchPromptOverheadChars,
@@ -155,6 +157,8 @@ type PrReviewRun = {
   /** A lost-response retry of a completed review: its stored result (no AI, no charge). */
   replay?: StoredResult;
   executionId?: string;
+  /** PR head the diff was loaded at (absent for the page fallback). */
+  headSha?: string;
   contextVersions: ResolvedAiRun['contextVersions'];
   /** Read-only code context loader at the PR head (GitHub API source only). */
   fileProvider?: FileContentProvider;
@@ -171,6 +175,8 @@ export type PrReviewExecution = {
   operationId?: string;
   /** True when this is the stored result of an earlier completed operation. */
   replayed?: boolean;
+  /** History snapshot status as confirmed by PostgreSQL (absent when not recorded). */
+  reviewHistory?: PrReviewHistoryPersistence;
 };
 
 /** Metadata stored (as JSON) with a delivered result. */
@@ -227,6 +233,7 @@ export class AiService {
     private readonly pullRequestDiff?: PullRequestDiffService,
     @Optional()
     private readonly prReviewOrchestrator?: PrReviewOrchestrator,
+    @Optional() private readonly prReviewHistory?: PrReviewHistoryService,
   ) {}
 
   /** REVIEW_ENTIRE_PR runs through the batched orchestrator when the diff service exists. */
@@ -257,6 +264,7 @@ export class AiService {
     coverage?: PRReviewCoverage;
     operationId?: string;
     replayed?: boolean;
+    reviewHistory?: PrReviewHistoryPersistence;
   }> {
     if (this.usesPrOrchestrator(input)) {
       const run = await this.resolvePrReviewRun(userId, input);
@@ -1013,6 +1021,7 @@ export class AiService {
       ...(reservation ? { reservation } : {}),
       ...(replay ? { replay } : {}),
       ...(input.executionId ? { executionId: input.executionId } : {}),
+      ...(diff.headSha ? { headSha: diff.headSha } : {}),
       contextVersions: memory?.version ? { memoryVersion: memory.version } : {},
     };
   }
@@ -1094,6 +1103,12 @@ export class AiService {
         });
       } catch (error) {
         await this.releaseCharge(run, 'orchestrator_error');
+        await this.recordHistory(userId, run, {
+          status: 'failed',
+          failureCode: 'orchestrator_error',
+          result,
+          startedAt,
+        });
         this.logger.error({
           msg: 'pr_review.orchestrator.failed',
           errorName: error instanceof Error ? error.name : 'unknown',
@@ -1122,6 +1137,12 @@ export class AiService {
         ...run.contextVersions,
       });
       if (cancelled) return null;
+      await this.recordHistory(userId, run, {
+        status: 'failed',
+        failureCode: 'all_batches_failed',
+        result,
+        startedAt,
+      });
       throw new ServiceUnavailableException(
         'Unable to complete the PR review right now. No usage was charged; try again.',
       );
@@ -1140,6 +1161,7 @@ export class AiService {
     });
     this.logPrReview(run, result, coverage, startedAt);
 
+    let reviewHistory: PrReviewHistoryPersistence | undefined;
     if (anySucceeded) {
       await this.commitCharge(run, {
         text,
@@ -1167,6 +1189,13 @@ export class AiService {
         },
         ...run.contextVersions,
       });
+      reviewHistory = await this.recordHistory(userId, run, {
+        status: coverage.complete ? 'completed' : 'partial',
+        result,
+        startedAt,
+        coverage,
+        text,
+      });
     }
 
     return {
@@ -1175,6 +1204,7 @@ export class AiService {
       coverage,
       ...(run.memoryMetadata ? { projectMemory: run.memoryMetadata } : {}),
       ...(run.reservation ? { operationId: run.reservation.operationId } : {}),
+      ...(reviewHistory ? { reviewHistory } : {}),
     };
   }
 
@@ -1237,6 +1267,66 @@ export class AiService {
     }
     response.write(result.text);
     response.end();
+  }
+
+  /**
+   * Persist the immutable history snapshot of a settled, charged-or-refunded execution.
+   * Only real executions (with a usage reservation) are recorded — never replays, cancelled
+   * runs or reviews that needed no AI call — so there is exactly one row per operation id.
+   * Runs after settlement, outside any transaction; best-effort (never throws).
+   */
+  private async recordHistory(
+    userId: string,
+    run: PrReviewRun,
+    outcome: {
+      status: 'completed' | 'partial' | 'failed';
+      failureCode?: string;
+      result: PrReviewRunResult;
+      startedAt: number;
+      coverage?: PRReviewCoverage;
+      text?: string;
+    },
+  ): Promise<PrReviewHistoryPersistence | undefined> {
+    if (!this.prReviewHistory || !run.reservation || run.replay) return undefined;
+    let coverage = outcome.coverage ?? null;
+    if (!coverage && outcome.result.outcomes.length > 0) {
+      try {
+        coverage = buildCoverage({
+          plan: run.plan,
+          outcomes: outcome.result.outcomes,
+          findings: outcome.result.findingStats,
+          // Failed runs carry no risk verdict (record() stores null for them).
+          riskFor: (complete) => computeRiskLevel([], complete),
+          usageUnits: 0,
+        });
+      } catch {
+        coverage = null;
+      }
+    }
+    return this.prReviewHistory.record({
+      workspaceId: run.workspaceId,
+      userId,
+      operationId: run.reservation.operationId,
+      owner: run.context.owner,
+      repository: run.context.repository,
+      pullRequestNumber: run.context.pullRequestNumber,
+      ...(run.context.pullRequestTitle ? { pullRequestTitle: run.context.pullRequestTitle } : {}),
+      headSha: run.headSha ?? null,
+      ...(run.context.baseBranch ? { baseBranch: run.context.baseBranch } : {}),
+      ...(run.context.headBranch ? { headBranch: run.context.headBranch } : {}),
+      status: outcome.status,
+      ...(outcome.failureCode ? { failureCode: outcome.failureCode } : {}),
+      coverage,
+      reviewScope: coverage ? scopeFromCoverage(coverage) : scopeFromPlan(run.plan),
+      findings: outcome.status === 'failed' ? [] : outcome.result.findings,
+      outcomes: outcome.result.outcomes,
+      ...(run.memoryMetadata ? { memory: run.memoryMetadata } : {}),
+      durationMs: Date.now() - outcome.startedAt,
+      batchCount: run.plan.batches.length,
+      markdown: outcome.text ?? null,
+      startedAt: new Date(outcome.startedAt),
+      completedAt: new Date(),
+    });
   }
 
   /** Refund the review's unit when nothing was delivered. Once only; never after a commit. */

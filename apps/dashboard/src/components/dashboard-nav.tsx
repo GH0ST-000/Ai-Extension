@@ -8,6 +8,7 @@ import { NavPendingIndicator } from './nav-pending-indicator';
 export const DASHBOARD_NAV_ITEMS = [
   { href: '/app', label: 'Overview', hint: 'Workspace pulse' },
   { href: '/app/memory', label: 'Memory', hint: 'Project context' },
+  { href: '/app/reviews', label: 'Review history', hint: 'Saved PR reviews' },
   { href: '/app/systems', label: 'Systems', hint: 'Multi-repo scope' },
   { href: '/app/reliability', label: 'Reliability', hint: 'Audit & recovery' },
   { href: '/app/workspace', label: 'Workspace', hint: 'General settings' },

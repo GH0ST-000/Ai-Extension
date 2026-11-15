@@ -47,6 +47,7 @@ model User {
   createdWorkspaces Workspace[] @relation("WorkspaceCreator")
   createdProjectMemories ProjectMemory[] @relation("ProjectMemoryCreator")
   createdProjectSystems ProjectSystem[] @relation("ProjectSystemCreator")
+  prReviewReports  PrReviewReport[]
 
   @@map("users")
 }
@@ -157,6 +158,7 @@ model Workspace {
   executionCheckpoints ExecutionCheckpoint[]
   executionFailures ExecutionFailure[]
   githubAppInstallation GitHubAppInstallation?
+  prReviewReports  PrReviewReport[]
 
   @@index([status])
   @@map("workspaces")
@@ -585,4 +587,61 @@ model ExecutionFailure {
   @@index([workspaceId, category])
   @@index([userId, category])
   @@map("execution_failures")
+}
+
+/**
+ * Persistent PR review history: an immutable snapshot of one REVIEW_ENTIRE_PR execution,
+ * written once when the run settles (completed / partial / failed) and never updated.
+ * Reopened without any AI call, usage charge or GitHub write.
+ * Privacy: no secrets, no credentials, no Project Memory rule text; personal (user-visibility)
+ * memory rules are stored as a count only. Snapshot shape is versioned by `schemaVersion`.
+ */
+model PrReviewReport {
+  id                      String    @id @default(cuid())
+  /// Version of `snapshot` / `reportMarkdown` layout (readers must accept older versions).
+  schemaVersion           Int       @default(1) @map("schema_version")
+  workspaceId             String    @map("workspace_id")
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Initiator. Null after the user was deleted (the workspace keeps its history).
+  userId                  String?   @map("user_id")
+  user                    User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Server-chosen usage operation id: one report per execution (idempotent persistence).
+  operationId             String    @map("operation_id")
+  provider                String    @default("github")
+  /// Lower-cased GitHub owner / repository (normalized for filtering).
+  owner                   String
+  repository              String
+  pullRequestNumber       Int       @map("pull_request_number")
+  pullRequestTitle        String?   @map("pull_request_title")
+  headSha                 String?   @map("head_sha")
+  baseBranch              String?   @map("base_branch")
+  headBranch              String?   @map("head_branch")
+  /// completed | partial | failed
+  status                  String
+  /// Stable machine code when failed (all_batches_failed, orchestrator_error).
+  failureCode             String?   @map("failure_code")
+  riskLevel               String?   @map("risk_level")
+  diffSource              String?   @map("diff_source")
+  findingsCount           Int       @default(0) @map("findings_count")
+  needsInvestigationCount Int       @default(0) @map("needs_investigation_count")
+  filesTotal              Int?      @map("files_total")
+  filesReviewed           Int       @default(0) @map("files_reviewed")
+  coverageComplete        Boolean   @default(false) @map("coverage_complete")
+  /// Project Memory setting the review ran with (on / off) and its outcome status.
+  memoryMode              String?   @map("memory_mode")
+  memoryStatus            String?   @map("memory_status")
+  /// Versioned structured snapshot (coverage, findings, verification, safe memory metadata).
+  snapshot                Json
+  /// Report exactly as delivered (Markdown with the coverage trailer). Null for failed runs.
+  reportMarkdown          String?   @map("report_markdown")
+  startedAt               DateTime  @map("started_at")
+  completedAt             DateTime  @map("completed_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, operationId])
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, owner, repository, pullRequestNumber, createdAt(sort: Desc)])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("pr_review_reports")
 }

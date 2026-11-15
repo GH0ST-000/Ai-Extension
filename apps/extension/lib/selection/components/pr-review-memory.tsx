@@ -8,8 +8,9 @@ import {
 } from '../utils/project-memory-metadata';
 
 /**
- * Which project memory rules were applied to this review's prompt. Data comes only from
- * the API response for this request (rules the user may read in the acting workspace).
+ * Whether Project Memory was applied, skipped or turned off for this review, and which rules
+ * were applied. Data comes only from the API response for this request (rules the user may
+ * read in the acting workspace).
  */
 export function PrReviewMemory({ metadata }: { metadata: ProjectMemoryPromptMetadata | null }) {
   const [open, setOpen] = useState(false);
@@ -30,7 +31,12 @@ export function PrReviewMemory({ metadata }: { metadata: ProjectMemoryPromptMeta
         <span aria-hidden>{open ? '▾' : '▸'}</span>
       </button>
       {open ? (
-        metadata.status === 'skipped' ? (
+        metadata.status === 'disabled' ? (
+          <p className="mt-1 text-[11px] leading-4 text-muted">
+            Project Memory was turned off for this review. No rules were retrieved or sent to the
+            AI.
+          </p>
+        ) : metadata.status === 'skipped' ? (
           <p className="mt-1 text-[11px] leading-4 text-muted">
             {memorySkipReasonText(metadata.reason)}
           </p>
@@ -52,6 +58,10 @@ export function PrReviewMemory({ metadata }: { metadata: ProjectMemoryPromptMeta
                 </p>
               </li>
             ))}
+            <li className="text-[10px] text-muted">
+              Sent to the AI as review context. This does not show whether a rule changed any
+              finding.
+            </li>
             <li className="text-[10px] text-muted">Memory version {metadata.version}</li>
           </ul>
         )

@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/invites/invites.service.ts",
+            "lineStart": 10,
+            "lineEnd": 10,
+            "category": "data_integrity",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Duplicate invites under concurrent requests (check-then-insert)",
+            "explanation": "findFirst and create are not atomic, so two requests can both insert an invite.",
+            "evidence": "const existing = await db.invite.findFirst({ where: { workspaceId, email } });",
+            "changeType": "introduced",
+            "trigger": "Two invite requests for the same email at once",
+            "failurePath": "findFirst \u2192 create twice",
+            "violatedInvariant": "One invite per email and workspace",
+            "impact": "Duplicate invites",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Duplicate invites under concurrent requests (check-then-insert)": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "} catch (error) {\n// A concurrent invite inserted the same (workspaceId, email) first: return that one.\nif ((error as { code?: string }).code === UNIQUE_VIOLATION) {",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

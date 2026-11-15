@@ -1,0 +1,29 @@
+{
+  "id": "memory-contamination",
+  "title": "Billing test added; Project Memory rule about webhooks (no bug)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "memory-contamination",
+  "groups": [
+    "clean",
+    "regression"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/invoices/invoice-total.ts",
+      "physical": "invoice-total.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/invoices/invoice-total.spec.ts",
+      "physical": "invoice-total.spec.fixture.ts",
+      "changed": true,
+      "status": "added"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)",
+  "projectMemory": "- [high] (USER_PREFERENCE) payment-idempotency: All payment webhook handlers must be idempotent. Duplicate webhook events must never cause duplicate billing operations."
+}

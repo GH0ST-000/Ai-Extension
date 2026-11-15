@@ -21,9 +21,203 @@ import {
   buildPrReviewCommentDraft,
   buildPrReviewHandoffSummary,
 } from '../utils/format-pr-review-markdown';
+import {
+  coverageGaps,
+  excludedCount,
+  isUnverifiedPageScope,
+  PAGE_FALLBACK_NOTICE,
+  unreviewedFiles,
+} from '../utils/pr-review-coverage';
 import { ReviewDraftChip, ReviewDraftPanel } from './review-draft-panel';
 import { PrReviewMemory } from './pr-review-memory';
 import { safeHttpsHref } from '../ci/safe-external-url';
+
+const STATUS_LABEL: Record<string, string> = {
+  reviewed_partial: 'partial',
+  deferred_budget: 'deferred',
+  review_failed: 'failed',
+  no_patch: 'no diff',
+  not_fetched: 'not listed',
+};
+const MAX_LISTED_FILES = 50;
+
+/** Diff collected from the GitHub page (API unavailable): coverage cannot be verified. */
+function PageFallbackNotice({ report }: { report: PRReviewReport }) {
+  if (!isUnverifiedPageScope(report.reviewScope)) {
+    return null;
+  }
+  return (
+    <div
+      role="alert"
+      data-testid="pr-review-page-fallback-notice"
+      className="rounded-lg border border-spark/40 bg-spark/10 px-2.5 py-2 text-[11px] leading-4 text-primary"
+    >
+      <p className="font-semibold">Unverified coverage: diff read from the GitHub page.</p>
+      <p className="mt-0.5 text-secondary">{PAGE_FALLBACK_NOTICE}</p>
+    </div>
+  );
+}
+
+/** Prominent partial-coverage notice: what was not reviewed, and why. */
+function CoverageBanner({ report }: { report: PRReviewReport }) {
+  const coverage = report.coverage;
+  if (!coverage || coverage.complete) {
+    return null;
+  }
+  const c = coverage.counts;
+  const total = coverage.totalFiles ?? coverage.files.length + c.not_fetched;
+  // Page fallback: the count is what the page showed, not the PR's real total.
+  const ofTotal = isUnverifiedPageScope(coverage)
+    ? `${total} file${total === 1 ? '' : 's'} found on the page`
+    : `${total} changed files`;
+  const gaps = coverageGaps(coverage);
+  const files = unreviewedFiles(coverage);
+  const failedBatches = coverage.batches.filter((b) => b.status !== 'succeeded').length;
+  const excluded = excludedCount(coverage);
+  const nothingReviewable = c.reviewed_full + c.reviewed_partial === 0 && gaps.length === 0;
+
+  return (
+    <div
+      role="alert"
+      data-testid="pr-review-coverage-banner"
+      className="rounded-lg border border-spark/40 bg-spark/10 px-2.5 py-2 text-[11px] leading-4 text-primary"
+    >
+      <p className="font-semibold">
+        {nothingReviewable
+          ? 'No reviewable code changes — nothing was sent to AI.'
+          : `Partial coverage: ${c.reviewed_full} of ${ofTotal} fully reviewed.`}
+      </p>
+      <p className="mt-0.5 text-secondary">
+        {nothingReviewable
+          ? 'Risk is not rated for this PR.'
+          : 'Risk cannot be rated LOW while code is unreviewed. Review the files below yourself.'}
+      </p>
+      {gaps.length > 0 ? (
+        <ul className="mt-1 list-disc pl-4 text-secondary">
+          {gaps.map((gap) => (
+            <li key={gap.status}>
+              {gap.count} {gap.label}
+            </li>
+          ))}
+          {failedBatches > 0 ? (
+            <li>
+              {failedBatches} of {coverage.batches.length} AI batches failed
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      {excluded > 0 ? (
+        <p className="mt-1 text-muted">
+          {excluded} generated, binary or rename-only file{excluded === 1 ? '' : 's'} excluded on
+          purpose.
+        </p>
+      ) : null}
+      {files.length > 0 ? (
+        <details className="mt-1">
+          <summary className="cursor-pointer font-semibold text-accent">
+            Show {files.length} unreviewed file{files.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {files.slice(0, MAX_LISTED_FILES).map((file) => (
+              <li key={file.path} className="flex gap-1.5">
+                <span className="shrink-0 rounded bg-hover px-1 text-[10px] text-muted">
+                  {STATUS_LABEL[file.status] ?? file.status}
+                </span>
+                <span className="min-w-0 break-all font-mono text-secondary">{file.path}</span>
+              </li>
+            ))}
+            {files.length > MAX_LISTED_FILES ? (
+              <li className="text-muted">… and {files.length - MAX_LISTED_FILES} more</li>
+            ) : null}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+const CHANGE_LABEL: Record<string, string> = {
+  introduced: 'introduced by this PR',
+  removed_safeguard: 'safeguard removed by this PR',
+  exposed_existing: 'existing defect exposed by this PR',
+  pre_existing: 'pre-existing (not from this PR)',
+};
+
+/** Why the finding stands: category, verification, and the trigger → failure → impact chain. */
+function FindingDetails({ finding }: { finding: PRReviewFinding }) {
+  const meta = [
+    finding.category?.replace(/_/g, ' '),
+    finding.confidence ? `${finding.confidence} confidence` : null,
+    finding.changeType ? (CHANGE_LABEL[finding.changeType] ?? null) : null,
+  ].filter(Boolean);
+  const chain: [string, string | undefined][] = [
+    ['Trigger', finding.trigger],
+    ['Failure path', finding.failurePath],
+    ['Impact', finding.impact],
+  ];
+  const hasChain = chain.some(([, v]) => v);
+  if (!meta.length && !finding.verification && !hasChain && !finding.alsoIn?.length) {
+    return null;
+  }
+  return (
+    <div className="mt-1 space-y-0.5 text-[10px] leading-4 text-muted">
+      {meta.length ? <p>{meta.join(' · ')}</p> : null}
+      {finding.verification ? <p>Verification: {finding.verification}</p> : null}
+      {finding.alsoIn?.length ? (
+        <p className="break-all">Also in: {finding.alsoIn.join(', ')}</p>
+      ) : null}
+      {hasChain ? (
+        <details>
+          <summary className="cursor-pointer font-semibold text-accent">Failure path</summary>
+          <dl className="mt-0.5 space-y-0.5">
+            {chain
+              .filter(([, v]) => v)
+              .map(([label, value]) => (
+                <div key={label}>
+                  <dt className="inline font-semibold text-secondary">{label}: </dt>
+                  <dd className="inline text-secondary">{value}</dd>
+                </div>
+              ))}
+          </dl>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** Unresolved MEDIUM/HIGH candidates: visible, clearly separated, never counted as findings. */
+function NeedsInvestigation({ items }: { items: PRReviewFinding[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div data-testid="pr-review-needs-investigation" className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+        Needs investigation ({items.length})
+      </p>
+      <p className="text-[11px] leading-4 text-secondary">
+        Possible issues that independent verification could neither confirm nor refute. They are not
+        counted as findings, but the PR is not rated low risk while they remain open.
+      </p>
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className="rounded-lg border border-dashed border-spark/40 bg-surface px-2.5 py-2"
+        >
+          <p className="text-[11px] font-semibold text-primary">
+            <span className="uppercase text-muted">possible {item.severity}</span>
+            {item.filePath ? (
+              <span className="font-mono font-medium text-secondary"> · {item.filePath}</span>
+            ) : null}
+          </p>
+          <p className="mt-0.5 text-[12px] leading-4 text-primary">{item.title}</p>
+          {item.why ? (
+            <p className="mt-1 text-[11px] leading-4 text-secondary">{item.why}</p>
+          ) : null}
+          <FindingDetails finding={item} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const FILTERS: { id: PrFindingFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -217,13 +411,22 @@ export function PrReviewReportView({
           <span className="rounded bg-hover px-1.5 py-0.5">{report.stats.low} low</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{formatReviewedFilesLabel(report)}</span>
           <span className="rounded bg-hover px-1.5 py-0.5">{openCount} open</span>
-          {report.reviewScope?.truncated ? (
-            <span className="rounded bg-hover px-1.5 py-0.5">partial diff</span>
+          {report.needsInvestigation?.length ? (
+            <span className="rounded bg-hover px-1.5 py-0.5 font-semibold text-spark">
+              {report.needsInvestigation.length} need investigation
+            </span>
+          ) : null}
+          {report.coverage?.complete ? (
+            <span className="rounded bg-hover px-1.5 py-0.5">full coverage</span>
+          ) : report.reviewScope?.truncated ? (
+            <span className="rounded bg-hover px-1.5 py-0.5 font-semibold text-spark">
+              partial coverage
+            </span>
           ) : null}
           {report.reviewScope?.source === 'page' ? (
             <span
               className="rounded bg-hover px-1.5 py-0.5"
-              title="GitHub API unavailable; diff read from the page"
+              title="GitHub API unavailable; diff read from the page (total unknown)"
             >
               page diff
             </span>
@@ -246,6 +449,9 @@ export function PrReviewReportView({
           </ul>
         </div>
       ) : null}
+
+      {!streaming ? <PageFallbackNotice report={report} /> : null}
+      {!streaming ? <CoverageBanner report={report} /> : null}
 
       <PrReviewMemory metadata={memory} />
 
@@ -455,6 +661,20 @@ export function PrReviewReportView({
                 {finding.why ? (
                   <p className="mt-1 text-[11px] leading-4 text-secondary">{finding.why}</p>
                 ) : null}
+                {finding.lineStart != null ? (
+                  <p className="mt-0.5 font-mono text-[10px] text-muted">
+                    L{finding.lineStart}
+                    {finding.lineEnd != null && finding.lineEnd !== finding.lineStart
+                      ? `–L${finding.lineEnd}`
+                      : ''}
+                  </p>
+                ) : null}
+                <FindingDetails finding={finding} />
+                {finding.evidence ? (
+                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-elevated px-1.5 py-1 font-mono text-[10px] leading-4 text-secondary">
+                    {finding.evidence}
+                  </pre>
+                ) : null}
                 {!streaming ? (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {disposition ? (
@@ -517,6 +737,8 @@ export function PrReviewReportView({
           })
         )}
       </div>
+
+      {!streaming ? <NeedsInvestigation items={report.needsInvestigation ?? []} /> : null}
 
       {streaming ? <span className="inline-block text-[11px] text-accent">0</span> : null}
     </div>

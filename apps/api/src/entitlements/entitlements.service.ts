@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { entitlementsAllowFeature, getProductPlan, isProductPlanId } from '@project-x/shared';
-import type { ProductEntitlements, ProductFeature, ProductPlanId } from '@project-x/types';
+import type {
+  ProductEntitlements,
+  ProductFeature,
+  ProductPlanId,
+  SubscriptionStatus,
+} from '@project-x/types';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { workspaceException } from '../workspaces/workspace.errors';
@@ -13,7 +18,31 @@ type CachedEntitlements = {
 
 const CACHE_TTL_MS = 30_000;
 
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'past_due', 'paused']);
+/**
+ * Entitlement policy by subscription status — the CURRENT commercial behavior, made explicit.
+ * `plan`: the subscribed plan's entitlements (features and monthly AI quota). `free`: the free
+ * plan's entitlements (AI stays available within the free quota).
+ *
+ * - trialing, active → plan.
+ * - past_due → plan: Paddle is retrying the payment (dunning); access continues until Paddle
+ *   cancels the subscription.
+ * - paused → plan. NOT CONFIRMED as intended: a paused Paddle subscription is not being billed.
+ *   Alternatives awaiting a product decision: (a) keep paid access (current), (b) free plan
+ *   while paused, (c) paid access until `currentPeriodEnd`, then free. Unchanged until approved.
+ * - cancelled, expired, none → free. A cancellation at period end keeps status `active` (with
+ *   `cancelAtPeriodEnd`) until Paddle sends the final `canceled`.
+ * - anything else (unknown / unmapped) → free: never assume a paid status.
+ * A `free` plan row is free in every status.
+ */
+export const SUBSCRIPTION_STATUS_POLICY: Readonly<Record<SubscriptionStatus, 'plan' | 'free'>> = {
+  trialing: 'plan',
+  active: 'plan',
+  past_due: 'plan',
+  paused: 'plan',
+  cancelled: 'free',
+  expired: 'free',
+  none: 'free',
+};
 
 /** The plan a workspace is entitled to, given its subscription row (or none). */
 export function effectivePlanId(
@@ -22,10 +51,11 @@ export function effectivePlanId(
   if (!subscription || !isProductPlanId(subscription.planId)) {
     return 'free';
   }
-  if (ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status) || subscription.planId === 'free') {
-    return subscription.planId;
-  }
-  return 'free';
+  if (subscription.planId === 'free') return 'free';
+  const policy = (SUBSCRIPTION_STATUS_POLICY as Record<string, 'plan' | 'free' | undefined>)[
+    subscription.status
+  ];
+  return policy === 'plan' ? subscription.planId : 'free';
 }
 
 @Injectable()

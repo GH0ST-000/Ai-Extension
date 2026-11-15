@@ -141,6 +141,8 @@ export interface WorkspaceUsageCounter {
 export interface UsageConsumeResult {
   allowed: boolean;
   metric: UsageMetric;
+  /** True when the idempotency key was already charged: this call charged nothing. */
+  duplicate?: boolean;
   current: number;
   limit: number | null;
   remaining: number | null;
@@ -276,6 +278,7 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_RESOURCE_ACCESS_DENIED'
   | 'FEATURE_NOT_AVAILABLE'
   | 'USAGE_LIMIT_REACHED'
+  | 'AI_OPERATION_IN_PROGRESS'
   | 'PLAN_LIMIT_EXCEEDED'
   | 'SUBSCRIPTION_REQUIRED'
   | 'SUBSCRIPTION_INACTIVE'

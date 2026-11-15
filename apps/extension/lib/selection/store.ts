@@ -4,6 +4,7 @@ import {
   AIAction,
   type PageContext,
   type PRReviewScope,
+  type ProjectMemoryMode,
   type ProjectMemoryPromptMetadata,
 } from '@project-x/types';
 
@@ -15,7 +16,7 @@ import {
 } from '../editing';
 import { extractPageContext } from '../context/extract-page-context';
 import { markFirstValue } from '../onboarding/onboarding-api';
-import { memoryRepositoryForRequest } from '../project-memory';
+import { memoryRepositoryForRequest, useReviewMemoryModeStore } from '../project-memory';
 import { AiClientError, buildAiRequest, streamAiAction } from '../services/ai-client';
 import { ERROR_INTELLIGENCE_ACTIONS, USER_FACING_AI_ERROR } from './constants';
 import {
@@ -52,6 +53,8 @@ type SelectionToolbarState = {
   lastReviewScope: PRReviewScope | null;
   /** Project memory rules the API applied to the latest REVIEW_ENTIRE_PR prompt. */
   lastReviewMemory: ProjectMemoryPromptMetadata | null;
+  /** Memory setting the latest REVIEW_ENTIRE_PR was sent with (reused by retry). */
+  lastReviewMemoryMode: ProjectMemoryMode | null;
   /** Trusted Apply Fix destination captured when launching SUGGEST_FIX from a PR finding. */
   suggestFixApplyTarget: SuggestFixApplyTarget | null;
   /** Session-only finding dispositions (cleared on dismiss / new PR review). */
@@ -72,6 +75,8 @@ type SelectionToolbarState = {
       applyTarget?: SuggestFixApplyTarget | null;
       /** `owner/repo` for server-side project memory when the page itself is not that repo. */
       memoryRepository?: string | null;
+      /** REVIEW_ENTIRE_PR: memory setting to use (default: the toggle's current value). */
+      projectMemoryMode?: ProjectMemoryMode;
     },
   ) => Promise<void>;
   retry: () => Promise<void>;
@@ -96,6 +101,7 @@ const INITIAL_STATE = {
   lastReviewContext: null as PageContext | null,
   lastReviewScope: null as PRReviewScope | null,
   lastReviewMemory: null as ProjectMemoryPromptMetadata | null,
+  lastReviewMemoryMode: null as ProjectMemoryMode | null,
   suggestFixApplyTarget: null as SuggestFixApplyTarget | null,
   findingDispositions: {} as Record<string, PrFindingDisposition>,
   findingFilter: 'all' as PrFindingFilter,
@@ -283,6 +289,10 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
 
     const editableSnapshot = resolveEditableSnapshot(selectedText, get().editableSnapshot);
     const resetReviewSession = action === AIAction.REVIEW_ENTIRE_PR;
+    // PR reviews always send the setting explicitly; other actions keep the server default.
+    const projectMemoryMode: ProjectMemoryMode | undefined = resetReviewSession
+      ? (options?.projectMemoryMode ?? useReviewMemoryModeStore.getState().mode)
+      : undefined;
 
     set({
       phase: 'assistant',
@@ -301,6 +311,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
             lastReviewContext: null,
             lastReviewScope: null,
             lastReviewMemory: null,
+            lastReviewMemoryMode: projectMemoryMode ?? null,
             suggestFixApplyTarget: null,
           }
         : action === AIAction.SUGGEST_FIX
@@ -353,6 +364,7 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
           action,
           text: requestText,
           memoryRepository,
+          ...(projectMemoryMode ? { projectMemoryMode } : {}),
           customPrompt: prompt,
           context: pageContext,
           errorIntelligence,
@@ -461,8 +473,14 @@ export const useSelectionToolbarStore = create<SelectionToolbarState>((set, get)
     const reuseFollowUp =
       assistant.action === AIAction.CUSTOM || assistant.action === AIAction.SUGGEST_FIX;
 
+    // A retried review keeps the memory setting it originally ran with (same request, so a
+    // lost response can be replayed), even if the toggle was changed since.
+    const lastMode = get().lastReviewMemoryMode;
     await get().startAction(assistant.action, {
       customPrompt: reuseFollowUp ? customPrompt : undefined,
+      ...(assistant.action === AIAction.REVIEW_ENTIRE_PR && lastMode
+        ? { projectMemoryMode: lastMode }
+        : {}),
     });
   },
 

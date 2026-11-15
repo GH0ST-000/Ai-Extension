@@ -1,0 +1,46 @@
+{
+  "id": "race-condition",
+  "title": "Seat limit check-then-insert without the lock",
+  "repository": "benchmark/phase1",
+  "pullRequest": "race-condition",
+  "groups": [
+    "data"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/workspaces/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/workspaces/seats.ts",
+      "physical": "seats.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "race-condition/seat-limit-exceeded",
+      "path": "apps/api/src/workspaces/seats.ts",
+      "lines": [
+        15,
+        19
+      ],
+      "removedLines": [
+        15,
+        21
+      ],
+      "category": "data_integrity",
+      "severity": "medium",
+      "security": false,
+      "changeType": "removed_safeguard",
+      "description": "The lock serializing the seat count and the insert was removed: concurrent invitations read the same count and exceed the seat limit.",
+      "witness": "witness.spec.ts \u203a three concurrent adds exceed a limit of two"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

@@ -1,0 +1,46 @@
+{
+  "id": "tx-insufficient-isolation",
+  "title": "Move withdrawals into an interactive transaction",
+  "repository": "benchmark/phase1",
+  "pullRequest": "tx-insufficient-isolation",
+  "groups": [
+    "data"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/wallet/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/wallet/wallet.service.ts",
+      "physical": "wallet.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "tx-insufficient-isolation/lost-update-overdraft",
+      "path": "apps/api/src/wallet/wallet.service.ts",
+      "lines": [
+        12,
+        16
+      ],
+      "removedLines": [
+        11,
+        14
+      ],
+      "category": "data_integrity",
+      "severity": "high",
+      "security": false,
+      "changeType": "removed_safeguard",
+      "description": "The atomic conditional decrement was replaced by read-check-write inside a READ COMMITTED transaction: concurrent withdrawals both pass the balance check and overdraw (lost update).",
+      "witness": "witness.spec.ts \u203a two concurrent withdrawals overdraw the account"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

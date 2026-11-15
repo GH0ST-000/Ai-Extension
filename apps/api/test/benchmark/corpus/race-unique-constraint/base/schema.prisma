@@ -1,0 +1,7 @@
+model Invite {
+  workspaceId String
+  email       String
+  status      String
+
+  @@unique([workspaceId, email])
+}

@@ -1,0 +1,108 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/members/members.service.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "security",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Owner check may not handle role changes",
+            "explanation": "It is unclear whether role changes are handled.",
+            "evidence": "if (!actor || actor.role !== 'owner') {",
+            "changeType": "introduced",
+            "trigger": "The actor role changes",
+            "failurePath": "members.service.ts guard",
+            "violatedInvariant": "Only owners remove members",
+            "impact": "Possible unauthorized removal",
+            "assumptions": "",
+            "missingContext": ""
+          },
+          {
+            "path": "apps/api/src/members/members.service.ts",
+            "lineStart": 19,
+            "lineEnd": 19,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Missing member is silently ignored",
+            "explanation": "The function may silently return.",
+            "evidence": "return { removed: false };",
+            "changeType": "introduced",
+            "trigger": "The member does not exist",
+            "failurePath": "target null \u2192 removed false",
+            "violatedInvariant": "Errors are surfaced",
+            "impact": "Callers may not notice",
+            "assumptions": "",
+            "missingContext": ""
+          },
+          {
+            "path": "apps/api/src/members/members.service.ts",
+            "lineStart": 23,
+            "lineEnd": 23,
+            "category": "robustness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Removal errors are only logged",
+            "explanation": "The catch block could hide failures.",
+            "evidence": "} catch (error) {\nlogger.error('member removal failed', error);",
+            "changeType": "introduced",
+            "trigger": "The delete fails",
+            "failurePath": "catch \u2192 log",
+            "violatedInvariant": "Failures propagate",
+            "impact": "Hidden failures",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Owner check may not handle role changes": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!actor || actor.role !== 'owner') {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        },
+        "Missing member is silently ignored": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "return { removed: false };",
+          "failureSite": "apps/api/src/members/members.service.ts:19",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Removing a missing member",
+          "violatedInvariant": "Errors are surfaced",
+          "triggerSource": "memberId: string,",
+          "guardsOnPath": []
+        },
+        "Removal errors are only logged": {
+          "verdict": "insufficient_context",
+          "severity": "medium",
+          "reasoning": "scripted insufficient_context",
+          "decisiveCode": "",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 import {
   ArrayMaxSize,
-  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -16,7 +16,12 @@ import {
   Matches,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { AIAction, PAGE_CONTEXT_TYPES } from '@project-x/types';
+import {
+  AIAction,
+  PAGE_CONTEXT_TYPES,
+  PROJECT_MEMORY_MODES,
+  type ProjectMemoryMode,
+} from '@project-x/types';
 
 import {
   AI_DEFAULT_MAX_CHANGED_FILE_EXCERPT_CHARACTERS,
@@ -35,6 +40,8 @@ import {
   AI_DEFAULT_MAX_STACK_FRAMES,
   AI_DEFAULT_MAX_STACK_TRACE_CHARACTERS,
 } from '../constants/ai.constants';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 const ERROR_CATEGORIES = [
   'runtime',
@@ -177,11 +184,11 @@ export class PageContextGitHubDto {
   changedFiles?: PageContextChangedFileDto[];
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   changedFilesTruncated?: boolean | null;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   filesTab?: boolean | null;
 }
 
@@ -381,11 +388,21 @@ export class ExecuteAiActionDto {
   @Type(() => ErrorIntelligenceContextDto)
   errorIntelligence?: ErrorIntelligenceContextDto | null;
 
-  /** Day 24 — optional reliability execution linkage for AI audit snapshots. */
+  /** Day 24 — optional reliability execution linkage for AI audit snapshots. Never billing identity. */
   @IsOptional()
   @IsString()
   @MaxLength(128)
   executionId?: string | null;
+
+  /**
+   * Retry of a request whose response was lost: the `X-AI-Operation-Id` / `operationId` the
+   * server returned. Replays that operation's stored result (no AI call, no charge) only for
+   * the same user, workspace and request within the replay window; otherwise the request runs
+   * as a new, normally charged operation. It never bypasses quota.
+   */
+  @IsOptional()
+  @IsUUID()
+  retryOperationId?: string;
 
   /** `owner/repo` whose project memory applies. The server loads and authorizes memory. */
   @Transform(emptyToNull)
@@ -396,10 +413,18 @@ export class ExecuteAiActionDto {
     message: 'memoryRepository must be owner/repo',
   })
   memoryRepository?: string | null;
+
+  /**
+   * Explicit Project Memory setting: `off` = no memory retrieval and no memory in any prompt.
+   * Omitted = `on` (older clients). Only these two string values are accepted.
+   */
+  @IsOptional()
+  @IsIn(PROJECT_MEMORY_MODES)
+  projectMemoryMode?: ProjectMemoryMode;
 }
 
 export class ErrorClassificationDto {
-  @IsBoolean()
+  @StrictBoolean()
   isError!: boolean;
 
   @IsNumber()

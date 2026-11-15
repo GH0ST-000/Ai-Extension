@@ -1,0 +1,68 @@
+{
+  "id": "pr48-known-fps",
+  "title": "PR #48 @ 69e1fc4: known false positives from live reviews #4\u2013#6",
+  "repository": "GH0ST-000/Ai-Extension",
+  "pullRequest": "48",
+  "revision": "69e1fc4f3d19",
+  "base": "94e06797e666",
+  "clean": true,
+  "securityRegression": false,
+  "fixtures": "pr48-69e1fc4",
+  "groups": [
+    "clean",
+    "regression"
+  ],
+  "files": [
+    {
+      "path": "apps/api/src/workspaces/resolve-workspace-id.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/ai/pr-review/pull-request-diff.service.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/extension/lib/selection/utils/project-memory-metadata.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/project-memory/memory-hardening.spec.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/dashboard/src/app/app/memory/page.tsx",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/extension/lib/project-memory/project-memory.store.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/extension/lib/selection/store.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/extension/lib/selection/workflow/workflow.store.ts",
+      "physical": null,
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "line-referenced code audit (ground-truth.md): each claim is shown false at the cited lines of the exact PR head",
+  "projectMemory": "- [high] (USER_PREFERENCE) payment-idempotency: All payment webhook handlers must be idempotent. Duplicate webhook events must never cause duplicate billing operations."
+}

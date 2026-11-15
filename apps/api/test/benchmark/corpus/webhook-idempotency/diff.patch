@@ -1,0 +1,14 @@
+diff --git a/apps/api/src/billing/payment-webhook.ts b/apps/api/src/billing/payment-webhook.ts
+--- a/apps/api/src/billing/payment-webhook.ts
++++ b/apps/api/src/billing/payment-webhook.ts
+@@ -12,10 +12,6 @@ export async function handlePaymentWebhook(
+   if (event.type !== 'payment.succeeded') {
+     return { ok: true };
+   }
+-  const seen = await db.webhookEvent.findUnique({ where: { id: event.id } });
+-  if (seen) {
+-    return { ok: true, duplicate: true };
+-  }
+   const account = await db.account.findUnique({ where: { id: event.accountId } });
+   if (!account) {
+     throw new Error('UNKNOWN_ACCOUNT');

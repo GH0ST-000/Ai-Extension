@@ -1,0 +1,21 @@
+diff --git a/apps/api/src/wallet/wallet.service.ts b/apps/api/src/wallet/wallet.service.ts
+--- a/apps/api/src/wallet/wallet.service.ts
++++ b/apps/api/src/wallet/wallet.service.ts
+@@ -8,11 +8,11 @@ export type WalletDb = {
+ };
+ 
+ export async function withdraw(db: WalletDb, accountId: string, amount: number): Promise<void> {
+-  const debited = await db.account.updateMany({
+-    where: { id: accountId, credits: { gte: amount } },
+-    data: { credits: { decrement: amount } },
++  await db.$transaction(async (tx) => {
++    const account = await tx.account.findUnique({ where: { id: accountId } });
++    if (!account || account.credits < amount) {
++      throw new Error('INSUFFICIENT_FUNDS');
++    }
++    await tx.account.update({ where: { id: accountId }, data: { credits: account.credits - amount } });
+   });
+-  if (debited.count === 0) {
+-    throw new Error('INSUFFICIENT_FUNDS');
+-  }
+ }

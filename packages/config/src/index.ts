@@ -78,6 +78,35 @@ export const apiEnvSchema = z.object({
   AI_PR_REVIEW_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(500).max(16_384).default(4_096),
   /** Request timeout for REVIEW_ENTIRE_PR; the 30s default is too short for ~4k output tokens. */
   AI_PR_REVIEW_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(300_000).default(120_000),
+  /**
+   * Batched PR review cost ceilings (one review = one usage unit regardless of batches).
+   * AI_PR_REVIEW_MAX_OUTPUT_TOKENS above is the per-batch output budget. Hard maxima here are
+   * also enforced in code, so no configuration can make a review unbounded.
+   */
+  AI_PR_REVIEW_MAX_BATCHES: z.coerce.number().int().min(1).max(12).default(6),
+  AI_PR_REVIEW_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(6).default(3),
+  /** Estimated input tokens per batch (prompt + diffs). */
+  AI_PR_REVIEW_BATCH_INPUT_TOKENS: z.coerce.number().int().min(2_000).max(60_000).default(16_000),
+  /** Estimated input tokens per review, across all batches. */
+  AI_PR_REVIEW_MAX_INPUT_TOKENS: z.coerce.number().int().min(2_000).max(400_000).default(96_000),
+  /** Output tokens per review, across all batches. */
+  AI_PR_REVIEW_MAX_TOTAL_OUTPUT_TOKENS: z.coerce
+    .number()
+    .int()
+    .min(500)
+    .max(100_000)
+    .default(24_576),
+  /** Whole-review deadline; batches still running are cancelled. */
+  AI_PR_REVIEW_TOTAL_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(600_000).default(240_000),
+  /**
+   * Independent verification of MEDIUM/HIGH finding candidates (bounded; no retries). Total
+   * verification cost per review ≤ MAX_VERIFICATIONS × (VERIFY_INPUT + VERIFY_OUTPUT) tokens.
+   */
+  AI_PR_REVIEW_MAX_VERIFICATIONS: z.coerce.number().int().min(0).max(24).default(10),
+  AI_PR_REVIEW_VERIFY_INPUT_TOKENS: z.coerce.number().int().min(2_000).max(20_000).default(6_000),
+  AI_PR_REVIEW_VERIFY_OUTPUT_TOKENS: z.coerce.number().int().min(300).max(4_000).default(800),
+  /** Files fetched at the PR head for read-only code context, per review. */
+  AI_PR_REVIEW_MAX_CONTEXT_FILES: z.coerce.number().int().min(0).max(30).default(12),
   AI_MAX_INPUT_CHARACTERS: z.coerce.number().int().positive().default(12_000),
   /** Comma-separated exact origins (dashboard + chrome-extension://ID). */
   AI_CORS_ORIGINS: z.string().optional().default(''),

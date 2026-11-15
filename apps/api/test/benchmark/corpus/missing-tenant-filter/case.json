@@ -1,0 +1,42 @@
+{
+  "id": "missing-tenant-filter",
+  "title": "Note listing lost its workspace filter",
+  "repository": "benchmark/phase1",
+  "pullRequest": "missing-tenant-filter",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.query.ts",
+      "physical": "notes.query.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "missing-tenant-filter/unscoped-find-many",
+      "path": "apps/api/src/notes/notes.query.ts",
+      "lines": [
+        20,
+        20
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "listNotes no longer filters by workspaceId: a member of one workspace lists notes of every workspace (the caller membership check does not help).",
+      "witness": "witness.spec.ts \u203a a member of ws1 sees notes of ws2"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

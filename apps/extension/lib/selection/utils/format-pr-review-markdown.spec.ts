@@ -62,11 +62,41 @@ describe('formatPrReviewMarkdown', () => {
           changedFiles: [{ path: 'src/a.ts', patchExcerpt: '+a.b' }],
         },
       },
+      scope: {
+        source: 'github_api',
+        totalFiles: 1,
+        analyzedFiles: 1,
+        skippedFiles: 0,
+        truncated: false,
+      },
     })!;
 
     const summary = buildPrReviewHandoffSummary(report);
     expect(summary).toContain('Overall risk: MEDIUM');
     expect(summary).toContain('1 open');
+  });
+
+  it('a page-only review (no server scope, total unknown) is never rated MEDIUM or LOW', () => {
+    const report = buildPrReviewReport({
+      markdown: SAMPLE,
+      final: true,
+      context: {
+        type: 'github',
+        url: 'https://github.com/acme/app/pull/3',
+        title: 't',
+        github: {
+          owner: 'acme',
+          repository: 'app',
+          pullRequestNumber: 3,
+          changedFiles: [{ path: 'src/a.ts', patchExcerpt: '+a.b' }],
+        },
+      },
+    })!;
+    const summary = buildPrReviewHandoffSummary(report);
+    expect(summary).toContain('Overall risk: UNKNOWN');
+    expect(summary).toContain(
+      '1 file reviewed from the GitHub page (total unknown) (partial coverage)',
+    );
   });
 
   it('never exports LOW risk or "0 findings" for an incomplete review', () => {

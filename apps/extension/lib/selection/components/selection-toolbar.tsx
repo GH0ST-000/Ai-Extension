@@ -33,6 +33,7 @@ import {
 } from '../utils/format-pr-review-markdown';
 import { extractFixClipboardText } from '../utils/parse-suggest-fix';
 import { ActionMenu } from './action-menu';
+import { PrReviewMemoryToggle } from './pr-review-memory-toggle';
 import { ContextualHint } from './contextual-hint';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
@@ -518,13 +519,14 @@ export function SelectionToolbar() {
       await navigator.clipboard.writeText(
         formatPrReviewMarkdown(report, {
           dispositions: findingDispositions,
+          memory: lastReviewMemory,
         }),
       );
       return true;
     } catch {
       return false;
     }
-  }, [getCurrentPrReport, findingDispositions]);
+  }, [getCurrentPrReport, findingDispositions, lastReviewMemory]);
 
   const handleCopySummary = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -532,12 +534,14 @@ export function SelectionToolbar() {
       return false;
     }
     try {
-      await navigator.clipboard.writeText(buildPrReviewHandoffSummary(report, findingDispositions));
+      await navigator.clipboard.writeText(
+        buildPrReviewHandoffSummary(report, findingDispositions, lastReviewMemory),
+      );
       return true;
     } catch {
       return false;
     }
-  }, [getCurrentPrReport, findingDispositions]);
+  }, [getCurrentPrReport, findingDispositions, lastReviewMemory]);
 
   const handleCopyCommentDraft = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -691,6 +695,11 @@ export function SelectionToolbar() {
                   githubSlot={
                     prCiDestination || pageSnapshot?.type === 'github' ? (
                       <div className="space-y-1 px-1 py-1">
+                        {prCiDestination ? (
+                          <div className="px-1 py-1">
+                            <PrReviewMemoryToggle />
+                          </div>
+                        ) : null}
                         {prCiDestination ? (
                           <div className="px-1 py-1">
                             <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />

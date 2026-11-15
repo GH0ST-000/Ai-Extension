@@ -8,6 +8,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { AiModelFactory } from './models/ai-model.factory';
+import { PrReviewOrchestrator } from './pr-review/pr-review-orchestrator.service';
 import { PullRequestDiffService } from './pr-review/pull-request-diff.service';
 import { PromptRegistry } from './prompts/prompt.registry';
 
@@ -21,7 +22,13 @@ import { PromptRegistry } from './prompts/prompt.registry';
     forwardRef(() => ProjectMemoryModule),
   ],
   controllers: [AiController],
-  providers: [AiService, PromptRegistry, AiModelFactory, PullRequestDiffService],
+  providers: [
+    AiService,
+    PromptRegistry,
+    AiModelFactory,
+    PullRequestDiffService,
+    PrReviewOrchestrator,
+  ],
   exports: [AiService],
 })
 export class AiModule {}

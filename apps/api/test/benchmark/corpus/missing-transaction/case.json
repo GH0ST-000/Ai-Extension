@@ -1,0 +1,42 @@
+{
+  "id": "missing-transaction",
+  "title": "Credit transfer no longer runs in a transaction",
+  "repository": "benchmark/phase1",
+  "pullRequest": "missing-transaction",
+  "groups": [
+    "data"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/billing/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/billing/transfer.ts",
+      "physical": "transfer.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "missing-transaction/partial-transfer",
+      "path": "apps/api/src/billing/transfer.ts",
+      "lines": [
+        20,
+        20
+      ],
+      "category": "data_integrity",
+      "severity": "high",
+      "security": false,
+      "changeType": "introduced",
+      "description": "Debit and credit are separate writes: if the credit fails, the debit stays and credits are lost.",
+      "witness": "witness.spec.ts \u203a a failed credit leaves the debit applied"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

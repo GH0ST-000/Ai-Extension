@@ -284,9 +284,34 @@ model WorkspaceUsageEvent {
   idempotencyKey  String   @map("idempotency_key")
   quantity        Int      @default(1)
   createdAt       DateTime @default(now()) @map("created_at")
+  /// Server-controlled lifecycle: "reserved" while the operation runs (counted, refundable),
+  /// "committed" once charged. Rows created before reservations existed are committed.
+  status          String   @default("committed")
+  /// Authenticated user the operation ran for (null for legacy rows and non-user charges).
+  userId          String?  @map("user_id")
+  /// While reserved: one user's identical in-flight operation (unique per workspace); null
+  /// once committed. Prevents duplicate concurrent model execution.
+  inFlightKey     String?  @map("in_flight_key")
+  finalizedAt     DateTime? @map("finalized_at")
+  /// Hash of (user, action, logical request); kept after commit so a retry can be matched.
+  requestKey      String?  @map("request_key")
+  /// Lease of a running operation, renewed by heartbeat. Only an expired lease is recovered.
+  leaseExpiresAt  DateTime? @map("lease_expires_at")
+  /// Set once output reached the client: recovery then charges instead of refunding, and a
+  /// refund is no longer possible.
+  deliveredAt     DateTime? @map("delivered_at")
+  /// Short-lived copy of the delivered result, replayed (no AI call, no charge) to the same
+  /// user's retry of the same request when the response was lost. Cleared after expiry.
+  resultText      String?  @map("result_text")
+  resultMeta      Json?    @map("result_meta")
+  resultExpiresAt DateTime? @map("result_expires_at")
 
   @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, inFlightKey])
   @@index([workspaceId, metric, periodKey])
+  @@index([workspaceId, status, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@index([workspaceId, resultExpiresAt])
   @@map("workspace_usage_events")
 }
 
@@ -330,7 +355,25 @@ model ProjectMemory {
   @@index([userId, owner, repository, category], map: "project_memory_user_repo_category_idx")
   @@index([userId, owner, repository, key], map: "project_memory_user_repo_key_idx")
   @@index([userId, provider, owner, repository, category, key, scopeFingerprint], map: "project_memory_lookup_idx")
+  // At most one ACTIVE row per slot is enforced by three partial unique indexes created in
+  // migration 20261115090000_project_memory_active_slot_unique (Prisma 6 cannot declare
+  // partial indexes): project_memory_active_{workspace,personal,legacy}_slot_uidx.
+  // Do not accept a generated migration that drops them.
   @@map("project_memories")
+}
+
+/// Duplicate active Project Memory rows resolved (marked superseded, never deleted) when the
+/// active-slot unique indexes were introduced. Reviewable / reversible record.
+model ProjectMemoryDedupAudit {
+  id             BigInt   @id @default(autoincrement())
+  memoryId       String   @map("memory_id")
+  keptMemoryId   String   @map("kept_memory_id")
+  previousStatus String   @map("previous_status")
+  reason         String
+  resolvedAt     DateTime @default(now()) @map("resolved_at")
+
+  @@index([memoryId], map: "project_memory_dedup_audit_memory_id_idx")
+  @@map("project_memory_dedup_audit")
 }
 
 /**

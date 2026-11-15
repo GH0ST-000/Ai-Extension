@@ -34,7 +34,7 @@ import {
   PROJECT_MEMORY_MAX_SUMMARY_CHARS,
   ProjectMemoryCategory,
 } from '@project-x/types';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { GithubContentService } from '../github/github-content.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -104,7 +104,47 @@ type PersistInput = {
   freshness?: ProjectMemoryItem['freshness'];
   /** When true, do not overwrite active user_explicit memories. */
   inferred?: boolean;
+  /** An explicit user rule: also counts against the per-author explicit rule limit. */
+  explicitRule?: boolean;
+  /**
+   * Learn (auto-accepted facts): never recreate a fact the workspace disputed. An unchanged
+   * fact is skipped; a different value in a disputed slot with no active rule needs approval.
+   * Throws {@link DisputedFactBlocked}.
+   */
+  respectDisputes?: boolean;
 };
+
+/** Learn must not auto-store this fact because of a dispute (see `respectDisputes`). */
+class DisputedFactBlocked extends Error {
+  constructor(readonly reason: 'unchanged' | 'changed') {
+    super(`disputed fact ${reason}`);
+  }
+}
+
+/**
+ * Identity of a fact as AI context sees it: slot (category, key, scope) plus the normalized
+ * rule text. Content-based on purpose: commits, timestamps and evidence file lists do not
+ * change it; only a different fact does. Stored in `disputed_fingerprint` when disputed.
+ */
+export function factFingerprint(fact: {
+  category: string;
+  key: string;
+  scopeFingerprint: string;
+  summary: string;
+}): string {
+  const text = fact.summary.replace(/\s+/g, ' ').trim().toLowerCase();
+  const digest = createHash('sha256')
+    .update(JSON.stringify([fact.category, fact.key, fact.scopeFingerprint, text]))
+    .digest('hex')
+    .slice(0, 40);
+  return `fact1:${digest}`;
+}
+
+function summaryOf(valueJson: unknown): string {
+  return valueJson && typeof valueJson === 'object' && !Array.isArray(valueJson)
+    ? String((valueJson as { summary?: unknown }).summary ?? '')
+    : '';
+}
 
 export type PromptContextInput = {
   userId: string;
@@ -162,6 +202,21 @@ function safeErrorCode(error: unknown): string {
   return error instanceof Error ? error.name.slice(0, 64) : 'UNKNOWN';
 }
 
+/**
+ * The active-slot unique indexes (migration 20261115090000) reject a second active rule in a
+ * slot. The advisory lock normally prevents that; if a write still collides (e.g. with a write
+ * that bypassed the lock), answer 409 instead of a 500.
+ */
+function rethrowActiveSlotConflict(error: unknown): never {
+  if ((error as { code?: unknown } | null)?.code === 'P2002') {
+    throw projectMemoryException(
+      'PROJECT_MEMORY_CONFLICT',
+      'Another active rule for this key and scope was saved at the same time. Reload and try again.',
+    );
+  }
+  throw error;
+}
+
 @Injectable()
 export class ProjectMemoryService {
   private readonly logger = new Logger(ProjectMemoryService.name);
@@ -183,7 +238,10 @@ export class ProjectMemoryService {
   ): Promise<ListProjectMemoryResponse> {
     const workspaceId = await this.authorize(userId, 'memory:read');
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    await this.assertRepositoryAccess(userId, owner, repository);
+    // Reading memory the workspace already stored does not touch GitHub: workspace membership,
+    // memory:read and the PROJECT_MEMORY feature gate (authorize) are the boundary, so members
+    // without a personal GitHub token can read it. Every write path, Learn and AI-review context
+    // still verify GitHub repository access.
 
     const rows = await this.prisma.projectMemory.findMany({
       where: {
@@ -215,7 +273,10 @@ export class ProjectMemoryService {
   ): Promise<ProjectProfile> {
     const workspaceId = await this.authorize(userId, 'memory:read');
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    await this.assertRepositoryAccess(userId, owner, repository);
+    // Reading memory the workspace already stored does not touch GitHub: workspace membership,
+    // memory:read and the PROJECT_MEMORY feature gate (authorize) are the boundary, so members
+    // without a personal GitHub token can read it. Every write path, Learn and AI-review context
+    // still verify GitHub repository access.
 
     const items = await this.loadActiveItems(userId, owner, repository, workspaceId);
     return this.buildProfile(owner, repository, items);
@@ -230,7 +291,10 @@ export class ProjectMemoryService {
   ): Promise<ProjectMemorySummary> {
     const workspaceId = await this.authorize(userId, 'memory:read');
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    await this.assertRepositoryAccess(userId, owner, repository);
+    // Reading memory the workspace already stored does not touch GitHub: workspace membership,
+    // memory:read and the PROJECT_MEMORY feature gate (authorize) are the boundary, so members
+    // without a personal GitHub token can read it. Every write path, Learn and AI-review context
+    // still verify GitHub repository access.
 
     const items = await this.loadActiveItems(userId, owner, repository, workspaceId);
     const categories = categoryRelevanceForCapability(
@@ -304,9 +368,8 @@ export class ProjectMemoryService {
       },
     ];
 
-    await this.assertCanCreateUserRule(userId, owner, repository);
-
     const result = await this.persistMemory({
+      explicitRule: true,
       userId,
       owner,
       repository,
@@ -333,14 +396,17 @@ export class ProjectMemoryService {
       status?: ProjectMemoryStatus;
       scope?: ProjectMemoryScope;
       text?: string;
+      /** `updatedAt` the client last saw; a mismatch is a concurrent change (409). */
+      expectedUpdatedAt?: string;
     },
   ): Promise<ProjectMemoryItem> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
     const { existing } = await this.findItemForMutation(userId, owner, repository, memoryId);
 
     const data: Prisma.ProjectMemoryUpdateInput = {};
+    const textEdit = body.text !== undefined || body.value !== undefined;
 
-    if (body.text !== undefined || body.value !== undefined) {
+    if (textEdit) {
       const nextValue: ProjectMemoryValue =
         body.value ??
         ({
@@ -388,30 +454,102 @@ export class ProjectMemoryService {
     const finalStatus = body.status ?? existing.status;
     const finalFingerprint =
       (data.scopeFingerprint as string | undefined) ?? existing.scopeFingerprint;
-    const updated = await this.prisma.$transaction(async (tx) => {
-      if (finalStatus === 'active') {
-        // One active fact per (category, key, scope) in its visibility: re-activating or
-        // re-scoping a rule supersedes whatever currently holds that slot.
-        await tx.projectMemory.updateMany({
-          where: {
-            id: { not: existing.id },
+    if (finalStatus === 'disputed') {
+      // Remember exactly which fact was disputed, so Learn does not bring it back.
+      data.disputedFingerprint = factFingerprint({
+        category: existing.category,
+        key: existing.key,
+        scopeFingerprint: finalFingerprint,
+        summary: summaryOf(data.valueJson ?? existing.valueJson),
+      });
+    } else if (finalStatus === 'active' && existing.status !== 'active') {
+      // Restored: the dispute is resolved.
+      data.disputedFingerprint = null;
+    }
+    const updated = await this.prisma
+      .$transaction(async (tx) => {
+        await this.lockRepository(tx, existing.workspaceId, owner, repository, existing.userId);
+        // Re-read under the repository lock: the row may have changed since it was authorized.
+        const current = await tx.projectMemory.findUnique({ where: { id: existing.id } });
+        if (!current) {
+          throw projectMemoryException(
+            'PROJECT_MEMORY_ITEM_NOT_FOUND',
+            'Project memory item was not found.',
+          );
+        }
+        if (
+          body.expectedUpdatedAt !== undefined &&
+          current.updatedAt.getTime() !== new Date(body.expectedUpdatedAt).getTime()
+        ) {
+          throw projectMemoryException(
+            'PROJECT_MEMORY_CONFLICT',
+            'This rule was changed by someone else since you opened it. Reload to see the latest version, then edit again.',
+          );
+        }
+        if (textEdit) {
+          // Edited text is the user's rule now: a later Learn must not overwrite it.
+          const wasExplicit = this.hasUserExplicitProvenance(current.provenanceJson);
+          if (!wasExplicit && finalStatus === 'active') {
+            await this.assertWithinLimits(tx, {
+              workspaceId: current.workspaceId,
+              userId: current.userId,
+              owner,
+              repository,
+              visibility: current.visibility === 'user' ? 'user' : 'workspace',
+              explicitRule: true,
+              // The rule is already counted as active; only the author's explicit-rule cap applies.
+              skipRepositoryCap: current.status === 'active',
+            });
+          }
+          const prior = Array.isArray(current.provenanceJson)
+            ? (current.provenanceJson as unknown as ProjectMemoryProvenance[])
+            : [];
+          data.provenanceJson = this.trimProvenance([
+            {
+              type: 'user_explicit',
+              repository: { owner, name: repository },
+              observedAt: new Date().toISOString(),
+              summary: 'Rule text edited',
+            },
+            ...prior,
+          ]) as unknown as Prisma.InputJsonValue;
+          data.lastConfirmedAt = new Date();
+        }
+        if (finalStatus === 'active' && existing.status !== 'active') {
+          // Re-activation adds an active rule: limits apply as for a new rule.
+          await this.assertWithinLimits(tx, {
+            workspaceId: existing.workspaceId,
+            userId: existing.userId,
             owner,
             repository,
-            category: existing.category,
-            key: existing.key,
-            scopeFingerprint: finalFingerprint,
-            status: 'active',
-            workspaceId: existing.workspaceId,
-            visibility: existing.visibility,
-            ...(existing.visibility === 'user' || existing.workspaceId === null
-              ? { userId: existing.userId }
-              : {}),
-          },
-          data: { status: 'superseded' },
-        });
-      }
-      return tx.projectMemory.update({ where: { id: existing.id }, data });
-    });
+            visibility: existing.visibility === 'user' ? 'user' : 'workspace',
+            explicitRule: this.hasUserExplicitProvenance(existing.provenanceJson),
+          });
+        }
+        if (finalStatus === 'active') {
+          // One active fact per (category, key, scope) in its visibility: re-activating or
+          // re-scoping a rule supersedes whatever currently holds that slot.
+          await tx.projectMemory.updateMany({
+            where: {
+              id: { not: existing.id },
+              owner,
+              repository,
+              category: existing.category,
+              key: existing.key,
+              scopeFingerprint: finalFingerprint,
+              status: 'active',
+              workspaceId: existing.workspaceId,
+              visibility: existing.visibility,
+              ...(existing.visibility === 'user' || existing.workspaceId === null
+                ? { userId: existing.userId }
+                : {}),
+            },
+            data: { status: 'superseded' },
+          });
+        }
+        return tx.projectMemory.update({ where: { id: existing.id }, data });
+      })
+      .catch(rethrowActiveSlotConflict);
     return toProjectMemoryItem(updated);
   }
 
@@ -491,6 +629,9 @@ export class ProjectMemoryService {
     const accepted: ProjectMemoryItem[] = [];
     const askUser: ProjectMemoryCandidate[] = [];
     const supersededIds: string[] = [];
+    /** Keys of facts not re-added because the workspace disputed exactly that fact. */
+    const disputedSkipped: string[] = [];
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
 
     for (const candidate of candidates) {
       if (candidate.recommendation === 'do_not_store') {
@@ -498,6 +639,26 @@ export class ProjectMemoryService {
       }
 
       if (candidate.recommendation === 'ask_user') {
+        // Do not even propose a fact the workspace already disputed, unchanged.
+        try {
+          await this.assertNotDisputed(this.prisma, {
+            workspaceId,
+            userId,
+            owner,
+            repository,
+            category: candidate.category,
+            key: candidate.key,
+            scopeFingerprint: scopeFingerprint(candidate.scope ?? { type: 'repository' }),
+            summary: candidate.proposedValue.summary.trim(),
+            slotHasActive: true,
+          });
+        } catch (err) {
+          if (err instanceof DisputedFactBlocked && err.reason === 'unchanged') {
+            disputedSkipped.push(candidate.key);
+            continue;
+          }
+          throw err;
+        }
         const stored = await this.storeCandidate(userId, owner, repository, candidate);
         askUser.push(stored);
         continue;
@@ -537,12 +698,30 @@ export class ProjectMemoryService {
               .join(','),
           },
           inferred: true,
+          respectDisputes: true,
         });
         if (row.supersedesMemoryId) {
           supersededIds.push(row.supersedesMemoryId);
         }
         accepted.push(toProjectMemoryItem(row));
       } catch (err) {
+        if (err instanceof DisputedFactBlocked) {
+          if (err.reason === 'unchanged') {
+            disputedSkipped.push(candidate.key);
+          } else {
+            // The repository now shows a different value in a disputed slot: ask, never
+            // auto-activate. Confirming uses the existing candidate approval flow.
+            askUser.push(
+              await this.storeCandidate(userId, owner, repository, {
+                ...candidate,
+                recommendation: 'ask_user',
+                reason:
+                  'An earlier version of this fact was disputed. The repository now shows a different value; confirm to use it.',
+              }),
+            );
+          }
+          continue;
+        }
         // Skip items that hit limits / explicit-rule protection; keep learning partial.
         this.logger.warn(
           `Learn skipped candidate ${candidate.key}: ${err instanceof Error ? err.message : 'error'}`,
@@ -550,12 +729,7 @@ export class ProjectMemoryService {
       }
     }
 
-    const items = await this.loadActiveItems(
-      userId,
-      owner,
-      repository,
-      await resolveWorkspaceIdForUser(this.prisma, userId),
-    );
+    const items = await this.loadActiveItems(userId, owner, repository, workspaceId);
     const profile = this.buildProfile(owner, repository, items);
 
     return {
@@ -564,6 +738,7 @@ export class ProjectMemoryService {
       accepted,
       candidates: askUser,
       ...(supersededIds.length > 0 ? { supersededIds } : {}),
+      ...(disputedSkipped.length > 0 ? { disputedSkipped } : {}),
     };
   }
 
@@ -659,12 +834,12 @@ export class ProjectMemoryService {
       case 'github_not_connected':
         throw projectMemoryException(
           'PROJECT_MEMORY_ACCESS_DENIED',
-          'Connect a GitHub token in dashboard Settings before using project memory.',
+          'This action needs GitHub access to the repository. Connect a GitHub token in dashboard Settings before using project memory, or ask a workspace Owner to install the Project X GitHub App with access to this repository.',
         );
       case 'repository_access_denied':
         throw projectMemoryException(
           'PROJECT_MEMORY_ACCESS_DENIED',
-          'GitHub denied access to this repository for the connected account.',
+          "GitHub denied access to this repository for the connected account or the workspace's GitHub App.",
         );
       case 'github_token_rejected':
         throw projectMemoryException(
@@ -1020,36 +1195,75 @@ export class ProjectMemoryService {
     };
   }
 
-  private async assertCanCreateUserRule(
-    userId: string,
+  /**
+   * Serializes memory writes for one repository in one workspace (or one user's pre-workspace
+   * rows): the slot check, supersede, limit check and insert of concurrent requests run one
+   * after another, so a slot never holds two active rules and limits cannot be overshot.
+   * Transaction-scoped PostgreSQL advisory lock; released on commit or rollback.
+   */
+  private async lockRepository(
+    tx: Prisma.TransactionClient,
+    workspaceId: string | null,
     owner: string,
     repository: string,
+    userId: string,
   ): Promise<void> {
-    const totalActive = await this.prisma.projectMemory.count({
-      where: { userId, owner, repository, status: 'active' },
-    });
-    if (totalActive >= PROJECT_MEMORY_MAX_ITEMS_PER_REPO) {
+    const scope = workspaceId ?? `user:${userId}`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`project_memory:${scope}:${owner}/${repository}`}, 0))::text`;
+  }
+
+  /**
+   * Limits, counted inside the locked transaction and per workspace (a user's rules in one
+   * workspace never count against another):
+   * - every active rule readable in the workspace for the repository (shared rules of all
+   *   authors plus the author's personal ones) ≤ PROJECT_MEMORY_MAX_ITEMS_PER_REPO;
+   * - an author's active explicit rules there ≤ PROJECT_MEMORY_MAX_ACTIVE_USER_RULES.
+   */
+  private async assertWithinLimits(
+    tx: Prisma.TransactionClient,
+    input: {
+      workspaceId: string | null;
+      userId: string;
+      owner: string;
+      repository: string;
+      visibility: 'workspace' | 'user';
+      explicitRule?: boolean;
+      /** Editing an already-active rule: it is counted already, so skip the per-repo cap. */
+      skipRepositoryCap?: boolean;
+    },
+  ): Promise<void> {
+    const inScope: Prisma.ProjectMemoryWhereInput = {
+      owner: input.owner,
+      repository: input.repository,
+      status: 'active',
+    };
+    const readable: Prisma.ProjectMemoryWhereInput =
+      input.workspaceId === null
+        ? { ...inScope, workspaceId: null, userId: input.userId }
+        : {
+            ...inScope,
+            OR: [
+              { workspaceId: input.workspaceId, visibility: 'workspace' },
+              { workspaceId: input.workspaceId, visibility: 'user', userId: input.userId },
+            ],
+          };
+    if (
+      !input.skipRepositoryCap &&
+      (await tx.projectMemory.count({ where: readable })) >= PROJECT_MEMORY_MAX_ITEMS_PER_REPO
+    ) {
       throw projectMemoryException(
         'PROJECT_MEMORY_LIMIT_REACHED',
         `Active project memory limit (${PROJECT_MEMORY_MAX_ITEMS_PER_REPO}) reached for this repository.`,
       );
     }
-
-    const ruleRows = await this.prisma.projectMemory.findMany({
-      where: {
-        userId,
-        owner,
-        repository,
-        status: 'active',
-      },
+    if (!input.explicitRule) return;
+    const authored = await tx.projectMemory.findMany({
+      where: { ...inScope, workspaceId: input.workspaceId, userId: input.userId },
       select: { provenanceJson: true },
       take: PROJECT_MEMORY_MAX_ITEMS_PER_REPO + 1,
     });
-    const explicitCount = ruleRows.filter((row) =>
-      this.hasUserExplicitProvenance(row.provenanceJson),
-    ).length;
-
-    if (explicitCount >= PROJECT_MEMORY_MAX_ACTIVE_USER_RULES) {
+    const explicit = authored.filter((row) => this.hasUserExplicitProvenance(row.provenanceJson));
+    if (explicit.length >= PROJECT_MEMORY_MAX_ACTIVE_USER_RULES) {
       throw projectMemoryException(
         'PROJECT_MEMORY_LIMIT_REACHED',
         `Active user rule limit (${PROJECT_MEMORY_MAX_ACTIVE_USER_RULES}) reached for this repository.`,
@@ -1071,64 +1285,86 @@ export class ProjectMemoryService {
   private async persistMemory(input: PersistInput): Promise<ProjectMemoryRow> {
     const fp = scopeFingerprint(input.scope);
     const valueSummary = input.value.summary.trim();
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
+    const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
 
-    const workspaceIdForLookup = await resolveWorkspaceIdForUser(this.prisma, input.userId);
-    const existing = await this.prisma.projectMemory.findFirst({
-      where: {
-        owner: input.owner,
-        repository: input.repository,
-        category: input.category,
-        key: input.key,
-        scopeFingerprint: fp,
-        status: 'active',
-        OR: [
-          {
-            workspaceId: workspaceIdForLookup,
-            ...(input.category === 'USER_PREFERENCE'
-              ? { visibility: 'user', userId: input.userId }
-              : { visibility: 'workspace' }),
-          },
-          { workspaceId: null, userId: input.userId },
-        ],
-      },
-    });
-
-    if (existing) {
-      const existingValue = existing.valueJson as unknown as ProjectMemoryValue;
-      const existingSummary = existingValue?.summary?.trim() ?? '';
-      const isUserExplicit = this.hasUserExplicitProvenance(existing.provenanceJson);
-
-      if (input.inferred && isUserExplicit) {
-        // Explicit user rules cannot be overwritten by inferred learn facts.
-        return existing;
-      }
-
-      if (existingSummary === valueSummary) {
-        // Dedup: refresh confirmation + merge provenance
-        const mergedProvenance = this.mergeProvenance(existing.provenanceJson, input.provenance);
-        return this.prisma.projectMemory.update({
-          where: { id: existing.id },
-          data: {
-            lastConfirmedAt: new Date(),
-            provenanceJson: mergedProvenance as unknown as Prisma.InputJsonValue,
-            confidence: input.confidence,
-            ...(input.freshness
-              ? { freshnessJson: input.freshness as unknown as Prisma.InputJsonValue }
-              : {}),
+    return this.prisma
+      .$transaction(async (tx) => {
+        await this.lockRepository(tx, workspaceId, input.owner, input.repository, input.userId);
+        const existing = await tx.projectMemory.findFirst({
+          where: {
+            owner: input.owner,
+            repository: input.repository,
+            category: input.category,
+            key: input.key,
+            scopeFingerprint: fp,
+            status: 'active',
+            OR: [
+              {
+                workspaceId,
+                ...(input.category === 'USER_PREFERENCE'
+                  ? { visibility: 'user', userId: input.userId }
+                  : { visibility: 'workspace' }),
+              },
+              { workspaceId: null, userId: input.userId },
+            ],
           },
         });
-      }
 
-      // Conflict: supersede old, create new — atomically, so a failure never leaves the
-      // slot with no active fact or with two.
-      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
-      const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
-      return this.prisma.$transaction(async (tx) => {
-        await tx.projectMemory.update({
-          where: { id: existing.id },
-          data: { status: 'superseded' },
+        if (input.respectDisputes) {
+          await this.assertNotDisputed(tx, {
+            workspaceId,
+            userId: input.userId,
+            owner: input.owner,
+            repository: input.repository,
+            category: input.category,
+            key: input.key,
+            scopeFingerprint: fp,
+            summary: valueSummary,
+            slotHasActive: existing !== null,
+          });
+        }
+
+        if (existing) {
+          const existingValue = existing.valueJson as unknown as ProjectMemoryValue;
+          const existingSummary = existingValue?.summary?.trim() ?? '';
+          if (input.inferred && this.hasUserExplicitProvenance(existing.provenanceJson)) {
+            // Explicit user rules cannot be overwritten by inferred learn facts.
+            return existing;
+          }
+          if (existingSummary === valueSummary) {
+            // Dedup: refresh confirmation + merge provenance.
+            const mergedProvenance = this.mergeProvenance(
+              existing.provenanceJson,
+              input.provenance,
+            );
+            return tx.projectMemory.update({
+              where: { id: existing.id },
+              data: {
+                lastConfirmedAt: new Date(),
+                provenanceJson: mergedProvenance as unknown as Prisma.InputJsonValue,
+                confidence: input.confidence,
+                ...(input.freshness
+                  ? { freshnessJson: input.freshness as unknown as Prisma.InputJsonValue }
+                  : {}),
+              },
+            });
+          }
+          // Conflict: supersede the old fact and create the new one in the same transaction.
+          await tx.projectMemory.update({
+            where: { id: existing.id },
+            data: { status: 'superseded' },
+          });
+        }
+
+        await this.assertWithinLimits(tx, {
+          workspaceId,
+          userId: input.userId,
+          owner: input.owner,
+          repository: input.repository,
+          visibility,
+          explicitRule: input.explicitRule,
         });
-        await this.assertUnderItemLimit(input.userId, input.owner, input.repository, tx);
         return tx.projectMemory.create({
           data: {
             userId: input.userId,
@@ -1148,54 +1384,76 @@ export class ProjectMemoryService {
               input.provenance,
             ) as unknown as Prisma.InputJsonValue,
             freshnessJson: (input.freshness ?? null) as unknown as Prisma.InputJsonValue,
-            supersedesMemoryId: existing.id,
+            ...(existing ? { supersedesMemoryId: existing.id } : {}),
             lastConfirmedAt: new Date(),
           },
         });
-      });
-    }
+      })
+      .catch(rethrowActiveSlotConflict);
+  }
 
-    await this.assertUnderItemLimit(input.userId, input.owner, input.repository);
-
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
-    const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
-    return this.prisma.projectMemory.create({
-      data: {
-        userId: input.userId,
-        workspaceId,
-        createdByUserId: input.userId,
-        visibility,
+  /**
+   * Dispute check for Learn (same slot rules as the active lookup above): disputed rows, and
+   * rows archived after a dispute, in this workspace slot. Throws 'unchanged' when the fact is
+   * one of them, 'changed' when the slot is disputed and holds no active rule.
+   */
+  private async assertNotDisputed(
+    client: Prisma.TransactionClient | PrismaService,
+    input: {
+      workspaceId: string | null;
+      userId: string;
+      owner: string;
+      repository: string;
+      category: string;
+      key: string;
+      scopeFingerprint: string;
+      summary: string;
+      slotHasActive: boolean;
+    },
+  ): Promise<void> {
+    const rows = await client.projectMemory.findMany({
+      where: {
         owner: input.owner,
         repository: input.repository,
         category: input.category,
         key: input.key,
-        valueJson: input.value as unknown as Prisma.InputJsonValue,
-        confidence: input.confidence,
-        status: 'active',
-        scopeJson: input.scope as unknown as Prisma.InputJsonValue,
-        scopeFingerprint: fp,
-        provenanceJson: this.trimProvenance(input.provenance) as unknown as Prisma.InputJsonValue,
-        freshnessJson: (input.freshness ?? null) as unknown as Prisma.InputJsonValue,
-        lastConfirmedAt: new Date(),
+        scopeFingerprint: input.scopeFingerprint,
+        status: { not: 'active' },
+        AND: [
+          { OR: [{ status: 'disputed' }, { disputedFingerprint: { not: null } }] },
+          {
+            OR: [
+              input.category === 'USER_PREFERENCE'
+                ? { workspaceId: input.workspaceId, visibility: 'user', userId: input.userId }
+                : { workspaceId: input.workspaceId, visibility: 'workspace' },
+              { workspaceId: null, userId: input.userId },
+            ],
+          },
+        ],
+      },
+      select: {
+        category: true,
+        key: true,
+        scopeFingerprint: true,
+        valueJson: true,
+        disputedFingerprint: true,
       },
     });
-  }
-
-  private async assertUnderItemLimit(
-    userId: string,
-    owner: string,
-    repository: string,
-    db: Prisma.TransactionClient = this.prisma,
-  ): Promise<void> {
-    const totalActive = await db.projectMemory.count({
-      where: { userId, owner, repository, status: 'active' },
-    });
-    if (totalActive >= PROJECT_MEMORY_MAX_ITEMS_PER_REPO) {
-      throw projectMemoryException(
-        'PROJECT_MEMORY_LIMIT_REACHED',
-        `Active project memory limit (${PROJECT_MEMORY_MAX_ITEMS_PER_REPO}) reached for this repository.`,
-      );
-    }
+    if (rows.length === 0) return;
+    const candidate = factFingerprint(input);
+    const disputed = rows.map(
+      (row) =>
+        // Rows disputed before fingerprints were recorded: derive it from the stored fact.
+        row.disputedFingerprint ??
+        factFingerprint({
+          category: row.category,
+          key: row.key,
+          scopeFingerprint: row.scopeFingerprint,
+          summary: summaryOf(row.valueJson),
+        }),
+    );
+    if (disputed.includes(candidate)) throw new DisputedFactBlocked('unchanged');
+    if (!input.slotHasActive) throw new DisputedFactBlocked('changed');
   }
 
   private mergeProvenance(

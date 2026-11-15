@@ -93,6 +93,7 @@ export class ProjectMemoryController {
       status: body.status,
       scope: body.scope as ProjectMemoryScope | undefined,
       text: body.text,
+      expectedUpdatedAt: body.expectedUpdatedAt,
     });
   }
 

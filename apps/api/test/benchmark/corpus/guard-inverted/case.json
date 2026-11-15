@@ -1,0 +1,42 @@
+{
+  "id": "guard-inverted",
+  "title": "Membership guard condition inverted",
+  "repository": "benchmark/phase1",
+  "pullRequest": "guard-inverted",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "guard-inverted/denies-members",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        15,
+        15
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "The guard throws for members and lets non-members through.",
+      "witness": "witness.spec.ts \u203a an outsider deletes and a member is refused"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -15,6 +14,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 const TRIGGERS = ['user', 'retry', 'resume', 'replay'] as const;
 const AUDIT_TYPES = [
@@ -386,10 +387,10 @@ export class RetryExecutionDto {
   attempt?: number;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   writeConfirmed?: boolean;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   idempotentSafe?: boolean;
 }

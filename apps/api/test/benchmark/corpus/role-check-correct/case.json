@@ -1,0 +1,27 @@
+{
+  "id": "role-check-correct",
+  "title": "Allow admins and editors to archive notes (viewers and guests stay read-only)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "role-check-correct",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

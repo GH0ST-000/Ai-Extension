@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership guard is inverted",
+            "explanation": "The guard throws when a membership exists.",
+            "evidence": "if (membership) {",
+            "changeType": "introduced",
+            "trigger": "An outsider deletes a ws1 note",
+            "failurePath": "inverted guard \u2192 delete",
+            "violatedInvariant": "Only members delete notes",
+            "impact": "Authorization bypass for outsiders",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership guard is inverted": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (membership) {\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:18",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "An outsider deletes a ws1 note",
+          "violatedInvariant": "Only members delete notes",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note."
+            },
+            {
+              "code": "if (membership) {",
+              "whyNotPreventing": "It is inverted: it denies members and lets non-members through."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership guard is inverted",
+            "explanation": "The guard throws when a membership exists.",
+            "evidence": "if (membership) {",
+            "changeType": "introduced",
+            "trigger": "An outsider deletes a ws1 note",
+            "failurePath": "inverted guard \u2192 delete",
+            "violatedInvariant": "Only members delete notes",
+            "impact": "Authorization bypass for outsiders",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership guard is inverted": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (membership) {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

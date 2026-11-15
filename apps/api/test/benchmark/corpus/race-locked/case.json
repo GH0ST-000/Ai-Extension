@@ -1,0 +1,27 @@
+{
+  "id": "race-locked",
+  "title": "Serialize seat allocation with a per-workspace lock",
+  "repository": "benchmark/phase1",
+  "pullRequest": "race-locked",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/workspaces/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/workspaces/seats.ts",
+      "physical": "seats.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

@@ -6,11 +6,14 @@ import type {
   AppliedProjectMemoryRule,
   PRReviewScope,
   ProjectMemoryPromptMetadata,
+  ProjectMemoryMode,
+  ProjectMemoryRequestRecord,
   ProjectMemorySkipReason,
   WorkspaceErrorBody,
   WorkspaceErrorCode,
 } from '@project-x/types';
 import {
+  AI_OPERATION_ID_HEADER,
   PR_DIFF_UNAVAILABLE_CODE,
   PR_REVIEW_SCOPE_HEADER,
   PROJECT_MEMORY_METADATA_HEADER,
@@ -92,9 +95,13 @@ export function parseProjectMemoryHeader(value: string | null): ProjectMemoryPro
   if (!value || value.length > 32_000) return null;
   try {
     const raw = JSON.parse(decodeBase64UrlUtf8(value)) as Record<string, unknown>;
+    const record = parseMemoryRequestRecord(raw);
+    if (raw.status === 'disabled') {
+      return { status: 'disabled', ...record, requested: 'off', ruleCount: 0 };
+    }
     if (raw.status === 'skipped') {
       return typeof raw.reason === 'string' && MEMORY_SKIP_REASONS.has(raw.reason)
-        ? { status: 'skipped', reason: raw.reason as ProjectMemorySkipReason }
+        ? { status: 'skipped', reason: raw.reason as ProjectMemorySkipReason, ...record }
         : null;
     }
     if (raw.status !== 'applied' || typeof raw.version !== 'string' || !Array.isArray(raw.rules)) {
@@ -120,10 +127,23 @@ export function parseProjectMemoryHeader(value: string | null): ProjectMemoryPro
         visibility: r.visibility === 'user' ? 'user' : 'workspace',
       });
     }
-    return { status: 'applied', version: raw.version.slice(0, 128), rules };
+    return { status: 'applied', version: raw.version.slice(0, 128), rules, ...record };
   } catch {
     return null;
   }
+}
+
+/** `requested` / `requestSource` / `ruleCount` when well-formed (absent from older servers). */
+function parseMemoryRequestRecord(raw: Record<string, unknown>): ProjectMemoryRequestRecord {
+  return {
+    ...(raw.requested === 'on' || raw.requested === 'off' ? { requested: raw.requested } : {}),
+    ...(raw.requestSource === 'explicit' || raw.requestSource === 'default'
+      ? { requestSource: raw.requestSource }
+      : {}),
+    ...(typeof raw.ruleCount === 'number' && Number.isInteger(raw.ruleCount) && raw.ruleCount >= 0
+      ? { ruleCount: Math.min(raw.ruleCount, 1_000) }
+      : {}),
+  };
 }
 
 /** Parse the `X-PR-Review-Scope` header; returns null for anything malformed. */
@@ -187,6 +207,45 @@ async function parseAiError(response: Response): Promise<{
   return { message: USER_FACING_AI_ERROR, code: null };
 }
 
+// ── lost-response retries ─────────────────────────────────────────────────
+
+/** The server keeps a completed result for replay this long (see the API's REPLAY_WINDOW_MS). */
+export const OPERATION_RETRY_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Operations started but not received in full, by request. When the same request is sent
+ * again (the user retries after a network failure), its operation id goes along as
+ * `retryOperationId`: the server replays a completed result without a new AI call or charge,
+ * reports a still-running one as AI_OPERATION_IN_PROGRESS, and otherwise runs a new
+ * operation. Entries are dropped once the output arrived in full.
+ */
+const unfinishedOperations = new Map<string, { operationId: string; at: number }>();
+
+function operationKey(request: ExecuteAiActionRequest): string {
+  const { executionId: _e, retryOperationId: _r, ...rest } = request;
+  return JSON.stringify(rest);
+}
+
+/** The operation id to send with `request`, if an earlier identical attempt was cut off. */
+export function pendingRetryOperationId(
+  request: ExecuteAiActionRequest,
+  now = Date.now(),
+): string | undefined {
+  const key = operationKey(request);
+  const entry = unfinishedOperations.get(key);
+  if (!entry) return undefined;
+  if (now - entry.at > OPERATION_RETRY_WINDOW_MS) {
+    unfinishedOperations.delete(key);
+    return undefined;
+  }
+  return entry.operationId;
+}
+
+/** Test hook. */
+export function resetUnfinishedOperations(): void {
+  unfinishedOperations.clear();
+}
+
 export async function streamAiAction(
   request: ExecuteAiActionRequest,
   handlers: StreamAiActionHandlers,
@@ -195,6 +254,9 @@ export async function streamAiAction(
   if (!(await hasAuthSession())) {
     throw new AiClientError(USER_FACING_AUTH_ERROR, { unauthorized: true });
   }
+  const key = operationKey(request);
+  const retryOperationId = pendingRetryOperationId(request);
+  const body = retryOperationId ? { ...request, retryOperationId } : request;
 
   let response: Response;
   let fullText = '';
@@ -207,13 +269,18 @@ export async function streamAiAction(
           'Content-Type': 'application/json',
           Accept: 'text/plain',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(body),
       },
       (chunk) => {
         fullText += chunk;
         onChunk(chunk);
       },
       signal,
+      (headers) => {
+        // Known as soon as the response starts, so a stream cut off later can be retried.
+        const operationId = headers.get(AI_OPERATION_ID_HEADER);
+        if (operationId) unfinishedOperations.set(key, { operationId, at: Date.now() });
+      },
     );
   } catch (error) {
     if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
@@ -230,6 +297,13 @@ export async function streamAiAction(
   if (!response.ok) {
     const requestId = response.headers.get('x-request-id');
     const parsed = await parseAiError(response);
+    if (parsed.code !== 'AI_OPERATION_IN_PROGRESS') unfinishedOperations.delete(key);
+    if (parsed.code === 'AI_OPERATION_IN_PROGRESS') {
+      throw new AiClientError(
+        'This request is still running. Wait for it to finish, then try again.',
+        { code: parsed.code, requestId },
+      );
+    }
     if (parsed.code === PR_DIFF_UNAVAILABLE_CODE) {
       // Actionable (connect GitHub / open a PR); the AI was not called.
       throw new AiClientError(parsed.message, { code: parsed.code, requestId });
@@ -270,7 +344,8 @@ export async function streamAiAction(
   if (!trimmed) {
     throw new AiClientError(USER_FACING_AI_ERROR);
   }
-
+  // Received in full (fresh or replayed): nothing left to recover.
+  unfinishedOperations.delete(key);
   return trimmed;
 }
 
@@ -283,6 +358,8 @@ export function buildAiRequest(input: {
   errorIntelligence?: ErrorIntelligenceContext | null;
   executionId?: string | null;
   memoryRepository?: string | null;
+  /** Sent explicitly whenever known; omitted only by callers that never chose a setting. */
+  projectMemoryMode?: ProjectMemoryMode;
 }): ExecuteAiActionRequest {
   return {
     action: input.action,
@@ -293,5 +370,6 @@ export function buildAiRequest(input: {
     errorIntelligence: input.errorIntelligence ?? null,
     ...(input.executionId ? { executionId: input.executionId } : {}),
     ...(input.memoryRepository ? { memoryRepository: input.memoryRepository } : {}),
+    ...(input.projectMemoryMode ? { projectMemoryMode: input.projectMemoryMode } : {}),
   };
 }

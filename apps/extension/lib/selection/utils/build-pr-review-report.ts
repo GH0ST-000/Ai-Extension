@@ -5,11 +5,13 @@ import type {
   PRReviewFindingSeverity,
   PRReviewReport,
   PRReviewReportStats,
+  PRReviewCoverage,
   PRReviewRiskLevel,
   PRReviewScope,
 } from '@project-x/types';
 
 import { parsePrReviewContent, type ParsedPrFinding, type ParsedPrReview } from './parse-pr-review';
+import { isUnverifiedPageScope, PARTIAL_COVERAGE_REASON } from './pr-review-coverage';
 
 export function prFindingId(
   finding: Pick<ParsedPrFinding, 'index' | 'filePath' | 'title'>,
@@ -26,13 +28,25 @@ function toSharedSeverity(severity: ParsedPrFinding['severity']): PRReviewFindin
 
 function toSharedFinding(finding: ParsedPrFinding): PRReviewFinding {
   return {
-    id: prFindingId(finding),
+    // Server stable ids survive re-runs and batch order; fall back to the legacy id.
+    id: finding.ref ?? prFindingId(finding),
     index: finding.index,
     severity: toSharedSeverity(finding.severity),
     filePath: finding.filePath ?? undefined,
     title: finding.title,
     why: finding.why,
     raw: finding.raw,
+    ...(finding.lineStart != null ? { lineStart: finding.lineStart } : {}),
+    ...(finding.lineEnd != null ? { lineEnd: finding.lineEnd } : {}),
+    ...(finding.evidence ? { evidence: finding.evidence } : {}),
+    ...(finding.category ? { category: finding.category } : {}),
+    ...(finding.confidence ? { confidence: finding.confidence } : {}),
+    ...(finding.verification ? { verification: finding.verification } : {}),
+    ...(finding.trigger ? { trigger: finding.trigger } : {}),
+    ...(finding.failurePath ? { failurePath: finding.failurePath } : {}),
+    ...(finding.impact ? { impact: finding.impact } : {}),
+    ...(finding.alsoIn?.length ? { alsoIn: finding.alsoIn } : {}),
+    ...(finding.changeType ? { changeType: finding.changeType } : {}),
   };
 }
 
@@ -88,6 +102,7 @@ const INCOMPLETE_REASON_TEXT: Record<string, string> = {
 function resolveScope(
   scope: PRReviewScope | null | undefined,
   github: PageContextGitHub | undefined,
+  coverage: PRReviewCoverage | null,
 ): {
   analyzed: number;
   skipped: number;
@@ -95,6 +110,19 @@ function resolveScope(
   truncated: boolean;
   source?: PRReviewScope['source'];
 } {
+  if (coverage) {
+    // Final server manifest: authoritative over the pre-review header.
+    const c = coverage.counts;
+    const analyzed = c.reviewed_full + c.reviewed_partial;
+    const total = coverage.totalFiles ?? coverage.files.length + c.not_fetched;
+    return {
+      analyzed,
+      skipped: Math.max(0, total - analyzed),
+      total: coverage.totalFiles,
+      truncated: !coverage.complete,
+      source: coverage.source,
+    };
+  }
   if (scope) {
     return {
       analyzed: scope.analyzedFiles,
@@ -121,7 +149,10 @@ function assessCompleteness(
   analyzedFiles: number,
 ): { complete: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  if (parsed.incompleteReason) {
+  // Partial coverage from a batched review is shown by the coverage banner, not as an
+  // incomplete answer. Without a decodable manifest it still counts as incomplete.
+  const coverageOnly = parsed.incompleteReason === PARTIAL_COVERAGE_REASON && parsed.coverage;
+  if (parsed.incompleteReason && !coverageOnly) {
     reasons.push(
       INCOMPLETE_REASON_TEXT[parsed.incompleteReason] ??
         'The review stream ended before the model finished.',
@@ -156,9 +187,12 @@ export function buildPrReviewReport(input: BuildPrReviewReportInput): PRReviewRe
 
   const github = input.context?.type === 'github' ? input.context.github : undefined;
   const findings = parsed.findings.map(toSharedFinding);
-  const scope = resolveScope(input.scope, github);
+  const needsInvestigation = parsed.investigation.map(toSharedFinding);
+  const scope = resolveScope(input.scope, github, parsed.coverage);
   const analyzedFiles = scope.analyzed;
-  const truncated = scope.truncated;
+  // Page-collected files with an unknown total: never treated as full coverage.
+  const unverifiedPage = isUnverifiedPageScope({ source: scope.source, totalFiles: scope.total });
+  const truncated = scope.truncated || unverifiedPage;
 
   const owner = github?.owner?.trim() || 'unknown';
   const name = github?.repository?.trim() || 'unknown';
@@ -172,7 +206,16 @@ export function buildPrReviewReport(input: BuildPrReviewReportInput): PRReviewRe
       number,
       title: github?.pullRequestTitle?.trim() || undefined,
     },
-    riskLevel: resolveRiskLevel(findings, completeness?.complete === true),
+    riskLevel: capUnverifiedRisk(
+      resolveRiskLevel(
+        findings,
+        completeness?.complete === true,
+        !truncated,
+        parsed.coverage?.riskLevel,
+        needsInvestigation,
+      ),
+      unverifiedPage,
+    ),
     overview: parsed.summary.trim() || 'No overview provided.',
     stats: buildStats(findings, analyzedFiles, scope.skipped),
     findings,
@@ -182,20 +225,46 @@ export function buildPrReviewReport(input: BuildPrReviewReportInput): PRReviewRe
       totalFiles: scope.total,
       ...(scope.source ? { source: scope.source } : {}),
     },
+    ...(parsed.coverage ? { coverage: parsed.coverage } : {}),
+    ...(needsInvestigation.length ? { needsInvestigation } : {}),
     ...(completeness ? { completeness } : {}),
   };
 }
 
 /**
- * Overall risk is only derived from a finished, complete review. An incomplete or still-
- * streaming review is never LOW or MEDIUM: a HIGH finding already seen is a safe lower
- * bound, otherwise the risk is `unknown`.
+ * Overall risk is only derived from a finished, complete review of fully covered code. An
+ * incomplete, still-streaming or partially covered review is never LOW or MEDIUM: a HIGH
+ * finding already seen is a safe lower bound, otherwise the risk is `unknown`. When the
+ * server computed a deterministic risk (batched review), it is used as-is.
  */
-function resolveRiskLevel(findings: PRReviewFinding[], complete: boolean): PRReviewRiskLevel {
-  if (complete) {
-    return deriveRiskLevel(findings);
+function resolveRiskLevel(
+  findings: PRReviewFinding[],
+  complete: boolean,
+  fullyCovered: boolean,
+  serverRisk?: PRReviewRiskLevel,
+  needsInvestigation: PRReviewFinding[] = [],
+): PRReviewRiskLevel {
+  const hasHigh = findings.some((finding) => finding.severity === 'high');
+  if (!complete) {
+    return hasHigh ? 'high' : 'unknown';
   }
-  return findings.some((finding) => finding.severity === 'high') ? 'high' : 'unknown';
+  if (serverRisk) {
+    return serverRisk;
+  }
+  // Unresolved serious candidates: never claim LOW (or MEDIUM) while they remain open.
+  const unresolved = needsInvestigation.some((f) => f.severity !== 'low');
+  if (!fullyCovered || unresolved) {
+    return hasHigh ? 'high' : 'unknown';
+  }
+  return deriveRiskLevel(findings);
+}
+
+/**
+ * Unverified (page-sourced) coverage is partial coverage: never LOW or MEDIUM, whatever the
+ * server or the findings say. A HIGH finding is still a valid lower bound.
+ */
+function capUnverifiedRisk(risk: PRReviewRiskLevel, unverifiedPage: boolean): PRReviewRiskLevel {
+  return unverifiedPage && (risk === 'low' || risk === 'medium') ? 'unknown' : risk;
 }
 
 /** "3 findings", or for an incomplete review "findings unknown" / "2+ findings (partial)". */
@@ -209,6 +278,20 @@ export function formatFindingsCountLabel(report: PRReviewReport): string {
 
 /** "3 of 12 files" / "3 files" / "0 files" for headers and exports. */
 export function formatReviewedFilesLabel(report: PRReviewReport): string {
+  const coverage = report.coverage;
+  if (isUnverifiedPageScope(report.reviewScope)) {
+    // The page's file count is not the PR's: never present it as "N of M".
+    const n = coverage
+      ? coverage.counts.reviewed_full + coverage.counts.reviewed_partial
+      : report.stats.analyzedFiles;
+    return `${n} file${n === 1 ? '' : 's'} reviewed from the GitHub page (total unknown)`;
+  }
+  if (coverage) {
+    const c = coverage.counts;
+    const total = coverage.totalFiles ?? coverage.files.length + c.not_fetched;
+    const partial = c.reviewed_partial ? ` (+${c.reviewed_partial} partial)` : '';
+    return `${c.reviewed_full} of ${total} file${total === 1 ? '' : 's'} fully reviewed${partial}`;
+  }
   const total = report.reviewScope?.totalFiles;
   const analyzed = report.stats.analyzedFiles;
   if (typeof total === 'number' && total !== analyzed) {

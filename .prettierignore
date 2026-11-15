@@ -8,3 +8,12 @@ out
 coverage
 pnpm-lock.yaml
 *.md
+
+# Review benchmark: generated corpus sources and pinned data (hashed; formatting changes break pins)
+apps/api/test/benchmark/corpus/*/head
+apps/api/test/benchmark/corpus/*/base
+apps/api/test/benchmark/corpus/*/fixed
+apps/api/test/benchmark/corpus/*/*.json
+apps/api/test/benchmark/manifest.json
+apps/api/test/benchmark/expected-results.json
+apps/api/test/benchmark/captures

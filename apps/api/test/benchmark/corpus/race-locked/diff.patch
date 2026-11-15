@@ -1,0 +1,21 @@
+diff --git a/apps/api/src/workspaces/seats.ts b/apps/api/src/workspaces/seats.ts
+--- a/apps/api/src/workspaces/seats.ts
++++ b/apps/api/src/workspaces/seats.ts
+@@ -12,9 +12,12 @@ export async function addSeat(
+   userId: string,
+   limit: number,
+ ): Promise<void> {
+-  const count = await db.membership.count({ where: { workspaceId } });
+-  if (count >= limit) {
+-    throw new Error('SEAT_LIMIT');
+-  }
+-  await db.membership.create({ data: { workspaceId, userId, role: 'member' } });
++  // Serialize seat allocation per workspace: count and insert run under one lock.
++  await db.lock(`seats:${workspaceId}`, async () => {
++    const count = await db.membership.count({ where: { workspaceId } });
++    if (count >= limit) {
++      throw new Error('SEAT_LIMIT');
++    }
++    await db.membership.create({ data: { workspaceId, userId, role: 'member' } });
++  });
+ }

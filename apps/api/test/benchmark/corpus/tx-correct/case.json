@@ -1,0 +1,27 @@
+{
+  "id": "tx-correct",
+  "title": "Run transfer debit and credit in one transaction",
+  "repository": "benchmark/phase1",
+  "pullRequest": "tx-correct",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/wallet/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/wallet/transfer.service.ts",
+      "physical": "transfer.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

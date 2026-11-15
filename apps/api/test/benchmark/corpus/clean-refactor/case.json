@@ -1,0 +1,21 @@
+{
+  "id": "clean-refactor",
+  "title": "Refactor: extract lineTotal (no behavior change)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "clean-refactor",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/invoices/invoice-total.ts",
+      "physical": "invoice-total.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

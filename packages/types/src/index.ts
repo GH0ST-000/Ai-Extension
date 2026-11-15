@@ -156,12 +156,160 @@ export interface PRReviewScope {
 }
 
 export const PR_REVIEW_SCOPE_HEADER = 'X-PR-Review-Scope';
+/** Server-generated id of an AI operation; send it back as `retryOperationId` after a lost response. */
+export const AI_OPERATION_ID_HEADER = 'X-AI-Operation-Id';
+/** `1` when the response is the stored result of an earlier completed operation (no new charge). */
+export const AI_OPERATION_REPLAYED_HEADER = 'X-AI-Operation-Replayed';
 
 /** Error code returned (HTTP 422) when no diff could be loaded; the AI is not called. */
 export const PR_DIFF_UNAVAILABLE_CODE = 'PR_DIFF_UNAVAILABLE';
 
 /** Marker the API appends when a PR review stream ended early (token limit / provider error). */
 export const PR_REVIEW_INCOMPLETE_MARKER = '[[px:review-incomplete';
+
+/**
+ * Marker for the coverage manifest trailer the API appends to a REVIEW_ENTIRE_PR response:
+ * `[[px:review-coverage <base64url(JSON PRReviewCoverage)>]]`. Authoritative over the
+ * pre-review `X-PR-Review-Scope` header (which cannot know batch outcomes).
+ */
+export const PR_REVIEW_COVERAGE_MARKER = '[[px:review-coverage';
+
+/**
+ * Coverage status of one changed file. Every changed file the API knows about has exactly
+ * one status; nothing is dropped silently.
+ * - reviewed_full: the whole patch was reviewed by a batch that succeeded
+ * - reviewed_partial: some patch chunks were reviewed, others were deferred or failed
+ * - excluded_generated: lockfile / generated / vendored / minified (intentional)
+ * - excluded_binary: binary asset (intentional)
+ * - excluded_no_changes: rename or mode change without content changes (intentional)
+ * - deferred_budget: reviewable, but the per-review budget was exhausted
+ * - no_patch: GitHub returned no patch (typically a diff too large to render) — not reviewed
+ * - not_fetched: beyond the GitHub listing limit — path unknown, counted only
+ * - review_failed: assigned to batches that all failed or were cancelled
+ */
+export type PRReviewFileStatus =
+  | 'reviewed_full'
+  | 'reviewed_partial'
+  | 'excluded_generated'
+  | 'excluded_binary'
+  | 'excluded_no_changes'
+  | 'deferred_budget'
+  | 'no_patch'
+  | 'not_fetched'
+  | 'review_failed';
+
+export const PR_REVIEW_FILE_STATUSES: readonly PRReviewFileStatus[] = [
+  'reviewed_full',
+  'reviewed_partial',
+  'excluded_generated',
+  'excluded_binary',
+  'excluded_no_changes',
+  'deferred_budget',
+  'no_patch',
+  'not_fetched',
+  'review_failed',
+];
+
+/** Statuses that mean reviewable code was NOT fully reviewed (coverage is partial). */
+export const PR_REVIEW_UNCOVERED_STATUSES: readonly PRReviewFileStatus[] = [
+  'reviewed_partial',
+  'deferred_budget',
+  'no_patch',
+  'not_fetched',
+  'review_failed',
+];
+
+export interface PRReviewCoverageFile {
+  path: string;
+  status: PRReviewFileStatus;
+  /** Higher = reviewed first (security-sensitive source > source > tests > docs). */
+  priority: number;
+  /** Characters of patch available / actually reviewed by a successful batch. */
+  patchChars: number;
+  reviewedChars: number;
+}
+
+export type PRReviewBatchStatus = 'succeeded' | 'failed' | 'cancelled';
+
+export interface PRReviewBatchOutcome {
+  id: string;
+  status: PRReviewBatchStatus;
+  /** Model calls made for this batch (1, or 2 after a transient-failure retry). */
+  attempts: number;
+  files: number;
+  /** Stable machine code when not succeeded (e.g. provider_error, invalid_output, timeout). */
+  errorCode?: string;
+}
+
+/** Final coverage manifest of a REVIEW_ENTIRE_PR run (see {@link PR_REVIEW_COVERAGE_MARKER}). */
+export interface PRReviewCoverage {
+  version: 1;
+  source: PRReviewDiffSource;
+  /** Files changed in the PR (GitHub's count), or null when unknown (page fallback). */
+  totalFiles: number | null;
+  /** True only when every reviewable file was fully reviewed and no batch failed. */
+  complete: boolean;
+  counts: Record<PRReviewFileStatus, number>;
+  /** Every known changed file (not_fetched files are counted in `counts` only). */
+  files: PRReviewCoverageFile[];
+  batches: PRReviewBatchOutcome[];
+  findings: {
+    /** Findings in the report: verified MEDIUM/HIGH plus LOW (which need no verification). */
+    accepted: number;
+    duplicates: number;
+    rejected: number;
+    /** e.g. path_not_in_batch, evidence_not_in_diff, trivial_evidence, context_only_low */
+    rejectedByReason: Record<string, number>;
+    /** Line references outside the reviewed hunks (recorded on the finding, never silent). */
+    linesCorrected: number;
+    /** MEDIUM/HIGH candidates that could not be confirmed or refuted. */
+    needsInvestigation?: number;
+    /** Candidates refuted by independent verification with grounded code. */
+    dismissed?: number;
+    /** Same root cause reported in several files, folded into one finding. */
+    crossFileMerged?: number;
+    /** Findings whose final severity differs from what the model requested. */
+    severityAdjusted?: number;
+    /** Declared change types contradicted by the diff evidence and corrected. */
+    changeTypeCorrections?: number;
+    /** Over-wide claimed line ranges narrowed to the quoted evidence. */
+    rangesNarrowed?: number;
+    /** Candidates whose claim repeats an applied Project Memory rule the changed code lacks. */
+    memoryEcho?: number;
+    verification?: {
+      attempted: number;
+      confirmed: number;
+      refuted: number;
+      insufficientContext: number;
+      unavailable: number;
+      /** Verifications that received the diff window around the finding's own lines. */
+      withDiffWindow?: number;
+      /** Verifications that received the enclosing code at the PR head around the finding. */
+      withHeadContext?: number;
+      /** Verifications that received at least one guard/helper/callee definition. */
+      withHelpers?: number;
+      /** "Confirmed" answers downgraded because they did not prove incorrect behavior. */
+      unprovenConfirmations?: number;
+      /** Verifications that received at least one cross-file dependency definition. */
+      withDependencies?: number;
+      /** Dependencies that could not be shown (each listed to the verifier with a reason). */
+      unresolvedDependencies?: number;
+      /** Distinct dependency source files attempted for this review (budget: 16). */
+      dependencyFiles?: number;
+      /** LOW findings checked with spare verification capacity (after MEDIUM/HIGH). */
+      lowChecks?: number;
+      lowConfirmed?: number;
+      /** LOW findings dismissed by a grounded refutation. */
+      lowDismissed?: number;
+      /** LOW findings reported as UNVERIFIED (not confirmed, or no capacity left). */
+      lowUnverified?: number;
+    };
+  };
+  /** Deterministic: from validated findings and coverage. Never `low` when incomplete. */
+  riskLevel: PRReviewRiskLevel;
+  /** Usage units charged for this review: 1 when any batch succeeded, otherwise 0. */
+  usageUnits: 0 | 1;
+}
 
 /**
  * Project memory metadata for an AI response, returned in the `X-Project-Memory` header as
@@ -197,9 +345,32 @@ export interface AppliedProjectMemoryRule {
   visibility: 'workspace' | 'user';
 }
 
+/**
+ * Per-request Project Memory setting. `off` = the server performs no memory retrieval and
+ * adds no memory to any prompt. Omitted (older clients) = `on`.
+ */
+export type ProjectMemoryMode = 'on' | 'off';
+export const PROJECT_MEMORY_MODES = ['on', 'off'] as const satisfies readonly ProjectMemoryMode[];
+
+/** Fields present on every memory metadata variant (absent on results from older servers). */
+export interface ProjectMemoryRequestRecord {
+  /** The setting the review ran with. */
+  requested?: ProjectMemoryMode;
+  /** `explicit` = the client sent `projectMemoryMode`; `default` = it was omitted (→ on). */
+  requestSource?: 'explicit' | 'default';
+  /** Number of rules placed in the prompt (0 unless applied). */
+  ruleCount?: number;
+}
+
 export type ProjectMemoryPromptMetadata =
-  | { status: 'applied'; version: string; rules: AppliedProjectMemoryRule[] }
-  | { status: 'skipped'; reason: ProjectMemorySkipReason };
+  | ({
+      status: 'applied';
+      version: string;
+      rules: AppliedProjectMemoryRule[];
+    } & ProjectMemoryRequestRecord)
+  | ({ status: 'skipped'; reason: ProjectMemorySkipReason } & ProjectMemoryRequestRecord)
+  /** The request turned memory off: nothing was retrieved or injected. */
+  | ({ status: 'disabled' } & ProjectMemoryRequestRecord);
 
 export type JiraPageType = 'issue' | 'board' | 'backlog' | 'search' | 'project' | 'unknown';
 
@@ -325,7 +496,13 @@ export type GitHubAppInstallationStatus = 'active' | 'suspended' | 'removed';
 export interface WorkspaceGitHubAppStatus {
   /** Whether the GitHub App env is configured on the API. */
   appConfigured: boolean;
+  /** True only for an active installation linked with verified GitHub ownership. */
   connected: boolean;
+  /**
+   * Whether the link was verified (the linking GitHub user controls the installation). A
+   * linked but unverified installation grants no access and must be re-linked.
+   */
+  ownershipVerified?: boolean;
   installationId?: string | null;
   accountLogin?: string | null;
   accountType?: string | null;
@@ -672,6 +849,18 @@ export interface ExecuteAiActionRequest {
    * server loads, authorizes and formats the memory itself. Clients never send memory text.
    */
   memoryRepository?: string | null;
+  /**
+   * Project Memory for this request. `off` skips memory retrieval and prompt injection
+   * entirely; `on` applies eligible rules (authorization, isolation, scope, safety and limits
+   * unchanged). Omitted = `on` (backward compatible).
+   */
+  projectMemoryMode?: ProjectMemoryMode;
+  /**
+   * Retry of a request whose response was lost: the operation id the server returned
+   * (`X-AI-Operation-Id`). A completed operation's result is replayed once without a new AI
+   * call or charge; anything else runs as a new, normally charged operation.
+   */
+  retryOperationId?: string;
 }
 
 export interface ExecuteAiActionResponse {
@@ -699,6 +888,23 @@ export interface PRReviewFinding {
   filePath?: string;
   title: string;
   why: string;
+  /** Changed-line range (new side; old side for deleted lines), validated against the diff. */
+  lineStart?: number;
+  lineEnd?: number;
+  /** Code from the diff that supports the finding (validated server-side). */
+  evidence?: string;
+  /** Impact category (only security / data_integrity / availability can be high). */
+  category?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  /** Independent verification outcome, e.g. "confirmed", "not required", "insufficient context". */
+  verification?: string;
+  trigger?: string;
+  failurePath?: string;
+  impact?: string;
+  /** Other files with the same root cause. */
+  alsoIn?: string[];
+  /** introduced | removed_safeguard | exposed_existing | pre_existing */
+  changeType?: string;
   /** Original markdown block for Suggest Fix follow-ups. */
   raw: string;
 }
@@ -734,6 +940,13 @@ export interface PRReviewReport {
     totalFiles?: number | null;
     source?: PRReviewDiffSource;
   };
+  /** Server coverage manifest (absent for legacy single-call reviews). */
+  coverage?: PRReviewCoverage;
+  /**
+   * MEDIUM/HIGH candidates that independent verification could neither confirm nor refute.
+   * Never counted as findings, never hidden: while any remain, risk is not LOW.
+   */
+  needsInvestigation?: PRReviewFinding[];
   /**
    * False when the model output is not a complete, well-formed review (cut off, missing
    * the Risk Findings section, or unparseable findings). "0 findings" is only meaningful
@@ -2488,6 +2701,11 @@ export interface UpdateProjectMemoryRequest {
   status?: ProjectMemoryStatus;
   scope?: ProjectMemoryScope;
   text?: string;
+  /**
+   * `updatedAt` of the rule as the client last saw it. If the rule changed since, the server
+   * rejects the update with 409 PROJECT_MEMORY_CONFLICT instead of overwriting the change.
+   */
+  expectedUpdatedAt?: string;
 }
 
 export interface LearnProjectMemoryResponse {
@@ -2496,6 +2714,11 @@ export interface LearnProjectMemoryResponse {
   accepted: ProjectMemoryItem[];
   candidates: ProjectMemoryCandidate[];
   supersededIds?: string[];
+  /**
+   * Keys of facts Learn found again but did not re-add, because the workspace disputed that
+   * exact fact. A changed value for a disputed fact is returned in `candidates` instead.
+   */
+  disputedSkipped?: string[];
 }
 
 export interface ListProjectMemoryResponse {

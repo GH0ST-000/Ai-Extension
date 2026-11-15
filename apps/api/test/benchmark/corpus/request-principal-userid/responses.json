@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "lineStart": 16,
+            "lineEnd": 16,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check may use the wrong user",
+            "explanation": "It is unclear whether the membership lookup uses the authenticated user.",
+            "evidence": "where: { workspaceId: note.workspaceId, userId },",
+            "changeType": "introduced",
+            "trigger": "A user deletes another workspace note",
+            "failurePath": "membership check",
+            "violatedInvariant": "Only members delete notes",
+            "impact": "Possible bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check may use the wrong user": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "const membership = await db.membership.findFirst({\nwhere: { workspaceId: note.workspaceId, userId },",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

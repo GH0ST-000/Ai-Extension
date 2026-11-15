@@ -54,7 +54,15 @@ describe.skipIf(!URL_ENV)('Project Memory on PostgreSQL', () => {
   let prisma: PrismaClient;
   let memory: ProjectMemoryService;
   let ai: AiService;
-  const usageConsume = vi.fn(async () => ({ allowed: true }));
+  const usageConsume = vi.fn(
+    async (i: { workspaceId: string; metric: string; operationId: string }) => ({
+      workspaceId: i.workspaceId,
+      metric: i.metric,
+      idempotencyKey: `op:${i.operationId}`,
+      operationId: i.operationId,
+      quantity: 1,
+    }),
+  );
   let run = 0;
 
   function build(client: PrismaClient) {
@@ -97,7 +105,12 @@ describe.skipIf(!URL_ENV)('Project Memory on PostgreSQL', () => {
       } as never,
       client as never,
       featureGate,
-      { consume: usageConsume } as never,
+      {
+        reserve: usageConsume,
+        commit: async () => true,
+        releaseReservation: async () => true,
+        startHeartbeat: () => () => undefined,
+      } as never,
       {
         createOperationId: () => 'op',
         observeGenerate: async ({ call }: { call: () => Promise<{ result: string }> }) => ({

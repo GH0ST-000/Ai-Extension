@@ -1,0 +1,83 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notifications/notify.ts",
+            "lineStart": 12,
+            "lineEnd": 12,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "notifyOwner crashes when the workspace has no owner",
+            "explanation": "findFirst can return null and displayName is optional; both are dereferenced.",
+            "evidence": "const name = owner!.displayName!.trim();",
+            "changeType": "introduced",
+            "trigger": "A workspace whose owner left",
+            "failurePath": "findFirst \u2192 null \u2192 owner!.displayName",
+            "violatedInvariant": "notifyOwner never throws on missing data",
+            "impact": "Notification job crashes",
+            "assumptions": "",
+            "missingContext": ""
+          },
+          {
+            "path": "apps/api/src/notifications/notify.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Failed notification emails are reported as sent",
+            "explanation": "The catch block ignores the send error and the function returns sent: true.",
+            "evidence": "} catch {\n// Mail failures are not fatal.",
+            "changeType": "introduced",
+            "trigger": "The SMTP server is down",
+            "failurePath": "send throws \u2192 catch \u2192 return { sent: true }",
+            "violatedInvariant": "sent reflects delivery",
+            "impact": "Silent loss of owner notifications",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "notifyOwner crashes when the workspace has no owner": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "const owner = await db.user.findFirst({ where: { workspaceId, role: 'owner' } });\nconst name = owner!.displayName!.trim();",
+          "failureSite": "apps/api/src/notifications/notify.ts:12",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A workspace without an owner",
+          "violatedInvariant": "No crash on a missing owner",
+          "triggerSource": "const owner = await db.user.findFirst({ where: { workspaceId, role: 'owner' } });",
+          "guardsOnPath": []
+        },
+        "Failed notification emails are reported as sent": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "} catch {\nreturn { sent: true };",
+          "failureSite": "apps/api/src/notifications/notify.ts:18",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "mailer.send rejects",
+          "violatedInvariant": "sent reflects delivery",
+          "triggerSource": "mailer: Mailer,",
+          "guardsOnPath": [
+            {
+              "code": "} catch {",
+              "whyNotPreventing": "It swallows the send error and falls through to return sent: true."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

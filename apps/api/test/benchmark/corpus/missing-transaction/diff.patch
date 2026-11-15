@@ -1,0 +1,24 @@
+diff --git a/apps/api/src/billing/transfer.ts b/apps/api/src/billing/transfer.ts
+--- a/apps/api/src/billing/transfer.ts
++++ b/apps/api/src/billing/transfer.ts
+@@ -12,13 +12,11 @@ export async function transferCredits(
+   toId: string,
+   amount: number,
+ ): Promise<void> {
+-  await db.$transaction(async (tx) => {
+-    const from = await tx.account.findUnique({ where: { id: fromId } });
+-    const to = await tx.account.findUnique({ where: { id: toId } });
+-    if (!from || !to || from.credits < amount) {
+-      throw new Error('INVALID_TRANSFER');
+-    }
+-    await tx.account.update({ where: { id: from.id }, data: { credits: from.credits - amount } });
+-    await tx.account.update({ where: { id: to.id }, data: { credits: to.credits + amount } });
+-  });
++  const from = await db.account.findUnique({ where: { id: fromId } });
++  const to = await db.account.findUnique({ where: { id: toId } });
++  if (!from || !to || from.credits < amount) {
++    throw new Error('INVALID_TRANSFER');
++  }
++  await db.account.update({ where: { id: from.id }, data: { credits: from.credits - amount } });
++  await db.account.update({ where: { id: to.id }, data: { credits: to.credits + amount } });
+ }

@@ -1,0 +1,53 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/billing/transfer.ts",
+            "lineStart": 20,
+            "lineEnd": 20,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Transfer debits without a transaction",
+            "explanation": "The $transaction wrapper was removed; a failed credit leaves the debit applied.",
+            "evidence": "await db.account.update({ where: { id: from.id }, data: { credits: from.credits - amount } });",
+            "changeType": "introduced",
+            "trigger": "The credit update fails (constraint, timeout) after the debit",
+            "failurePath": "debit committed \u2192 credit throws",
+            "violatedInvariant": "A transfer applies both writes or neither",
+            "impact": "Lost credits",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Transfer debits without a transaction": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "await db.account.update({ where: { id: from.id }, data: { credits: from.credits - amount } });\nawait db.account.update({ where: { id: to.id }, data: { credits: to.credits + amount } });",
+          "failureSite": "apps/api/src/billing/transfer.ts:21",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "The credit update throws after the debit",
+          "violatedInvariant": "Both writes or neither",
+          "triggerSource": "amount: number,",
+          "guardsOnPath": [
+            {
+              "code": "if (!from || !to || from.credits < amount) {",
+              "whyNotPreventing": "Validates input only; it cannot undo a debit when the later credit fails."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

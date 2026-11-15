@@ -1,0 +1,42 @@
+{
+  "id": "membership-missing-userid",
+  "title": "Membership check matches any active member of the workspace",
+  "repository": "benchmark/phase1",
+  "pullRequest": "membership-missing-userid",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/workspaces/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/workspaces/workspace-access.ts",
+      "physical": "workspace-access.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "membership-missing-userid/where-without-user",
+      "path": "apps/api/src/workspaces/workspace-access.ts",
+      "lines": [
+        13,
+        13
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "The membership query no longer filters by userId: any caller passes as long as the workspace has an active member.",
+      "witness": "witness.spec.ts \u203a an outsider passes the membership check"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

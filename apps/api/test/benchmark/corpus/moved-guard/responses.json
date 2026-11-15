@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/archive.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check removed from archiveNote",
+            "explanation": "The membership guard at the top of archiveNote was deleted.",
+            "evidence": "if (!membership) {\nthrow new Error('FORBIDDEN');",
+            "changeType": "removed_safeguard",
+            "trigger": "A non-member archives a note",
+            "failurePath": "archiveNote update without membership",
+            "violatedInvariant": "Only members archive notes",
+            "impact": "Unauthorized archive",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check removed from archiveNote": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!membership) {\nthrow new Error('FORBIDDEN');\nawait db.note.update({ where: { id: noteId }, data: { archived: true } });",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

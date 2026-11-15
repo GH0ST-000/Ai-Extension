@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 18,
+            "lineEnd": 18,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Role check lets non-owners archive notes",
+            "explanation": "The guard now accepts any role in ARCHIVE_ROLES, so users who are not owners can archive notes.",
+            "evidence": "if (!membership || !ARCHIVE_ROLES.includes(membership.role)) {",
+            "changeType": "introduced",
+            "trigger": "A viewer archives a note",
+            "failurePath": "archiveNote \u2192 role check \u2192 update",
+            "violatedInvariant": "Only privileged roles archive notes",
+            "impact": "Unauthorized archival",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Role check lets non-owners archive notes": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!membership || !ARCHIVE_ROLES.includes(membership.role)) {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    },
+    {
+      "id": "adversarial-confirmation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 18,
+            "lineEnd": 18,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Role check lets non-owners archive notes",
+            "explanation": "The guard now accepts any role in ARCHIVE_ROLES, so users who are not owners can archive notes.",
+            "evidence": "if (!membership || !ARCHIVE_ROLES.includes(membership.role)) {",
+            "changeType": "introduced",
+            "trigger": "A viewer archives a note",
+            "failurePath": "archiveNote \u2192 role check \u2192 update",
+            "violatedInvariant": "Only privileged roles archive notes",
+            "impact": "Unauthorized archival",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Role check lets non-owners archive notes": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (!membership) { await db.note.update({ where: { id: noteId }, data: { archived: true } }); }",
+          "failureSite": "apps/api/src/notes/notes.service.ts:21",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A viewer archives a note",
+          "violatedInvariant": "Only privileged roles archive notes",
+          "triggerSource": "const ARCHIVE_ROLES = ['owner', 'admin', 'editor'];",
+          "guardsOnPath": [
+            {
+              "code": "if (!membership || !ARCHIVE_ROLES.includes(membership.role)) {",
+              "whyNotPreventing": "Viewers are in the allowed roles."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

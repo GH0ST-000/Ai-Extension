@@ -1,0 +1,19 @@
+diff --git a/apps/api/src/invoices/invoice-total.ts b/apps/api/src/invoices/invoice-total.ts
+--- a/apps/api/src/invoices/invoice-total.ts
++++ b/apps/api/src/invoices/invoice-total.ts
+@@ -1,9 +1,10 @@
+ export type LineItem = { unitPrice: number; quantity: number };
+ 
++export function lineTotal(item: LineItem): number {
++  return Math.round(item.unitPrice * item.quantity * 100) / 100;
++}
++
+ export function invoiceTotal(items: LineItem[]): number {
+-  let total = 0;
+-  for (const item of items) {
+-    total += Math.round(item.unitPrice * item.quantity * 100) / 100;
+-  }
+-  return Math.round(total * 100) / 100;
++  const sum = items.reduce((acc, item) => acc + lineTotal(item), 0);
++  return Math.round(sum * 100) / 100;
+ }

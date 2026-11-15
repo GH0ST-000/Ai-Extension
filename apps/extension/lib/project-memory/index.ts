@@ -19,3 +19,8 @@ export {
   resolveGithubOwnerRepo,
 } from './project-memory.store';
 export type { ProjectMemoryCapability } from './project-memory.store';
+
+export {
+  useReviewMemoryModeStore,
+  REVIEW_MEMORY_MODE_STORAGE_KEY,
+} from './review-memory-mode.store';

@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/workspaces/seats.ts",
+            "lineStart": 17,
+            "lineEnd": 17,
+            "category": "data_integrity",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Seat count and insert can race under concurrent invitations",
+            "explanation": "Two invitations may read the same count before either inserts, exceeding the seat limit.",
+            "evidence": "const count = await db.membership.count({ where: { workspaceId } });",
+            "changeType": "introduced",
+            "trigger": "Two invitations for the last seat at the same time",
+            "failurePath": "count \u2192 create twice",
+            "violatedInvariant": "Members never exceed the seat limit",
+            "impact": "Seat limit bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Seat count and insert can race under concurrent invitations": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "await db.lock(`seats:${workspaceId}`, async () => {\nconst count = await db.membership.count({ where: { workspaceId } });",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    },
+    {
+      "id": "adversarial-confirmation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/workspaces/seats.ts",
+            "lineStart": 17,
+            "lineEnd": 17,
+            "category": "data_integrity",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Seat count and insert can race under concurrent invitations",
+            "explanation": "Two invitations may read the same count before either inserts, exceeding the seat limit.",
+            "evidence": "const count = await db.membership.count({ where: { workspaceId } });",
+            "changeType": "introduced",
+            "trigger": "Two invitations for the last seat at the same time",
+            "failurePath": "count \u2192 create twice",
+            "violatedInvariant": "Members never exceed the seat limit",
+            "impact": "Seat limit bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Seat count and insert can race under concurrent invitations": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (count >= limit) {\nawait db.membership.create({ data: { workspaceId, userId, role: 'member' } });",
+          "failureSite": "apps/api/src/workspaces/seats.ts:21",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Two invitations for the last seat at the same time",
+          "violatedInvariant": "Members never exceed the seat limit",
+          "triggerSource": "limit: number,",
+          "guardsOnPath": [
+            {
+              "code": "if (count >= limit) {",
+              "whyNotPreventing": "Concurrent calls read the same count."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

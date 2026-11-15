@@ -1,0 +1,12 @@
+diff --git a/apps/api/src/workspaces/workspace-access.ts b/apps/api/src/workspaces/workspace-access.ts
+--- a/apps/api/src/workspaces/workspace-access.ts
++++ b/apps/api/src/workspaces/workspace-access.ts
+@@ -10,7 +10,7 @@ export async function assertWorkspaceMember(
+   workspaceId: string,
+ ): Promise<Membership> {
+   const membership = await db.membership.findFirst({
+-    where: { workspaceId, userId, status: 'active' },
++    where: { workspaceId, status: 'active' },
+   });
+   if (!membership) {
+     throw new Error('FORBIDDEN');

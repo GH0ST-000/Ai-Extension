@@ -1,0 +1,48 @@
+{
+  "id": "helper-wrong-user",
+  "title": "A correct membership helper is called with the author's id",
+  "repository": "benchmark/phase1",
+  "pullRequest": "helper-wrong-user",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/membership.ts",
+      "physical": "membership.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/delete-note.ts",
+      "physical": "delete-note.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "helper-wrong-user/author-passed-as-member",
+      "path": "apps/api/src/notes/delete-note.ts",
+      "lines": [
+        9,
+        9
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "findMembership is called with note.authorId: the caller is never checked, so anyone can delete a note whose author is a member.",
+      "witness": "witness.spec.ts \u203a an outsider deletes a note through the helper"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

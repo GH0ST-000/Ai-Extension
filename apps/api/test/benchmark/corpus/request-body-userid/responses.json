@@ -1,0 +1,101 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "lineStart": 16,
+            "lineEnd": 16,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check trusts a user id from the request body",
+            "explanation": "The membership lookup filters by userId, which comes from req.body (client input).",
+            "evidence": "const userId = req.body.userId ?? req.user.id;",
+            "changeType": "introduced",
+            "trigger": "An outsider sends body.userId of a workspace member",
+            "failurePath": "body userId \u2192 membership \u2192 delete",
+            "violatedInvariant": "Authorization uses the authenticated principal",
+            "impact": "Authorization bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check trusts a user id from the request body": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "const userId = req.body.userId ?? req.user.id;\nawait db.note.delete({ where: { id: note.id } });",
+          "failureSite": "apps/api/src/notes/notes.handler.ts:21",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "An outsider names a member in body.userId",
+          "violatedInvariant": "Authorization uses the authenticated principal",
+          "triggerSource": "const userId = req.body.userId ?? req.user.id;",
+          "guardsOnPath": [
+            {
+              "code": "const userId = req.body.userId ?? req.user.id;",
+              "whyNotPreventing": "The ?? fallback only applies when body.userId is absent; an attacker supplies it."
+            },
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note."
+            },
+            {
+              "code": "if (!membership) {",
+              "whyNotPreventing": "It checks the membership of the user named in the body, not the authenticated caller."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "lineStart": 16,
+            "lineEnd": 16,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check trusts a user id from the request body",
+            "explanation": "The membership lookup filters by userId, which comes from req.body (client input).",
+            "evidence": "const userId = req.body.userId ?? req.user.id;",
+            "changeType": "introduced",
+            "trigger": "An outsider sends body.userId of a workspace member",
+            "failurePath": "body userId \u2192 membership \u2192 delete",
+            "violatedInvariant": "Authorization uses the authenticated principal",
+            "impact": "Authorization bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check trusts a user id from the request body": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "const membership = await db.membership.findFirst({\nwhere: { workspaceId: note.workspaceId, userId },",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

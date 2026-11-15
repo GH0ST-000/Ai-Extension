@@ -58,10 +58,10 @@ describe('memory labels', () => {
   it('summarises applied and skipped memory', () => {
     expect(memoryChipLabel(null)).toBeNull();
     expect(memoryChipLabel({ status: 'applied', version: 'v', rules: [RULE as never] })).toBe(
-      '1 memory rule',
+      'Applied · 1 rule',
     );
     expect(memoryChipLabel({ status: 'skipped', reason: 'no_active_rules' })).toBe(
-      'No memory applied',
+      'Skipped · no rules applied',
     );
     expect(memorySkipReasonText('github_not_connected')).toMatch(/Connect GitHub/);
     expect(memoryCategoryLabel('SECURITY_CONVENTION')).toBe('Security convention');

@@ -242,6 +242,9 @@ chrome.runtime.onConnect.addListener((port) => {
               }
             },
             abortController.signal,
+            (headers) => {
+              if (!aborted) port.postMessage({ type: 'HEADERS', headers });
+            },
           );
           if (!aborted) {
             port.postMessage({

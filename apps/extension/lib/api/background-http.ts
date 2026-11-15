@@ -228,6 +228,8 @@ const STREAM_RESPONSE_HEADER_ALLOWLIST = [
   'x-request-id',
   'x-pr-review-scope',
   'x-project-memory',
+  'x-ai-operation-id',
+  'x-ai-operation-replayed',
 ] as const;
 
 function pickStreamResponseHeaders(headers: Headers): Record<string, string> {
@@ -245,6 +247,8 @@ export async function executeApiStream(
   input: Omit<ApiStreamStartMessage, 'type'>,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
+  /** Allow-listed response headers, as soon as the response starts (before the body). */
+  onHeaders?: (headers: Record<string, string>) => void,
 ): Promise<{ ok: boolean; status: number; bodyText: string; headers: Record<string, string> }> {
   if (!isAllowedExtensionApiPath(input.path)) {
     return { ok: false, status: 0, bodyText: 'API path is not allowed.', headers: {} };
@@ -298,6 +302,7 @@ export async function executeApiStream(
     };
   }
 
+  onHeaders?.(pickStreamResponseHeaders(response.headers));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = '';
@@ -386,6 +391,8 @@ export async function extensionApiStream(
   init: RequestInit & { auth?: boolean },
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
+  /** Allow-listed response headers as soon as the stream starts (e.g. the operation id). */
+  onHeaders?: (headers: Headers) => void,
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (!headers.has('Content-Type') && init.body) {
@@ -411,6 +418,7 @@ export async function extensionApiStream(
       },
       onChunk,
       signal,
+      onHeaders ? (h) => onHeaders(recordToHeaders(h)) : undefined,
     );
     return new Response(result.bodyText, {
       status: result.status,
@@ -460,6 +468,15 @@ export async function extensionApiStream(
         if (msg.type === 'CHUNK' && typeof msg.chunk === 'string') {
           full += msg.chunk;
           onChunk(msg.chunk);
+          return;
+        }
+        if (msg.type === 'HEADERS' && msg.headers && typeof msg.headers === 'object') {
+          const early = new Headers();
+          for (const name of STREAM_RESPONSE_HEADER_ALLOWLIST) {
+            const value = msg.headers[name];
+            if (typeof value === 'string') early.set(name, value);
+          }
+          onHeaders?.(early);
           return;
         }
         if (msg.type === 'DONE') {

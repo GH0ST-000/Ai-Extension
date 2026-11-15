@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { EntitlementService, effectivePlanId } from './entitlements.service';
+import {
+  EntitlementService,
+  SUBSCRIPTION_STATUS_POLICY,
+  effectivePlanId,
+} from './entitlements.service';
 
 describe('effectivePlanId', () => {
   it('grants the paid plan only while the subscription is active-like', () => {
@@ -41,5 +45,32 @@ describe('EntitlementService cache', () => {
     await service.getPlanId('ws_1');
     await service.getPlanId('ws_1');
     expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('subscription status entitlement policy (current behavior, explicit)', () => {
+  it.each([
+    ['trialing', 'pro'],
+    ['active', 'pro'],
+    ['past_due', 'pro'], // dunning: access continues until Paddle cancels
+    ['paused', 'pro'], // UNDECIDED product policy — current behavior preserved
+    ['cancelled', 'free'],
+    ['expired', 'free'],
+    ['none', 'free'],
+    ['something_new', 'free'], // unknown statuses never grant a paid plan
+  ])('a pro subscription in status %s is entitled to the %s plan', (status, plan) => {
+    expect(effectivePlanId({ planId: 'pro', status })).toBe(plan);
+  });
+
+  it('a missing subscription, an unknown plan id or the free plan is always free', () => {
+    expect(effectivePlanId(null)).toBe('free');
+    expect(effectivePlanId({ planId: 'enterprise-legacy', status: 'active' })).toBe('free');
+    expect(effectivePlanId({ planId: 'free', status: 'cancelled' })).toBe('free');
+  });
+
+  it('the policy table covers every known status', () => {
+    expect(Object.keys(SUBSCRIPTION_STATUS_POLICY).sort()).toEqual(
+      ['active', 'cancelled', 'expired', 'none', 'past_due', 'paused', 'trialing'].sort(),
+    );
   });
 });

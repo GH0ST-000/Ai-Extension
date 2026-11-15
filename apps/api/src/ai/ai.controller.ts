@@ -98,10 +98,8 @@ export class AiController {
   @Post('actions')
   @HttpCode(200)
   async generateAction(@CurrentUser() user: AuthRequestUser, @Body() body: ExecuteAiActionDto) {
-    const { text, reviewScope, projectMemory } = await this.aiService.generateActionWithMetadata(
-      user.id,
-      body,
-    );
+    const { text, reviewScope, projectMemory, operationId, replayed } =
+      await this.aiService.generateActionWithMetadata(user.id, body);
     return {
       success: true as const,
       data: {
@@ -109,6 +107,8 @@ export class AiController {
         result: text,
         ...(reviewScope ? { reviewScope } : {}),
         ...(projectMemory ? { projectMemory } : {}),
+        ...(operationId ? { operationId } : {}),
+        ...(replayed ? { replayed: true } : {}),
       },
     };
   }

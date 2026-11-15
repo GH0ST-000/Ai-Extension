@@ -1,0 +1,42 @@
+{
+  "id": "membership-wrong-userid",
+  "title": "Delete checks the author's membership instead of the caller's",
+  "repository": "benchmark/phase1",
+  "pullRequest": "membership-wrong-userid",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "membership-wrong-userid/author-instead-of-caller",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        13,
+        13
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "The membership query uses note.authorId instead of the acting userId: anyone can delete a note whose author is a member.",
+      "witness": "witness.spec.ts \u203a an outsider deletes a note whose author is a member"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

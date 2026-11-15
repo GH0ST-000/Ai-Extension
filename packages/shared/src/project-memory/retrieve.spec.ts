@@ -130,3 +130,31 @@ describe('selectRelevantMemory', () => {
     expect(selected[0]?.id).toBe('1');
   });
 });
+
+describe('selectRelevantMemory — path scope', () => {
+  const rules = () => [
+    item({ id: 'repo', key: 'repo', scope: { type: 'repository' } }),
+    item({ id: 'web', key: 'web', scope: { type: 'directory', path: 'apps/web' } }),
+    item({ id: 'api', key: 'api', scope: { type: 'directory', path: 'apps/api' } }),
+    item({ id: 'sql', key: 'sql', scope: { type: 'file-pattern', pattern: '**/*.sql' } }),
+  ];
+  const select = (pathHints?: string[]) =>
+    selectRelevantMemory(rules(), { pathHints, maxItems: 10, maxChars: 10_000 })
+      .map((i) => i.id)
+      .sort();
+
+  it('excludes directory and file-pattern rules that match none of the touched paths', () => {
+    expect(select(['apps/api/src/main.ts'])).toEqual(['api', 'repo']);
+    expect(select(['db/migrations/001.sql'])).toEqual(['repo', 'sql']);
+  });
+
+  it('a directory prefix must end at a path boundary', () => {
+    expect(select(['apps/webhooks/handler.ts'])).toEqual(['repo']);
+    expect(select(['apps/web'])).toEqual(['repo', 'web']);
+  });
+
+  it('keeps every scoped rule when no paths are known', () => {
+    expect(select([])).toEqual(['api', 'repo', 'sql', 'web']);
+    expect(select(undefined)).toEqual(['api', 'repo', 'sql', 'web']);
+  });
+});

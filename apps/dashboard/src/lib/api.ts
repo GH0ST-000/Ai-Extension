@@ -393,7 +393,7 @@ export type CreateProjectMemoryRuleBody = Omit<
 export async function listProjectMemory(
   owner: string,
   repo: string,
-  status?: 'active' | 'archived',
+  status?: 'active' | 'archived' | 'disputed',
 ): Promise<ListProjectMemoryResponse> {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
   return apiFetch<ListProjectMemoryResponse>(projectMemoryPath(owner, repo, query));

@@ -1,0 +1,42 @@
+{
+  "id": "helper-unavailable",
+  "title": "Delegate the membership check to requireWorkspaceMember() (helper source unavailable)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "helper-unavailable",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "helper-unavailable/membership-result-ignored",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        13,
+        14
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "removed_safeguard",
+      "description": "requireWorkspaceMember returns a boolean that deleteNote ignores; its source is not available to the review, so the engine can only report it as uncertain.",
+      "witness": "witness.spec.ts \u203a an outsider can delete a note although requireWorkspaceMember is called"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

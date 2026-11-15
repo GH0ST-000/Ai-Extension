@@ -1,0 +1,42 @@
+{
+  "id": "defensive-guard-bug",
+  "title": "Session expiry guard compares milliseconds with seconds",
+  "repository": "benchmark/phase1",
+  "pullRequest": "defensive-guard-bug",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/auth/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/auth/session.guard.ts",
+      "physical": "session.guard.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "defensive-guard-bug/expired-session-accepted",
+      "path": "apps/api/src/auth/session.guard.ts",
+      "lines": [
+        9,
+        9
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "expiresAt is in milliseconds but is compared with seconds: an expired session is accepted.",
+      "witness": "witness.spec.ts \u203a an expired session is accepted"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

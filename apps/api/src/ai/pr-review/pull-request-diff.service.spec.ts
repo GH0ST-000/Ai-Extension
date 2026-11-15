@@ -1,7 +1,7 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PullRequestDiffService } from './pull-request-diff.service';
+import { PR_DIFF_MAX_PAGES, PullRequestDiffService } from './pull-request-diff.service';
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers });
@@ -42,7 +42,7 @@ describe('PullRequestDiffService', () => {
           title: 'Memory fixes',
           changed_files: 101,
           base: { ref: 'main' },
-          head: { ref: 'fix' },
+          head: { ref: 'fix', sha: 'abc1234def' },
         }),
       )
       .mockResolvedValueOnce(json(page1))
@@ -55,13 +55,49 @@ describe('PullRequestDiffService', () => {
       'https://api.github.com/repos/GH0ST-000/Ai-Extension/pulls/48/files?per_page=100&page=1',
       'https://api.github.com/repos/GH0ST-000/Ai-Extension/pulls/48/files?per_page=100&page=2',
     ]);
-    expect(result.scope).toMatchObject({ source: 'github_api', totalFiles: 101, truncated: true });
-    expect(result.scope.analyzedFiles).toBeGreaterThan(0);
+    // Every listed file is returned (no selection here); budgeting happens in the planner.
+    expect(result).toMatchObject({ source: 'github_api', totalFiles: 101 });
+    expect(result.files).toHaveLength(101);
+    expect(result.files.at(-1)).toEqual({
+      path: 'src/last.ts',
+      status: 'modified',
+      changes: 0,
+      patch: '+y',
+    });
     expect(result).toMatchObject({
       pullRequestTitle: 'Memory fixes',
       baseBranch: 'main',
       headBranch: 'fix',
+      headSha: 'abc1234def',
     });
+  });
+
+  it(`stops at ${PR_DIFF_MAX_PAGES} pages and keeps GitHub's total so the rest count as not fetched`, async () => {
+    const page = (n: number) =>
+      Array.from({ length: 100 }, (_, i) => ({ filename: `p${n}/f${i}.ts`, patch: '+x' }));
+    fetchMock.mockResolvedValueOnce(json({ changed_files: 2500 }));
+    for (let n = 1; n <= PR_DIFF_MAX_PAGES + 2; n += 1)
+      fetchMock.mockResolvedValueOnce(json(page(n)));
+
+    const result = await service.resolve({ ...base, pullRequestNumber: 7 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1 + PR_DIFF_MAX_PAGES);
+    expect(result.files).toHaveLength(PR_DIFF_MAX_PAGES * 100);
+    expect(result.totalFiles).toBe(2500);
+  });
+
+  it('keeps files without a patch (binary / too large) instead of dropping them', async () => {
+    fetchMock.mockResolvedValueOnce(json({ changed_files: 2 })).mockResolvedValueOnce(
+      json([
+        { filename: 'logo.png', status: 'added', changes: 0 },
+        { filename: 'src/huge.ts', status: 'modified', changes: 9000 },
+      ]),
+    );
+    const result = await service.resolve({ ...base, pullRequestNumber: 9 });
+    expect(result.files.map((f) => [f.path, f.patch])).toEqual([
+      ['logo.png', null],
+      ['src/huge.ts', null],
+    ]);
   });
 
   it('ignores page files when the API succeeds', async () => {
@@ -73,7 +109,7 @@ describe('PullRequestDiffService', () => {
       pullRequestNumber: 48,
       pageFiles: [{ path: 'dom.ts', patchExcerpt: '+dom' }],
     });
-    expect(result.changedFiles.map((f) => f.path)).toEqual(['api.ts']);
+    expect(result.files.map((f) => f.path)).toEqual(['api.ts']);
   });
 
   it('falls back to page diff when GitHub denies access', async () => {
@@ -83,7 +119,10 @@ describe('PullRequestDiffService', () => {
       pullRequestNumber: 48,
       pageFiles: [{ path: 'dom.ts', patchExcerpt: '+dom' }],
     });
-    expect(result.scope).toMatchObject({ source: 'page', analyzedFiles: 1, totalFiles: null });
+    expect(result).toMatchObject({ source: 'page', totalFiles: null });
+    expect(result.files).toEqual([
+      { path: 'dom.ts', status: 'modified', changes: 1, patch: '+dom' },
+    ]);
   });
 
   it('rejects with PR_DIFF_UNAVAILABLE when there is no token and no page diff', async () => {

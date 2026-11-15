@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check result is ignored before deleting the note",
+            "explanation": "assertMember returns a boolean instead of throwing, and deleteNote ignores it.",
+            "evidence": "await assertMember(db, note.workspaceId, userId);",
+            "changeType": "removed_safeguard",
+            "trigger": "A non-member deletes a note by id",
+            "failurePath": "assertMember \u2192 false (ignored) \u2192 delete",
+            "violatedInvariant": "Only workspace members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check result is ignored before deleting the note": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "return membership != null;\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:14",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A non-member deletes a note",
+          "violatedInvariant": "Only workspace members delete notes",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note."
+            },
+            {
+              "code": "await assertMember(db, note.workspaceId, userId);",
+              "whyNotPreventing": "assertMember returns false for non-members and never throws; the result is discarded."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership check result is ignored before deleting the note",
+            "explanation": "assertMember returns a boolean instead of throwing, and deleteNote ignores it.",
+            "evidence": "await assertMember(db, note.workspaceId, userId);",
+            "changeType": "removed_safeguard",
+            "trigger": "A non-member deletes a note by id",
+            "failurePath": "assertMember \u2192 false (ignored) \u2192 delete",
+            "violatedInvariant": "Only workspace members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership check result is ignored before deleting the note": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "await assertMember(db, note.workspaceId, userId);\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

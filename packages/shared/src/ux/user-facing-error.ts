@@ -199,6 +199,16 @@ export function mapToUserFacingError(input: MapErrorInput): UserFacingError {
         primaryAction: action('View plans', 'view_plans'),
       });
 
+    case 'AI_OPERATION_IN_PROGRESS':
+      return error({
+        title: 'Already running',
+        message:
+          'The same request is still in progress. Wait for it to finish before trying again.',
+        severity: 'info',
+        code,
+        referenceId,
+      });
+
     case 'USAGE_LIMIT_REACHED':
     case 'PLAN_LIMIT_EXCEEDED':
     case 'WORKFLOW_BUDGET_EXCEEDED':

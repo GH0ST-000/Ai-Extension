@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsIn,
   IsNotEmpty,
   IsOptional,
@@ -11,6 +10,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { MULTI_REPO_MAX_REPOS_PER_SYSTEM, type MultiRepoRepositoryRole } from '@project-x/types';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 const ROLE_VALUES = [
   'frontend',
@@ -39,7 +40,7 @@ export class CreateSystemRepositoryDto {
   role?: MultiRepoRepositoryRole;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   enabled?: boolean;
 }
 

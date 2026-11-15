@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/invoices/invoice-total.ts",
+            "lineStart": 4,
+            "lineEnd": 4,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Refactor may change invoice rounding",
+            "explanation": "Moving the rounding into lineTotal could change totals.",
+            "evidence": "return Math.round(item.unitPrice * item.quantity * 100) / 100;",
+            "changeType": "introduced",
+            "trigger": "Invoices with fractional prices",
+            "failurePath": "lineTotal rounding",
+            "violatedInvariant": "Totals are unchanged by the refactor",
+            "impact": "Wrong invoice totals",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Refactor may change invoice rounding": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "return Math.round(item.unitPrice * item.quantity * 100) / 100;\nconst sum = items.reduce((acc, item) => acc + lineTotal(item), 0);",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

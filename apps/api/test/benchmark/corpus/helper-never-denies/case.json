@@ -1,0 +1,48 @@
+{
+  "id": "helper-never-denies",
+  "title": "Replace the inline membership check with assertMember()",
+  "repository": "benchmark/phase1",
+  "pullRequest": "helper-never-denies",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/access.ts",
+      "physical": "access.ts",
+      "changed": true,
+      "status": "added"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "helper-never-denies/ignored-membership-result",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        13,
+        14
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "removed_safeguard",
+      "description": "assertMember only returns a boolean; its result is ignored, so non-members delete notes. The name suggests a check that never denies.",
+      "witness": "witness.spec.ts \u203a an outsider can delete a note although assertMember is called"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

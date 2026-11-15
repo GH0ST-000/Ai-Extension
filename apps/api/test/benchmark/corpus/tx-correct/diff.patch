@@ -1,0 +1,26 @@
+diff --git a/apps/api/src/wallet/transfer.service.ts b/apps/api/src/wallet/transfer.service.ts
+--- a/apps/api/src/wallet/transfer.service.ts
++++ b/apps/api/src/wallet/transfer.service.ts
+@@ -8,12 +8,15 @@ export type WalletDb = {
+ };
+ 
+ export async function transfer(db: WalletDb, fromId: string, toId: string, amount: number): Promise<void> {
+-  const debited = await db.account.updateMany({
+-    where: { id: fromId, credits: { gte: amount } },
+-    data: { credits: { decrement: amount } },
++  // Debit and credit commit together; the debit is an atomic conditional decrement.
++  await db.$transaction(async (tx) => {
++    const debited = await tx.account.updateMany({
++      where: { id: fromId, credits: { gte: amount } },
++      data: { credits: { decrement: amount } },
++    });
++    if (debited.count === 0) {
++      throw new Error('INSUFFICIENT_FUNDS');
++    }
++    await tx.account.update({ where: { id: toId }, data: { credits: { increment: amount } } });
+   });
+-  if (debited.count === 0) {
+-    throw new Error('INSUFFICIENT_FUNDS');
+-  }
+-  await db.account.update({ where: { id: toId }, data: { credits: { increment: amount } } });
+ }

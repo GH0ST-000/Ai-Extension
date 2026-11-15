@@ -32,8 +32,20 @@ export interface ApiConfig {
     maxInputCharacters: number;
     /** REVIEW_ENTIRE_PR overrides (output budget + timeout); other actions are unaffected. */
     prReview: {
+      /** Output tokens per batch call. */
       maxOutputTokens: number;
+      /** Timeout per batch call. */
       requestTimeoutMs: number;
+      maxBatches: number;
+      concurrency: number;
+      batchInputTokens: number;
+      maxInputTokens: number;
+      maxTotalOutputTokens: number;
+      reviewTimeoutMs: number;
+      maxVerifications: number;
+      verifyInputTokens: number;
+      verifyOutputTokens: number;
+      maxContextFiles: number;
     };
     corsOrigins: string[];
     corsContentScriptOrigins: string[];
@@ -146,10 +158,20 @@ export default (): ApiConfig => {
       maxOutputTokens: env.AI_MAX_OUTPUT_TOKENS,
       requestTimeoutMs: env.AI_REQUEST_TIMEOUT_MS,
       maxInputCharacters: env.AI_MAX_INPUT_CHARACTERS,
-      prReview: {
+      prReview: validatePrReviewBudget({
         maxOutputTokens: env.AI_PR_REVIEW_MAX_OUTPUT_TOKENS,
         requestTimeoutMs: env.AI_PR_REVIEW_TIMEOUT_MS,
-      },
+        maxBatches: env.AI_PR_REVIEW_MAX_BATCHES,
+        concurrency: env.AI_PR_REVIEW_MAX_CONCURRENCY,
+        batchInputTokens: env.AI_PR_REVIEW_BATCH_INPUT_TOKENS,
+        maxInputTokens: env.AI_PR_REVIEW_MAX_INPUT_TOKENS,
+        maxTotalOutputTokens: env.AI_PR_REVIEW_MAX_TOTAL_OUTPUT_TOKENS,
+        reviewTimeoutMs: env.AI_PR_REVIEW_TOTAL_TIMEOUT_MS,
+        maxVerifications: env.AI_PR_REVIEW_MAX_VERIFICATIONS,
+        verifyInputTokens: env.AI_PR_REVIEW_VERIFY_INPUT_TOKENS,
+        verifyOutputTokens: env.AI_PR_REVIEW_VERIFY_OUTPUT_TOKENS,
+        maxContextFiles: env.AI_PR_REVIEW_MAX_CONTEXT_FILES,
+      }),
       corsOrigins: parseCorsOrigins(env.AI_CORS_ORIGINS),
       corsContentScriptOrigins: parseCorsOrigins(env.AI_CORS_CONTENT_SCRIPT_ORIGINS),
     },
@@ -195,3 +217,29 @@ export default (): ApiConfig => {
     },
   };
 };
+
+/**
+ * Cross-field checks for the batched PR review budget. A configuration that would allow zero
+ * batches, or a per-batch value larger than its per-review ceiling, fails at startup instead of
+ * silently reviewing nothing or exceeding the cost ceiling.
+ */
+export function validatePrReviewBudget(
+  budget: ApiConfig['ai']['prReview'],
+): ApiConfig['ai']['prReview'] {
+  const problems: string[] = [];
+  if (budget.batchInputTokens > budget.maxInputTokens) {
+    problems.push('AI_PR_REVIEW_BATCH_INPUT_TOKENS must not exceed AI_PR_REVIEW_MAX_INPUT_TOKENS');
+  }
+  if (budget.maxOutputTokens > budget.maxTotalOutputTokens) {
+    problems.push(
+      'AI_PR_REVIEW_MAX_OUTPUT_TOKENS (per batch) must not exceed AI_PR_REVIEW_MAX_TOTAL_OUTPUT_TOKENS',
+    );
+  }
+  if (budget.requestTimeoutMs > budget.reviewTimeoutMs) {
+    problems.push('AI_PR_REVIEW_TIMEOUT_MS must not exceed AI_PR_REVIEW_TOTAL_TIMEOUT_MS');
+  }
+  if (problems.length > 0) {
+    throw new Error(`Invalid PR review budget: ${problems.join('; ')}`);
+  }
+  return budget;
+}

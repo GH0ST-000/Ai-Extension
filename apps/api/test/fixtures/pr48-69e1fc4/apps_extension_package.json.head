@@ -1,0 +1,66 @@
+{
+  "name": "@project-x/extension",
+  "displayName": "Project X",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Project X Chrome extension (Plasmo)",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "preview": "pnpm run clean && plasmo build",
+    "package": "plasmo package",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf build .plasmo"
+  },
+  "dependencies": {
+    "@floating-ui/react": "^0.27.20",
+    "@project-x/shared": "workspace:*",
+    "@project-x/types": "workspace:*",
+    "clsx": "^2.1.1",
+    "framer-motion": "11",
+    "plasmo": "^0.89.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@plasmohq/prettier-plugin-sort-imports": "^4.0.1",
+    "@project-x/eslint-config": "workspace:*",
+    "@project-x/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.17.0",
+    "jsdom": "^29.1.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "3.4.17",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  },
+  "manifest": {
+    "host_permissions": [
+      "http://localhost:3001/*",
+      "http://127.0.0.1:3001/*",
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*"
+    ],
+    "optional_host_permissions": [
+      "https://*/*",
+      "http://*/*"
+    ],
+    "permissions": [
+      "storage",
+      "cookies"
+    ],
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+    }
+  }
+}

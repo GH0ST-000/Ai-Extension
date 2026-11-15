@@ -1,0 +1,10 @@
+diff --git a/apps/api/src/notes/notes.query.ts b/apps/api/src/notes/notes.query.ts
+--- a/apps/api/src/notes/notes.query.ts
++++ b/apps/api/src/notes/notes.query.ts
+@@ -17,5 +17,5 @@ export async function listNotesForUser(
+ }
+ 
+ export async function listNotes(db: NotesDb, workspaceId: string): Promise<Note[]> {
+-  return db.note.findMany({ where: { workspaceId, archived: false } });
++  return db.note.findMany({ where: { archived: false } });
+ }

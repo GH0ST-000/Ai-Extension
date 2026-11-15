@@ -1,0 +1,46 @@
+{
+  "id": "multiline-evidence",
+  "title": "Remove the membership lookup from note deletion (multi-line deleted evidence)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "multiline-evidence",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/docs/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/docs/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "multiline-evidence/delete-without-membership",
+      "path": "apps/api/src/docs/notes.service.ts",
+      "lines": [
+        12,
+        12
+      ],
+      "removedLines": [
+        12,
+        16
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "removed_safeguard",
+      "description": "The membership lookup and its FORBIDDEN branch were removed: any user deletes any note by id.",
+      "witness": "witness.spec.ts \u203a an outsider can delete a note of another workspace"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

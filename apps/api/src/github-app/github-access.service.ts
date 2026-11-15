@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { Injectable } from '@nestjs/common';
 
 import { RequestContextService } from '../observability/request-context.service';
@@ -18,9 +16,10 @@ export type ResolvedGitHubApiToken = {
 
 /**
  * Stable, non-secret identity of the credential a call would use:
- * `installation:<installationId>` or `pat:<sha256 fingerprint of the token>`. It changes when
- * the workspace's installation is removed, suspended or relinked, or when the user's personal
- * token is disconnected or replaced — so anything keyed by it is invalidated at once.
+ * `installation:<installationId>` or `pat:<connection row id>:<updatedAt>`. Never derived from
+ * a secret. It changes when the workspace's installation is removed, suspended or relinked, or
+ * when the user's personal token is disconnected, reconnected or replaced — so anything keyed by
+ * it is invalidated at once.
  */
 export type GitHubCredentialIdentity = string;
 
@@ -42,8 +41,22 @@ export class GithubAccessService {
     userId: string,
     explicitWorkspaceId?: string,
   ): Promise<ResolvedGitHubApiToken | null> {
-    const resolved = await this.resolveCredential(userId, explicitWorkspaceId, true);
-    return resolved ? { token: resolved.token!, source: resolved.source } : null;
+    const workspaceId = await this.resolveWorkspaceId(userId, explicitWorkspaceId);
+
+    if (this.appTokens.isAppAuthEnabled()) {
+      const installationId = await this.installations.getActiveInstallationId(workspaceId);
+      if (installationId) {
+        const token = await this.appTokens.mintInstallationAccessToken(installationId);
+        return { token, source: 'installation' };
+      }
+    }
+
+    const pat = await this.patConnections.getDecryptedToken(userId);
+    if (pat) {
+      return { token: pat, source: 'pat' };
+    }
+
+    return null;
   }
 
   /** {@link resolveApiToken} plus the identity of the credential that was used. */
@@ -89,12 +102,13 @@ export class GithubAccessService {
       }
     }
 
-    const pat = await this.patConnections.getDecryptedToken(userId);
-    if (pat) {
-      return { token: pat, source: 'pat', identity: `pat:${patFingerprint(pat)}` };
+    if (mint) {
+      const pat = await this.patConnections.getDecryptedTokenWithVersion(userId);
+      return pat ? { token: pat.token, source: 'pat', identity: `pat:${pat.version}` } : null;
     }
-
-    return null;
+    // Identity only: no decryption needed.
+    const version = await this.patConnections.getConnectionVersion(userId);
+    return version ? { token: null, source: 'pat', identity: `pat:${version}` } : null;
   }
 
   /** @deprecated Prefer {@link resolveApiToken} — kept for tests migrating off PAT-only. */
@@ -110,9 +124,4 @@ export class GithubAccessService {
     }
     return resolveWorkspaceIdForUser(this.prisma, userId, explicitWorkspaceId);
   }
-}
-
-/** One-way fingerprint of a personal token (never stored or logged in clear). */
-function patFingerprint(token: string): string {
-  return createHash('sha256').update(`px-github-pat:${token}`).digest('hex').slice(0, 32);
 }

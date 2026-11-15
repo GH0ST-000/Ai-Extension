@@ -59,6 +59,13 @@ const INSTALLATION_REPOS: Record<string, string[]> = {};
 const PATS: Record<string, string> = {};
 /** Repositories for which GitHub answers 502 (transient outage). */
 const FLAKY_REPOS = new Set<string>();
+/** Stand-in for GitHubConnection row versions: each distinct stored token is a new version. */
+const PAT_VERSIONS = new Map<string, string>();
+function patVersion(userId: string, token: string): string {
+  const key = `${userId}\u0000${token}`;
+  if (!PAT_VERSIONS.has(key)) PAT_VERSIONS.set(key, `conn_${userId}:${PAT_VERSIONS.size + 1}`);
+  return PAT_VERSIONS.get(key)!;
+}
 /** Access-cache stand-in state (see beforeAll). */
 const cache: { offsetMs: number; store: Map<string, { value: string; expiresAt: number }> } = {
   offsetMs: 0,
@@ -140,7 +147,16 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
       requestContext,
       appTokens as never,
       installations,
-      { getDecryptedToken: async (userId: string) => PATS[userId] ?? null } as never,
+      {
+        getDecryptedToken: async (userId: string) => PATS[userId] ?? null,
+        // Like the real service: a non-secret row version that changes on every replacement.
+        getConnectionVersion: async (userId: string) =>
+          PATS[userId] ? patVersion(userId, PATS[userId]!) : null,
+        getDecryptedTokenWithVersion: async (userId: string) =>
+          PATS[userId]
+            ? { token: PATS[userId]!, version: patVersion(userId, PATS[userId]!) }
+            : null,
+      } as never,
     );
     // TTL-aware Redis stand-in; `cacheClock.offsetMs` moves time forward for expiry tests.
     const redisStore = new Map<string, { value: string; expiresAt: number }>();
@@ -1443,6 +1459,44 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     expect(keys[0]).toMatch(/^px:prh:access:v2:[0-9a-f]{64}$/);
     for (const plain of [PATS[users.owner!]!, users.owner!, ws, 'acme', 'app']) {
       expect(keys[0]).not.toContain(plain);
+    }
+  });
+
+  it('GitHubConnection version (real table): changes on replace, gone on disconnect, new on reconnect', async () => {
+    const { GithubConnectionService } =
+      await import('../../src/settings/github-connection.service');
+    const connections = new GithubConnectionService(
+      prisma as never,
+      { getOrThrow: () => ENCRYPTION_KEY, get: () => ENCRYPTION_KEY } as never,
+    );
+    const { users } = await seed({ roles: { owner: 'owner' } });
+    const userId = users.owner!;
+    await prisma.gitHubConnection.create({
+      data: { userId, tokenCiphertext: encryptSecret('ghp_first_value', ENCRYPTION_KEY) },
+    });
+    const first = await connections.getConnectionVersion(userId);
+    expect(first).toMatch(/^c[a-z0-9]+:\d+$/);
+    expect(await connections.getDecryptedTokenWithVersion(userId)).toEqual({
+      token: 'ghp_first_value',
+      version: first,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    // Same write the settings flow performs when a token is replaced (upsert → update).
+    await prisma.gitHubConnection.update({
+      where: { userId },
+      data: { tokenCiphertext: encryptSecret('ghp_second_value', ENCRYPTION_KEY) },
+    });
+    const second = await connections.getConnectionVersion(userId);
+    expect(second).not.toBe(first);
+    await connections.disconnect(userId);
+    expect(await connections.getConnectionVersion(userId)).toBeNull();
+    await prisma.gitHubConnection.create({
+      data: { userId, tokenCiphertext: encryptSecret('ghp_second_value', ENCRYPTION_KEY) },
+    });
+    const third = await connections.getConnectionVersion(userId);
+    expect(third).not.toBe(second); // same token reconnected → new row, new version
+    for (const version of [first, second, third]) {
+      expect(version).not.toMatch(/ghp_/);
     }
   });
 });

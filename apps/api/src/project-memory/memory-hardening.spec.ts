@@ -90,8 +90,16 @@ function createDb() {
       return { count: hits.length };
     }),
   };
+  const auditEvents: Row[] = [];
   const prisma = {
     projectMemory,
+    // Audit events are appended in the same transaction as every memory write.
+    projectMemoryAuditEvent: {
+      createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+        auditEvents.push(...data);
+        return { count: data.length };
+      }),
+    },
     // In-memory stand-in: runs the callback against the same tables (no rollback).
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown): Promise<unknown> => fn(prisma)),
     // Advisory lock taken by every memory write (no-op here).

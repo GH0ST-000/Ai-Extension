@@ -48,6 +48,7 @@ model User {
   createdProjectMemories ProjectMemory[] @relation("ProjectMemoryCreator")
   createdProjectSystems ProjectSystem[] @relation("ProjectSystemCreator")
   prReviewReports  PrReviewReport[]
+  projectMemoryAuditEvents ProjectMemoryAuditEvent[]
 
   @@map("users")
 }
@@ -159,6 +160,7 @@ model Workspace {
   executionFailures ExecutionFailure[]
   githubAppInstallation GitHubAppInstallation?
   prReviewReports  PrReviewReport[]
+  projectMemoryAuditEvents ProjectMemoryAuditEvent[]
 
   @@index([status])
   @@map("workspaces")
@@ -644,4 +646,52 @@ model PrReviewReport {
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@index([userId])
   @@map("pr_review_reports")
+}
+
+/**
+ * Append-only Project Memory audit log. One row per change to a memory rule, written in the
+ * same transaction as the change. A database trigger rejects UPDATE (except detaching a
+ * deleted actor) and DELETE (except when the workspace itself is deleted).
+ * `memoryId` / `relatedMemoryId` are plain ids (no FK): history outlives deleted rules.
+ * Personal preferences (`visibility = user`) are readable only by `subjectUserId` and never
+ * store rule text. Auditing starts with this table; earlier history is not reconstructed.
+ */
+model ProjectMemoryAuditEvent {
+  id              String     @id @default(cuid())
+  schemaVersion   Int        @default(1) @map("schema_version")
+  workspaceId     String     @map("workspace_id")
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  memoryId        String     @map("memory_id")
+  relatedMemoryId String?    @map("related_memory_id")
+  /// rule_created | rule_reconfirmed | rule_edited | rule_archived | rule_disputed |
+  /// rule_restored | rule_reactivated | rule_superseded
+  eventType       String     @map("event_type")
+  /// user | system
+  actorType       String     @map("actor_type")
+  actorUserId     String?    @map("actor_user_id")
+  actorUser       User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// Display name at the time of the event (never an email address).
+  actorName       String?    @map("actor_name")
+  reason          String?
+  /// workspace (shared rule) | user (personal preference — readable by subjectUserId only)
+  visibility      String
+  /// Owner of a personal preference. Plain id: no FK, so history is never re-attributed.
+  subjectUserId   String?    @map("subject_user_id")
+  provider        String     @default("github")
+  owner           String
+  repository      String
+  category        String
+  key             String
+  previousState   Json?      @map("previous_state")
+  newState        Json?      @map("new_state")
+  requestId       String?    @map("request_id")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, memoryId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorUserId, createdAt(sort: Desc)])
+  @@index([workspaceId, eventType, createdAt(sort: Desc)])
+  @@index([workspaceId, owner, repository, createdAt(sort: Desc)])
+  @@index([actorUserId])
+  @@map("project_memory_audit_events")
 }

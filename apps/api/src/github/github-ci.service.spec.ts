@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GithubCiService } from './github-ci.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
+import { workspaceException } from '../workspaces/workspace.errors';
 
 describe('GithubCiService', () => {
   const errors = new GithubErrorNormalizer();
@@ -11,6 +12,7 @@ describe('GithubCiService', () => {
   };
   const aiService = {
     generateAction: vi.fn(),
+    generateActionWithMetadata: vi.fn(),
   };
 
   let service: GithubCiService;
@@ -38,6 +40,53 @@ describe('GithubCiService', () => {
       return handler(url);
     }) as typeof fetch;
   }
+
+  describe('job log redirects and Actions detection (CodeQL: incomplete URL substring sanitization)', () => {
+    const logs = (svc: GithubCiService) =>
+      (
+        svc as unknown as {
+          fetchActionsJobLogsBounded: (i: {
+            token: string;
+            owner: string;
+            repository: string;
+            jobId: number;
+          }) => Promise<string | null>;
+        }
+      ).fetchActionsJobLogsBounded({ token: 't', owner: 'acme', repository: 'pay', jobId: 7 });
+    const redirectTo = (location: string) => () =>
+      new Response(null, { status: 302, headers: { location } });
+
+    it.each([
+      'https://evil.example/logs?next=githubusercontent.com',
+      'https://githubusercontent.com.evil.example/logs',
+      'https://evil.example/githubusercontent.com/logs',
+      'http://pipelines.actions.githubusercontent.com/logs', // not https
+    ])('never follows a log redirect to %s', async (location) => {
+      mockFetchSequence([redirectTo(location)]);
+      expect(await logs(service)).toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('follows a log redirect to a genuine GitHub host', async () => {
+      mockFetchSequence([
+        redirectTo('https://pipelines.actions.githubusercontent.com/serviceHosts/x/logs/7'),
+        () => new Response('step 1 failed'),
+      ]);
+      expect(await logs(service)).toBe('step 1 failed');
+    });
+
+    it('detects GitHub Actions jobs by hostname, not by substring', () => {
+      const looks = (detailsUrl: string) =>
+        (
+          service as unknown as {
+            looksLikeGitHubActions: (c: { source?: string; detailsUrl?: string }) => boolean;
+          }
+        ).looksLikeGitHubActions({ source: 'third-party', detailsUrl });
+      expect(looks('https://github.com/acme/pay/runs/1/job/2')).toBe(true);
+      expect(looks('https://evil.example/?u=github.com/x/job/1')).toBe(false);
+      expect(looks('https://github.com.evil.example/x/job/1')).toBe(false);
+    });
+  });
 
   it('lists checks bound to trusted PR head SHA', async () => {
     mockFetchSequence([
@@ -184,16 +233,21 @@ describe('GithubCiService', () => {
         ]),
     ]);
 
-    aiService.generateAction.mockResolvedValue(
-      JSON.stringify({
-        summary: 'Assertion failed',
-        likelyRootCause: 'Double invoke',
-        confidence: 'medium',
-        relatedToPullRequest: 'likely',
-        affectedFiles: [{ path: 'src/a.ts', reason: 'annotation' }],
-        suggestedNextSteps: ['Inspect retry'],
-        canSuggestFix: true,
-      }),
+    // Like AiService: the caller's validator runs before the charge.
+    aiService.generateActionWithMetadata.mockImplementation(
+      async (_u: string, _i: unknown, opts?: { validate?: (t: string) => void }) => {
+        const text = JSON.stringify({
+          summary: 'Assertion failed',
+          likelyRootCause: 'Double invoke',
+          confidence: 'medium',
+          relatedToPullRequest: 'likely',
+          affectedFiles: [{ path: 'src/a.ts', reason: 'annotation' }],
+          suggestedNextSteps: ['Inspect retry'],
+          canSuggestFix: true,
+        });
+        opts?.validate?.(text);
+        return { text };
+      },
     );
 
     const result = await service.analyzeCheckFailure('u', 'acme', 'pay', 1, 'check_run:9', {
@@ -204,7 +258,74 @@ describe('GithubCiService', () => {
     expect(result.analysis.canSuggestFix).toBe(true);
     expect(result.analysis.headSha).toBe('headsha');
     expect(result.analysis.checkId).toBe('check_run:9');
-    expect(aiService.generateAction).toHaveBeenCalledTimes(1);
-    expect(aiService.generateAction.mock.calls[0]?.[1]?.action).toBe('ANALYZE_CI_FAILURE');
+    expect(aiService.generateActionWithMetadata).toHaveBeenCalledTimes(1);
+    expect(aiService.generateActionWithMetadata.mock.calls[0]?.[1]?.action).toBe(
+      'ANALYZE_CI_FAILURE',
+    );
+  });
+
+  describe('AI error propagation', () => {
+    const failureFetches = () =>
+      mockFetchSequence([
+        () => Response.json({ number: 1, head: { sha: 'headsha' }, title: 'Fix' }),
+        () =>
+          Response.json({
+            id: 9,
+            name: 'unit-tests',
+            status: 'completed',
+            conclusion: 'failure',
+            output: { summary: 'Expected 1 call' },
+            app: { name: 'GitHub Actions' },
+          }),
+        () => Response.json([]),
+      ]);
+    const analyze = () =>
+      service.analyzeCheckFailure('u', 'acme', 'pay', 1, 'check_run:9', {
+        expectedHeadSha: 'headsha',
+        changedFiles: [{ path: 'src/a.ts' }],
+      });
+    const codeOf = async () => {
+      try {
+        await analyze();
+        return 'ok';
+      } catch (error) {
+        return ((error as HttpException).getResponse() as { code?: string }).code;
+      }
+    };
+
+    it.each(['USAGE_LIMIT_REACHED', 'FEATURE_NOT_AVAILABLE', 'AI_OPERATION_IN_PROGRESS'] as const)(
+      'a %s refusal keeps its code (not masked as AI_ANALYSIS_FAILED)',
+      async (code) => {
+        failureFetches();
+        aiService.generateActionWithMetadata.mockRejectedValueOnce(
+          workspaceException(code, 'refused'),
+        );
+        expect(await codeOf()).toBe(code);
+      },
+    );
+
+    it('unparseable output is rejected by the validator before the charge (AI_ANALYSIS_FAILED)', async () => {
+      failureFetches();
+      let validatorThrew = false;
+      aiService.generateActionWithMetadata.mockImplementationOnce(
+        async (_u: string, _i: unknown, opts?: { validate?: (t: string) => void }) => {
+          try {
+            opts?.validate?.('this is not JSON');
+          } catch (error) {
+            validatorThrew = true; // AiService refunds the operation and rethrows
+            throw error;
+          }
+          return { text: 'this is not JSON' };
+        },
+      );
+      expect(await codeOf()).toBe('AI_ANALYSIS_FAILED');
+      expect(validatorThrew).toBe(true);
+    });
+
+    it('a provider failure is still reported as AI_ANALYSIS_FAILED', async () => {
+      failureFetches();
+      aiService.generateActionWithMetadata.mockRejectedValueOnce(new Error('provider down'));
+      expect(await codeOf()).toBe('AI_ANALYSIS_FAILED');
+    });
   });
 });

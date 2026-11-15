@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Figtree, Syne } from 'next/font/google';
 
+import { Toaster } from '../components/notifications/toaster';
 import { ThemeProvider } from '../components/theme-provider';
 import {
   SITE_DESCRIPTION,
@@ -110,7 +111,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
       <body className="bg-mist font-body text-ink antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          {/* The only notification renderer: mounted once, survives client navigation. */}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

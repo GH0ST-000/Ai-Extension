@@ -68,7 +68,7 @@ import {
   markPlanStepsReady,
   type WorkflowEngineConditionState,
 } from './workflow-engine';
-import { parseOwnerRepo, useProjectMemoryStore } from '../../project-memory';
+import { memoryRepositoryForRequest, useProjectMemoryStore } from '../../project-memory';
 import { useMultiRepoStore } from '../multi-repo';
 import { runWorkflowStepHandler, type WorkflowOpenPanel } from './workflow-handlers';
 import { buildPlannerPrompt, type WorkflowAvailableFlags } from './workflow-planner-prompt';
@@ -84,6 +84,8 @@ export type WorkflowPendingAiLaunch = {
   action: AIAction;
   text: string;
   stepId?: string;
+  /** Bound repository whose project memory the server applies to this launch. */
+  memoryRepository?: string | null;
 };
 
 type WorkflowStoreState = {
@@ -653,12 +655,8 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       return;
     }
 
-    const parsedRepo = parseOwnerRepo(binding.github?.repository);
-    const projectMemory = parsedRepo
-      ? ((await useProjectMemoryStore.getState().fetchSummary(parsedRepo.owner, parsedRepo.repo, {
-          capability: 'PLANNING',
-        })) ?? undefined)
-      : undefined;
+    // Project memory for planning is added server-side to the PLAN_DEVELOPER_WORKFLOW request
+    // (memoryRepository = the bound repository), never packed into client-built text.
 
     const multiRepo = useMultiRepoStore.getState();
     if (multiRepo.systems.length === 0) {
@@ -670,7 +668,6 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       goal: agentGoal,
       binding,
       available: availableForPlanning(sessions, binding),
-      ...(projectMemory ? { projectMemory } : {}),
       ...(multiRepoSystem ? { multiRepoSystem } : {}),
     });
     const planningContextText = formatPlanningContextForPrompt(planningContext);
@@ -692,6 +689,10 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
       pendingAiLaunch: {
         action: AIAction.PLAN_DEVELOPER_WORKFLOW,
         text: prompt,
+        memoryRepository: memoryRepositoryForRequest({
+          action: AIAction.PLAN_DEVELOPER_WORKFLOW,
+          bindingRepository: binding.github?.repository ?? null,
+        }),
       },
     });
   },

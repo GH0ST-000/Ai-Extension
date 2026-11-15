@@ -1,0 +1,42 @@
+{
+  "id": "request-body-userid",
+  "title": "Delete handler takes the acting user id from the request body",
+  "repository": "benchmark/phase1",
+  "pullRequest": "request-body-userid",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.handler.ts",
+      "physical": "notes.handler.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "request-body-userid/client-chosen-identity",
+      "path": "apps/api/src/notes/notes.handler.ts",
+      "lines": [
+        10,
+        16
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "The membership check uses req.body.userId (client input) instead of the authenticated req.user.id: an attacker names a member and deletes notes.",
+      "witness": "witness.spec.ts \u203a an outsider deletes a note by naming a member in the body"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

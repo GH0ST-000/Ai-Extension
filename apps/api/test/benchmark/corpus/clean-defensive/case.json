@@ -1,0 +1,27 @@
+{
+  "id": "clean-defensive",
+  "title": "Hardening: owner-only member removal, safe fallbacks (no bug)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "clean-defensive",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/members/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/members/members.service.ts",
+      "physical": "members.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

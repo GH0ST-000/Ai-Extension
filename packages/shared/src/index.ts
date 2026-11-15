@@ -141,6 +141,7 @@ export {
   computeMemoryVersion,
   selectRelevantMemory,
   formatProjectMemoryForPrompt,
+  memoryCapabilityForAiAction,
   buildProjectConstraintContext,
   validateMemoryValue,
   validateScope,
@@ -151,6 +152,7 @@ export {
 export type {
   EvaluateCandidateInput,
   ExtractConfigFile,
+  ProjectMemoryCapability,
   SelectRelevantMemoryOptions,
   ValidateResult,
   ValidatedCreateRule,
@@ -417,3 +419,7 @@ export {
   PROMPT_INJECTION_GUARD,
   PROMPT_INJECTION_FIXTURES,
 } from './security';
+
+export * from './notifications';
+
+export { escapeRegExp } from './regexp';

@@ -181,6 +181,17 @@ export async function startGithubAppInstall(
   });
 }
 
+/** Final step of GitHub App linking (see app/app/integrations/github-app/callback). */
+export async function verifyGithubAppInstall(
+  workspaceId: string,
+  body: { code: string; state: string },
+): Promise<WorkspaceGitHubAppStatus> {
+  return apiFetch<WorkspaceGitHubAppStatus>(githubAppPath(workspaceId, '/verify'), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function disconnectGithubApp(workspaceId: string): Promise<void> {
   await apiFetch<void>(githubAppPath(workspaceId), {
     method: 'DELETE',

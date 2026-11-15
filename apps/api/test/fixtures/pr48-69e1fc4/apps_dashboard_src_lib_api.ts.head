@@ -1,0 +1,739 @@
+import type {
+  AddSystemRepositoryRequest,
+  AnalyzeChangeImpactRequest,
+  AuthTokenResponse,
+  AuthUser,
+  CreateProjectMemoryRuleRequest,
+  CreateProjectSystemRequest,
+  DiscoverRelationshipsResponse,
+  GitHubConnectionStatus,
+  JiraConnectionStatus,
+  LearnProjectMemoryResponse,
+  ListProjectMemoryResponse,
+  LoginRequest,
+  MultiRepoArchitectureContext,
+  MultiRepoChangeImpactAnalysis,
+  MultiRepoEvidence,
+  MultiRepoRequirementCoverage,
+  OnboardingView,
+  ProjectMemoryItem,
+  ProjectProfile,
+  ProjectSystem,
+  RegisterRequest,
+  RelatedRepositoryCandidate,
+  RelationshipConfidence,
+  RepositoryIdentity,
+  RepositoryRelationship,
+  SystemFlowTrace,
+  TraceSystemFlowRequest,
+  UpdateOnboardingPreferencesRequest,
+  UpdateProjectMemoryRequest,
+  UpdateProjectSystemRequest,
+  UpdateSystemRepositoryRequest,
+  UpdateUserSettingsRequest,
+  UpsertGitHubConnectionRequest,
+  UpsertJiraConnectionRequest,
+  UserSettings,
+  WorkflowExecution,
+  WorkflowExecutionDetail,
+  ListWorkflowExecutionsResponse,
+  ResumeExecutionResponse,
+  ReplayPreviewResponse,
+  RetryExecutionResponse,
+  RetryExecutionRequest,
+  ReplayPreviewRequest,
+} from '@project-x/types';
+
+import { clearSession, setSession } from './auth-storage';
+import { publishExtensionLogout } from './extension-handoff';
+
+export function getApiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  return (configured && configured.length > 0 ? configured : 'http://localhost:3001').replace(
+    /\/$/,
+    '',
+  );
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+const REFRESH_TIMEOUT_MS = 3_000;
+
+/**
+ * The refresh request is shared by every concurrent caller, so it is bounded only
+ * by its own timeout. A caller's signal stops that caller from waiting; it must
+ * never cancel the shared request (that would log out the other callers).
+ */
+function refreshSession(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) {
+    return Promise.reject(abortError());
+  }
+  const shared = refreshInFlight ?? (refreshInFlight = startRefresh());
+  if (!signal) {
+    return shared;
+  }
+  return new Promise<boolean>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    shared.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Matches RefreshTokenRotatedException in apps/api auth.service. */
+const ROTATED_REFRESH_MESSAGE = 'Refresh token was already rotated.';
+const ROTATION_RACE_SETTLE_MS = 500;
+
+async function isLostRotationRace(response: Response): Promise<boolean> {
+  if (response.status !== 401) return false;
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    return body.message === ROTATED_REFRESH_MESSAGE;
+  } catch {
+    return false;
+  }
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function startRefresh(): Promise<boolean> {
+  return (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: '{}',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        if (!(await isLostRotationRace(response))) {
+          return false;
+        }
+        // The extension rotated the shared token first and is writing the new cookies.
+        await new Promise((resolve) => setTimeout(resolve, ROTATION_RACE_SETTLE_MS));
+        return true;
+      }
+      const result = (await response.json()) as AuthTokenResponse;
+      setSession(result.user);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+      refreshInFlight = null;
+    }
+  })();
+}
+
+export class ApiError extends Error {
+  readonly statusCode: number;
+  /** Machine-readable API error code (e.g. WORKSPACE_CONTEXT_UNAVAILABLE), when provided. */
+  readonly code?: string;
+
+  constructor(message: string, statusCode: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+/** The selected workspace (X-Workspace-Id) is malformed, stale, or no longer accessible. */
+export function isWorkspaceSelectionError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.code === 'WORKSPACE_CONTEXT_UNAVAILABLE' || err.code === 'WORKSPACE_ID_INVALID')
+  );
+}
+
+export type WorkspaceIdGetter = () => string | null | undefined;
+
+let workspaceIdGetter: WorkspaceIdGetter | null = null;
+
+/** Set by WorkspaceProvider so product API calls can attach X-Workspace-Id. */
+export function setWorkspaceIdGetter(getter: WorkspaceIdGetter | null): void {
+  workspaceIdGetter = getter;
+}
+
+export function getWorkspaceIdForRequest(): string | null {
+  const value = workspaceIdGetter?.();
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export type ServiceHealthStatus = 'up' | 'down';
+
+export type TerminusHealthResponse = {
+  status: 'ok' | 'error' | 'shutting_down';
+  info?: Record<string, { status: ServiceHealthStatus }>;
+  error?: Record<string, { status: ServiceHealthStatus }>;
+  details?: Record<string, { status: ServiceHealthStatus }>;
+};
+
+async function parseErrorBody(response: Response): Promise<{ message: string; code?: string }> {
+  try {
+    const body = (await response.json()) as { message?: string | string[]; code?: unknown };
+    const code = typeof body.code === 'string' ? body.code : undefined;
+    if (Array.isArray(body.message)) {
+      return { message: body.message.join(', '), code };
+    }
+    if (typeof body.message === 'string' && body.message.trim()) {
+      return { message: body.message, code };
+    }
+    return { message: 'Request failed.', code };
+  } catch {
+    // ignore
+  }
+  return { message: 'Request failed.' };
+}
+
+async function parseErrorMessage(response: Response): Promise<string> {
+  return (await parseErrorBody(response)).message;
+}
+
+export async function fetchApiHealth(): Promise<TerminusHealthResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/api/health/live`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseErrorMessage(response), response.status);
+  }
+
+  const live = (await response.json()) as { status?: string };
+  return {
+    status: live.status === 'ok' ? 'ok' : 'error',
+    info: { api: { status: live.status === 'ok' ? 'up' : 'down' } },
+    details: { api: { status: live.status === 'ok' ? 'up' : 'down' } },
+  };
+}
+
+export async function apiFetch<T>(
+  path: string,
+  init?: RequestInit & { auth?: boolean; workspaceId?: string | null; _retried?: boolean },
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Content-Type') && init?.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const workspaceId =
+    init?.workspaceId !== undefined ? init.workspaceId : getWorkspaceIdForRequest();
+  if (workspaceId && !headers.has('X-Workspace-Id')) {
+    headers.set('X-Workspace-Id', workspaceId);
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}/api${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+
+  if (response.status === 401 && init?.auth !== false && !init?._retried) {
+    // Rejects with AbortError if this caller's signal aborts; never clears the session then.
+    const refreshed = await refreshSession(init?.signal ?? undefined);
+    if (refreshed) {
+      return apiFetch<T>(path, { ...init, _retried: true });
+    }
+    clearSession();
+  } else if (response.status === 401) {
+    clearSession();
+  }
+
+  if (!response.ok) {
+    const parsed = await parseErrorBody(response);
+    throw new ApiError(parsed.message, response.status, parsed.code);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+export async function register(input: RegisterRequest): Promise<AuthTokenResponse> {
+  const result = await apiFetch<AuthTokenResponse>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    auth: false,
+  });
+  setSession(result.user);
+  return result;
+}
+
+export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
+  const result = await apiFetch<AuthTokenResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    auth: false,
+  });
+  setSession(result.user);
+  return result;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    // Revoke server-side first: the request needs the px_at / px_rt cookies, and the
+    // extension's CLEAR_SESSION handler deletes them.
+    await apiFetch<{ ok: true }>('/auth/logout', { method: 'POST', auth: false });
+  } catch {
+    // Always clear local session even if revocation fails (network / already invalid).
+  } finally {
+    publishExtensionLogout();
+    clearSession();
+  }
+}
+
+export async function fetchMe(init?: { signal?: AbortSignal }): Promise<AuthUser> {
+  const result = await apiFetch<{ user: AuthUser }>('/auth/me', {
+    signal: init?.signal,
+  });
+  return result.user;
+}
+
+export async function getSettings(): Promise<UserSettings> {
+  return apiFetch<UserSettings>('/settings');
+}
+
+export async function updateSettings(input: UpdateUserSettingsRequest): Promise<UserSettings> {
+  return apiFetch<UserSettings>('/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchOnboarding(): Promise<OnboardingView> {
+  return apiFetch<OnboardingView>('/settings/onboarding');
+}
+
+export async function updateOnboarding(
+  input: UpdateOnboardingPreferencesRequest,
+): Promise<OnboardingView> {
+  return apiFetch<OnboardingView>('/settings/onboarding', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function markWelcomeSeen(): Promise<OnboardingView> {
+  return updateOnboarding({ welcomeSeen: true });
+}
+
+export async function dismissOnboarding(): Promise<OnboardingView> {
+  return updateOnboarding({ dismiss: true });
+}
+
+export async function getGithubConnection(): Promise<GitHubConnectionStatus> {
+  return apiFetch<GitHubConnectionStatus>('/settings/github');
+}
+
+export async function upsertGithubConnection(
+  input: UpsertGitHubConnectionRequest,
+): Promise<GitHubConnectionStatus> {
+  return apiFetch<GitHubConnectionStatus>('/settings/github', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteGithubConnection(): Promise<void> {
+  await apiFetch<void>('/settings/github', {
+    method: 'DELETE',
+  });
+}
+
+export async function getJiraConnection(): Promise<JiraConnectionStatus> {
+  return apiFetch<JiraConnectionStatus>('/settings/jira');
+}
+
+export async function upsertJiraConnection(
+  input: UpsertJiraConnectionRequest,
+): Promise<JiraConnectionStatus> {
+  return apiFetch<JiraConnectionStatus>('/settings/jira', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteJiraConnection(): Promise<void> {
+  await apiFetch<void>('/settings/jira', {
+    method: 'DELETE',
+  });
+}
+
+function projectMemoryPath(owner: string, repo: string, suffix = ''): string {
+  return `/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/memory${suffix}`;
+}
+
+export type CreateProjectMemoryRuleBody = Omit<
+  CreateProjectMemoryRuleRequest,
+  'owner' | 'repository'
+>;
+
+/** Active memory by default; pass `'archived'` to list archived rules separately. */
+export async function listProjectMemory(
+  owner: string,
+  repo: string,
+  status?: 'active' | 'archived',
+): Promise<ListProjectMemoryResponse> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiFetch<ListProjectMemoryResponse>(projectMemoryPath(owner, repo, query));
+}
+
+export async function getProjectMemoryProfile(
+  owner: string,
+  repo: string,
+): Promise<ProjectProfile> {
+  return apiFetch<ProjectProfile>(projectMemoryPath(owner, repo, '/profile'));
+}
+
+export async function createProjectMemoryRule(
+  owner: string,
+  repo: string,
+  body: CreateProjectMemoryRuleBody,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, '/rules'), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProjectMemory(
+  owner: string,
+  repo: string,
+  id: string,
+  body: UpdateProjectMemoryRequest,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, `/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function clearProjectMemory(
+  owner: string,
+  repo: string,
+): Promise<{ archived: number }> {
+  return apiFetch<{ archived: number }>(projectMemoryPath(owner, repo, '/clear'), {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+export async function learnProjectMemory(
+  owner: string,
+  repo: string,
+): Promise<LearnProjectMemoryResponse> {
+  return apiFetch<LearnProjectMemoryResponse>(projectMemoryPath(owner, repo, '/learn'), {
+    method: 'POST',
+  });
+}
+
+export async function confirmMemoryCandidate(
+  owner: string,
+  repo: string,
+  candidateId: string,
+): Promise<ProjectMemoryItem> {
+  return apiFetch<ProjectMemoryItem>(projectMemoryPath(owner, repo, '/candidates/confirm'), {
+    method: 'POST',
+    body: JSON.stringify({ candidateId }),
+  });
+}
+
+export async function rejectMemoryCandidate(
+  owner: string,
+  repo: string,
+  candidateId: string,
+): Promise<{ rejected: true; candidateId: string }> {
+  return apiFetch<{ rejected: true; candidateId: string }>(
+    projectMemoryPath(owner, repo, '/candidates/reject'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ candidateId }),
+    },
+  );
+}
+
+/** Day 23 — multi-repo systems (read-only analysis; no auto-add). */
+export type RefreshSystemResponse = {
+  analyzed: number;
+  relationshipsChecked: number;
+  candidates: RelatedRepositoryCandidate[];
+  unavailable: RepositoryIdentity[];
+  truncated: boolean;
+};
+
+export type CompareRequirementRequest = {
+  systemId: string;
+  issueKey: string;
+  criteria?: string[];
+};
+
+export type FindApiConsumersRequest = {
+  method?: string;
+  path: string;
+  operationId?: string;
+};
+
+export type FindEventConsumersRequest = {
+  topic: string;
+  eventType?: string;
+};
+
+export type FindConsumersResponse = {
+  consumers: Array<{
+    repository: RepositoryIdentity;
+    confidence: RelationshipConfidence;
+    evidence?: MultiRepoEvidence[];
+    summary?: string;
+  }>;
+  scope?: {
+    systemId: string;
+    repositoriesAnalyzed: number;
+    truncated?: boolean;
+  };
+};
+
+function systemsPath(suffix = ''): string {
+  return `/systems${suffix}`;
+}
+
+export async function listSystems(): Promise<ProjectSystem[]> {
+  return apiFetch<ProjectSystem[]>(systemsPath());
+}
+
+export async function createSystem(body: CreateProjectSystemRequest): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getSystem(systemId: string): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}`));
+}
+
+export async function updateSystem(
+  systemId: string,
+  body: UpdateProjectSystemRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}`), {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSystem(systemId: string): Promise<void> {
+  await apiFetch<void>(systemsPath(`/${encodeURIComponent(systemId)}`), {
+    method: 'DELETE',
+  });
+}
+
+export async function addSystemRepository(
+  systemId: string,
+  body: AddSystemRepositoryRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(systemsPath(`/${encodeURIComponent(systemId)}/repositories`), {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeSystemRepository(
+  systemId: string,
+  owner: string,
+  repo: string,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(
+    systemsPath(
+      `/${encodeURIComponent(systemId)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    ),
+    { method: 'DELETE' },
+  );
+}
+
+export async function updateSystemRepository(
+  systemId: string,
+  owner: string,
+  repo: string,
+  body: UpdateSystemRepositoryRequest,
+): Promise<ProjectSystem> {
+  return apiFetch<ProjectSystem>(
+    systemsPath(
+      `/${encodeURIComponent(systemId)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    ),
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function refreshSystem(systemId: string): Promise<RefreshSystemResponse> {
+  return apiFetch<RefreshSystemResponse>(systemsPath(`/${encodeURIComponent(systemId)}/refresh`), {
+    method: 'POST',
+  });
+}
+
+export async function listRelationships(systemId: string): Promise<RepositoryRelationship[]> {
+  return apiFetch<RepositoryRelationship[]>(
+    systemsPath(`/${encodeURIComponent(systemId)}/relationships`),
+  );
+}
+
+export async function discoverRelationships(
+  systemId: string,
+): Promise<DiscoverRelationshipsResponse> {
+  return apiFetch<DiscoverRelationshipsResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/relationships/discover`),
+    { method: 'POST' },
+  );
+}
+
+export async function getSystemContext(systemId: string): Promise<MultiRepoArchitectureContext> {
+  return apiFetch<MultiRepoArchitectureContext>(
+    systemsPath(`/${encodeURIComponent(systemId)}/context`),
+  );
+}
+
+export async function analyzeChangeImpact(
+  body: AnalyzeChangeImpactRequest,
+): Promise<MultiRepoChangeImpactAnalysis> {
+  return apiFetch<MultiRepoChangeImpactAnalysis>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/analyze-change-impact`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function traceSystemFlow(body: TraceSystemFlowRequest): Promise<SystemFlowTrace> {
+  return apiFetch<SystemFlowTrace>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/trace-system-flow`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function compareRequirement(
+  body: CompareRequirementRequest,
+): Promise<MultiRepoRequirementCoverage> {
+  return apiFetch<MultiRepoRequirementCoverage>(
+    systemsPath(`/${encodeURIComponent(body.systemId)}/compare-requirement`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function findApiConsumers(
+  systemId: string,
+  body: FindApiConsumersRequest,
+): Promise<FindConsumersResponse> {
+  return apiFetch<FindConsumersResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/find-api-consumers`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function findEventConsumers(
+  systemId: string,
+  body: FindEventConsumersRequest,
+): Promise<FindConsumersResponse> {
+  return apiFetch<FindConsumersResponse>(
+    systemsPath(`/${encodeURIComponent(systemId)}/find-event-consumers`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function reliabilityPath(suffix = ''): string {
+  return `/reliability${suffix}`;
+}
+
+export async function listWorkflowExecutions(): Promise<WorkflowExecution[]> {
+  const response = await apiFetch<ListWorkflowExecutionsResponse>(reliabilityPath('/executions'));
+  return response.executions;
+}
+
+export async function getWorkflowExecution(executionId: string): Promise<WorkflowExecutionDetail> {
+  return apiFetch<WorkflowExecutionDetail>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}`),
+  );
+}
+
+export async function resumeWorkflowExecution(
+  executionId: string,
+): Promise<ResumeExecutionResponse> {
+  return apiFetch<ResumeExecutionResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/resume`),
+    { method: 'POST' },
+  );
+}
+
+export async function previewWorkflowReplay(
+  executionId: string,
+  body: ReplayPreviewRequest = {},
+): Promise<ReplayPreviewResponse> {
+  return apiFetch<ReplayPreviewResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay/preview`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function replayWorkflowExecution(
+  executionId: string,
+  body: ReplayPreviewRequest = {},
+): Promise<WorkflowExecution> {
+  return apiFetch<WorkflowExecution>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/replay`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function retryWorkflowExecution(
+  executionId: string,
+  body: RetryExecutionRequest,
+): Promise<RetryExecutionResponse> {
+  return apiFetch<RetryExecutionResponse>(
+    reliabilityPath(`/executions/${encodeURIComponent(executionId)}/retry`),
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}

@@ -1,6 +1,12 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AIAction, type PageContext, type PRReviewFinding } from '@project-x/types';
+import {
+  AIAction,
+  type PageContext,
+  type PRReviewFinding,
+  type PRReviewScope,
+  type ProjectMemoryPromptMetadata,
+} from '@project-x/types';
 
 import { cn } from '~/lib/utils/cn';
 
@@ -29,6 +35,10 @@ type ResultPanelProps = {
   streaming?: boolean;
   canReplace?: boolean;
   reviewContext?: PageContext | null;
+  /** Diff scope the API reviewed (REVIEW_ENTIRE_PR). */
+  reviewScope?: PRReviewScope | null;
+  /** Project memory applied to the review prompt (REVIEW_ENTIRE_PR). */
+  reviewMemory?: ProjectMemoryPromptMetadata | null;
   findingFilter?: PrFindingFilter;
   findingDispositions?: PrFindingDispositionMap;
   /** Optional freshness warning (e.g. engineering alignment sources changed). */
@@ -162,6 +172,8 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     streaming = false,
     canReplace = false,
     reviewContext = null,
+    reviewScope = null,
+    reviewMemory = null,
     findingFilter = 'all',
     findingDispositions = {},
     staleMessage = null,
@@ -209,8 +221,16 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
     [content, isSuggestFix],
   );
   const prReport = useMemo(
-    () => (isEntirePr ? buildPrReviewReport({ markdown: content, context: reviewContext }) : null),
-    [content, isEntirePr, reviewContext],
+    () =>
+      isEntirePr
+        ? buildPrReviewReport({
+            markdown: content,
+            context: reviewContext,
+            scope: reviewScope,
+            final: !streaming,
+          })
+        : null,
+    [content, isEntirePr, reviewContext, reviewScope, streaming],
   );
   const dispositions = useMemo(() => findingDispositions, [findingDispositions]);
   const showSuggestFix = Boolean(
@@ -331,6 +351,7 @@ export const ResultPanel = forwardRef<HTMLDivElement, ResultPanelProps>(function
         {showPrReport && prReport ? (
           <PrReviewReportView
             report={prReport}
+            memory={reviewMemory}
             streaming={streaming}
             filter={findingFilter}
             dispositions={dispositions}

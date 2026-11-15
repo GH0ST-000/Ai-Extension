@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Guard lets guests delete notes",
+            "explanation": "Only 'viewer' is refused; 'guest' has no write permission.",
+            "evidence": "if (!membership || membership.role === 'viewer') {",
+            "changeType": "introduced",
+            "trigger": "A guest member deletes a note",
+            "failurePath": "role check \u2192 delete",
+            "violatedInvariant": "Only owners and editors delete notes",
+            "impact": "Privilege escalation for guests",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Guard lets guests delete notes": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (!membership || membership.role === 'viewer') {\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:18",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A guest deletes a note",
+          "violatedInvariant": "Only owners and editors delete notes",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note."
+            },
+            {
+              "code": "if (!membership || membership.role === 'viewer') {",
+              "whyNotPreventing": "It refuses only viewers; a guest membership passes."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 15,
+            "lineEnd": 15,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Guard lets guests delete notes",
+            "explanation": "Only 'viewer' is refused; 'guest' has no write permission.",
+            "evidence": "if (!membership || membership.role === 'viewer') {",
+            "changeType": "introduced",
+            "trigger": "A guest member deletes a note",
+            "failurePath": "role check \u2192 delete",
+            "violatedInvariant": "Only owners and editors delete notes",
+            "impact": "Privilege escalation for guests",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Guard lets guests delete notes": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!membership || membership.role === 'viewer') {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

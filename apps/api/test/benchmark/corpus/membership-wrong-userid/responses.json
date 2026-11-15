@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 13,
+            "lineEnd": 13,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "deleteNote checks the author's membership, not the caller's",
+            "explanation": "The where clause uses note.authorId, so the caller is never checked.",
+            "evidence": "where: { workspaceId: note.workspaceId, userId: note.authorId },",
+            "changeType": "introduced",
+            "trigger": "An outsider deletes a note authored by a member",
+            "failurePath": "membership lookup by authorId \u2192 delete",
+            "violatedInvariant": "The acting user must be a member",
+            "impact": "Unauthorized deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "deleteNote checks the author's membership, not the caller's": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "where: { workspaceId: note.workspaceId, userId: note.authorId },\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:18",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "An outsider deletes a member-authored note",
+          "violatedInvariant": "The caller must be a member",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note."
+            },
+            {
+              "code": "if (!membership) {",
+              "whyNotPreventing": "It checks the author's membership, which exists, not the caller's."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 13,
+            "lineEnd": 13,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "deleteNote checks the author's membership, not the caller's",
+            "explanation": "The where clause uses note.authorId, so the caller is never checked.",
+            "evidence": "where: { workspaceId: note.workspaceId, userId: note.authorId },",
+            "changeType": "introduced",
+            "trigger": "An outsider deletes a note authored by a member",
+            "failurePath": "membership lookup by authorId \u2192 delete",
+            "violatedInvariant": "The acting user must be a member",
+            "impact": "Unauthorized deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "deleteNote checks the author's membership, not the caller's": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "where: { workspaceId: note.workspaceId, userId: note.authorId },\nif (!membership) {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

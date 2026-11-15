@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/auth/session.guard.ts",
+            "lineStart": 9,
+            "lineEnd": 9,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Expired sessions pass the expiry check",
+            "explanation": "expiresAt is milliseconds; dividing Date.now() by 1000 makes the expiry comparison never true.",
+            "evidence": "if (!session || session.expiresAt < Date.now() / 1000) {",
+            "changeType": "introduced",
+            "trigger": "A request with a token that expired a minute ago",
+            "failurePath": "expiry guard \u2192 return session",
+            "violatedInvariant": "Expired sessions are rejected",
+            "impact": "Session expiry is not enforced",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Expired sessions pass the expiry check": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (!session || session.expiresAt < Date.now() / 1000) {\nreturn session;",
+          "failureSite": "apps/api/src/auth/session.guard.ts:12",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A token that expired a minute ago",
+          "violatedInvariant": "Expired sessions are rejected",
+          "triggerSource": "export async function requireSession(db: SessionDb, token: string): Promise<Session> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!session || session.expiresAt < Date.now() / 1000) {",
+              "whyNotPreventing": "It compares a millisecond timestamp with seconds, so an expired session never matches."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/auth/session.guard.ts",
+            "lineStart": 9,
+            "lineEnd": 9,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Expired sessions pass the expiry check",
+            "explanation": "expiresAt is milliseconds; dividing Date.now() by 1000 makes the expiry comparison never true.",
+            "evidence": "if (!session || session.expiresAt < Date.now() / 1000) {",
+            "changeType": "introduced",
+            "trigger": "A request with a token that expired a minute ago",
+            "failurePath": "expiry guard \u2192 return session",
+            "violatedInvariant": "Expired sessions are rejected",
+            "impact": "Session expiry is not enforced",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Expired sessions pass the expiry check": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!session || session.expiresAt < Date.now() / 1000) {\nthrow new Error('UNAUTHORIZED');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

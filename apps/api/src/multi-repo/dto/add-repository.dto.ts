@@ -1,5 +1,7 @@
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import type { MultiRepoRepositoryRole, MultiRepoRepositorySource } from '@project-x/types';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 const ROLE_VALUES = [
   'frontend',
@@ -34,7 +36,7 @@ export class AddRepositoryDto {
   role?: MultiRepoRepositoryRole;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   enabled?: boolean;
 
   @IsOptional()

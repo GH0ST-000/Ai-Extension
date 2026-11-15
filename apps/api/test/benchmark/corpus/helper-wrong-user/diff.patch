@@ -1,0 +1,12 @@
+diff --git a/apps/api/src/notes/delete-note.ts b/apps/api/src/notes/delete-note.ts
+--- a/apps/api/src/notes/delete-note.ts
++++ b/apps/api/src/notes/delete-note.ts
+@@ -6,7 +6,7 @@ export async function deleteNote(db: NotesDb, userId: string, noteId: string): P
+   if (!note) {
+     throw new Error('NOT_FOUND');
+   }
+-  const membership = await findMembership(db, userId, note.workspaceId);
++  const membership = await findMembership(db, note.authorId, note.workspaceId);
+   if (!membership) {
+     throw new Error('FORBIDDEN');
+   }

@@ -1,0 +1,88 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.query.ts",
+            "lineStart": 20,
+            "lineEnd": 20,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "listNotes returns notes of every workspace",
+            "explanation": "The workspaceId filter was dropped from the query.",
+            "evidence": "return db.note.findMany({ where: { archived: false } });",
+            "changeType": "introduced",
+            "trigger": "A member of ws1 calls listNotesForUser for ws1",
+            "failurePath": "notes.query.ts listNotes findMany",
+            "violatedInvariant": "Note reads are scoped to the requested workspace",
+            "impact": "Cross-tenant disclosure of notes",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "listNotes returns notes of every workspace": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "export async function listNotes(db: NotesDb, workspaceId: string): Promise<Note[]> {\nreturn db.note.findMany({ where: { archived: false } });",
+          "failureSite": "apps/api/src/notes/notes.query.ts:20",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A ws1 member lists notes while ws2 has notes",
+          "violatedInvariant": "Reads are scoped to the requested workspace",
+          "triggerSource": "export async function listNotes(db: NotesDb, workspaceId: string): Promise<Note[]> {",
+          "guardsOnPath": []
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.query.ts",
+            "lineStart": 20,
+            "lineEnd": 20,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "listNotes returns notes of every workspace",
+            "explanation": "The workspaceId filter was dropped from the query.",
+            "evidence": "return db.note.findMany({ where: { archived: false } });",
+            "changeType": "introduced",
+            "trigger": "A member of ws1 calls listNotesForUser for ws1",
+            "failurePath": "notes.query.ts listNotes findMany",
+            "violatedInvariant": "Note reads are scoped to the requested workspace",
+            "impact": "Cross-tenant disclosure of notes",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "listNotes returns notes of every workspace": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "const membership = await db.membership.findFirst({ where: { workspaceId, userId } });\nif (!membership) {\nthrow new Error('FORBIDDEN');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

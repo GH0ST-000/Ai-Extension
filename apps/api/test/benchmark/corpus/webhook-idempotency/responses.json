@@ -1,0 +1,57 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/billing/payment-webhook.ts",
+            "lineStart": 19,
+            "lineEnd": 19,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Redelivered payment webhooks credit the account again",
+            "explanation": "The PR removed the processed-event lookup, so a duplicate delivery repeats the credit.",
+            "evidence": "const seen = await db.webhookEvent.findUnique({ where: { id: event.id } });\nif (seen) {",
+            "changeType": "removed_safeguard",
+            "trigger": "The payment provider redelivers evt_1",
+            "failurePath": "no dedupe \u2192 account.update twice",
+            "violatedInvariant": "Each payment event is applied once",
+            "impact": "Duplicate credits",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Redelivered payment webhooks credit the account again": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "const account = await db.account.findUnique({ where: { id: event.accountId } });\nawait db.account.update({ where: { id: account.id }, data: { credits: account.credits + event.amount } });",
+          "failureSite": "apps/api/src/billing/payment-webhook.ts:19",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "The provider redelivers the same event id",
+          "violatedInvariant": "Each event is applied once",
+          "triggerSource": "event: PaymentEvent,",
+          "guardsOnPath": [
+            {
+              "code": "if (event.type !== 'payment.succeeded') {",
+              "whyNotPreventing": "Filters event types only; the duplicate is a succeeded payment."
+            },
+            {
+              "code": "if (!account) {",
+              "whyNotPreventing": "Only rejects unknown accounts."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

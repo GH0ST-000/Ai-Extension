@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/workspaces/workspace-access.ts",
+            "lineStart": 13,
+            "lineEnd": 13,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership lookup ignores the acting user",
+            "explanation": "The where clause lost userId, so any active member satisfies the check.",
+            "evidence": "where: { workspaceId, status: 'active' },",
+            "changeType": "introduced",
+            "trigger": "A non-member calls an endpoint guarded by assertWorkspaceMember",
+            "failurePath": "workspace-access.ts findFirst without userId \u2192 membership of another user",
+            "violatedInvariant": "Only members of the workspace pass the check",
+            "impact": "Authorization bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership lookup ignores the acting user": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "where: { workspaceId, status: 'active' },\nreturn membership;",
+          "failureSite": "apps/api/src/workspaces/workspace-access.ts:18",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "An outsider calls a guarded endpoint for ws1",
+          "violatedInvariant": "Only members pass",
+          "triggerSource": "userId: string,",
+          "guardsOnPath": [
+            {
+              "code": "if (!membership) {",
+              "whyNotPreventing": "It passes whenever ANY active member exists, because the query ignores userId."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/workspaces/workspace-access.ts",
+            "lineStart": 13,
+            "lineEnd": 13,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Membership lookup ignores the acting user",
+            "explanation": "The where clause lost userId, so any active member satisfies the check.",
+            "evidence": "where: { workspaceId, status: 'active' },",
+            "changeType": "introduced",
+            "trigger": "A non-member calls an endpoint guarded by assertWorkspaceMember",
+            "failurePath": "workspace-access.ts findFirst without userId \u2192 membership of another user",
+            "violatedInvariant": "Only members of the workspace pass the check",
+            "impact": "Authorization bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Membership lookup ignores the acting user": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "const membership = await db.membership.findFirst({\nwhere: { workspaceId, status: 'active' },",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

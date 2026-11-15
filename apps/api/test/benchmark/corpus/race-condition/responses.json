@@ -1,0 +1,53 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/workspaces/seats.ts",
+            "lineStart": 19,
+            "lineEnd": 19,
+            "category": "data_integrity",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Concurrent invitations can exceed the seat limit",
+            "explanation": "The lock around count and create was removed; concurrent calls read the same count.",
+            "evidence": "await db.membership.create({ data: { workspaceId, userId, role: 'member' } });",
+            "changeType": "introduced",
+            "trigger": "Two invitations for the last seat arrive at the same time",
+            "failurePath": "count \u2192 (interleave) \u2192 create twice",
+            "violatedInvariant": "Members never exceed the seat limit",
+            "impact": "Seat limit bypass",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Concurrent invitations can exceed the seat limit": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "const count = await db.membership.count({ where: { workspaceId } });\nawait db.membership.create({ data: { workspaceId, userId, role: 'member' } });",
+          "failureSite": "apps/api/src/workspaces/seats.ts:19",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Concurrent invitations for the last seat",
+          "violatedInvariant": "Members never exceed the limit",
+          "triggerSource": "limit: number,",
+          "guardsOnPath": [
+            {
+              "code": "if (count >= limit) {",
+              "whyNotPreventing": "Concurrent calls all read the same count before any insert, so all pass."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

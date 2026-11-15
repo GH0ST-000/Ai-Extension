@@ -1,0 +1,22 @@
+diff --git a/apps/api/src/notes/notes.service.ts b/apps/api/src/notes/notes.service.ts
+--- a/apps/api/src/notes/notes.service.ts
++++ b/apps/api/src/notes/notes.service.ts
+@@ -4,6 +4,9 @@ export type Note = { id: string; workspaceId: string; authorId: string; archived
+ export type Membership = { workspaceId: string; userId: string; role: string; status: string };
+ export type NotesDb = { note: Table<Note>; membership: Table<Membership> };
+ 
++/** Roles allowed to archive notes. Viewers and guests are read-only. */
++const ARCHIVE_ROLES = ['owner', 'admin', 'editor'];
++
+ export async function archiveNote(db: NotesDb, userId: string, noteId: string): Promise<void> {
+   const note = await db.note.findUnique({ where: { id: noteId } });
+   if (!note) {
+@@ -12,7 +15,7 @@ export async function archiveNote(db: NotesDb, userId: string, noteId: string):
+   const membership = await db.membership.findFirst({
+     where: { workspaceId: note.workspaceId, userId, status: 'active' },
+   });
+-  if (!membership || membership.role !== 'owner') {
++  if (!membership || !ARCHIVE_ROLES.includes(membership.role)) {
+     throw new Error('FORBIDDEN');
+   }
+   await db.note.update({ where: { id: noteId }, data: { archived: true } });

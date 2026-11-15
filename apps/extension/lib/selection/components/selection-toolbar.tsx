@@ -33,6 +33,7 @@ import {
 } from '../utils/format-pr-review-markdown';
 import { extractFixClipboardText } from '../utils/parse-suggest-fix';
 import { ActionMenu } from './action-menu';
+import { PrReviewMemoryToggle } from './pr-review-memory-toggle';
 import { ContextualHint } from './contextual-hint';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
@@ -88,6 +89,8 @@ export function SelectionToolbar() {
   const assistant = useSelectionToolbarStore((s) => s.assistant);
   const customPrompt = useSelectionToolbarStore((s) => s.customPrompt);
   const lastReviewContext = useSelectionToolbarStore((s) => s.lastReviewContext);
+  const lastReviewScope = useSelectionToolbarStore((s) => s.lastReviewScope);
+  const lastReviewMemory = useSelectionToolbarStore((s) => s.lastReviewMemory);
   const findingFilter = useSelectionToolbarStore((s) => s.findingFilter);
   const findingDispositions = useSelectionToolbarStore((s) => s.findingDispositions);
   const suggestFixApplyTarget = useSelectionToolbarStore((s) => s.suggestFixApplyTarget);
@@ -294,7 +297,7 @@ export function SelectionToolbar() {
       return;
     }
     useSelectionToolbarStore.setState({ selectedText: launch.text });
-    void startAction(launch.action);
+    void startAction(launch.action, { memoryRepository: launch.memoryRepository ?? null });
   }, [pendingAiLaunch, consumePendingAiLaunch, startAction]);
 
   useEffect(() => {
@@ -502,8 +505,10 @@ export function SelectionToolbar() {
     return buildPrReviewReport({
       markdown: assistant.content,
       context: lastReviewContext,
+      scope: lastReviewScope,
+      final: assistant.status === 'success',
     });
-  }, [assistant, lastReviewContext]);
+  }, [assistant, lastReviewContext, lastReviewScope]);
 
   const handleCopyFullReview = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -514,13 +519,14 @@ export function SelectionToolbar() {
       await navigator.clipboard.writeText(
         formatPrReviewMarkdown(report, {
           dispositions: findingDispositions,
+          memory: lastReviewMemory,
         }),
       );
       return true;
     } catch {
       return false;
     }
-  }, [getCurrentPrReport, findingDispositions]);
+  }, [getCurrentPrReport, findingDispositions, lastReviewMemory]);
 
   const handleCopySummary = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -528,12 +534,14 @@ export function SelectionToolbar() {
       return false;
     }
     try {
-      await navigator.clipboard.writeText(buildPrReviewHandoffSummary(report, findingDispositions));
+      await navigator.clipboard.writeText(
+        buildPrReviewHandoffSummary(report, findingDispositions, lastReviewMemory),
+      );
       return true;
     } catch {
       return false;
     }
-  }, [getCurrentPrReport, findingDispositions]);
+  }, [getCurrentPrReport, findingDispositions, lastReviewMemory]);
 
   const handleCopyCommentDraft = useCallback(async () => {
     const report = getCurrentPrReport();
@@ -689,6 +697,11 @@ export function SelectionToolbar() {
                       <div className="space-y-1 px-1 py-1">
                         {prCiDestination ? (
                           <div className="px-1 py-1">
+                            <PrReviewMemoryToggle />
+                          </div>
+                        ) : null}
+                        {prCiDestination ? (
+                          <div className="px-1 py-1">
                             <CiEntryButton onOpen={handleOpenCi} summaryLabel="CI · Status" />
                           </div>
                         ) : null}
@@ -809,6 +822,12 @@ export function SelectionToolbar() {
                 }
                 reviewContext={
                   assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewContext : null
+                }
+                reviewScope={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewScope : null
+                }
+                reviewMemory={
+                  assistant.action === AIAction.REVIEW_ENTIRE_PR ? lastReviewMemory : null
                 }
                 findingFilter={findingFilter}
                 findingDispositions={findingDispositions}

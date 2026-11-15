@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/wallet/transfer.service.ts",
+            "lineStart": 20,
+            "lineEnd": 20,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Credit failure leaves the debit applied (partial transfer)",
+            "explanation": "If the credit update fails after the debit, the sender loses credits.",
+            "evidence": "await tx.account.update({ where: { id: toId }, data: { credits: { increment: amount } } });",
+            "changeType": "introduced",
+            "trigger": "The credit update fails",
+            "failurePath": "debit \u2192 credit throws",
+            "violatedInvariant": "Transfers are all-or-nothing",
+            "impact": "Lost credits",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Credit failure leaves the debit applied (partial transfer)": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "await db.$transaction(async (tx) => {\nconst debited = await tx.account.updateMany({",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

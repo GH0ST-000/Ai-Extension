@@ -141,6 +141,8 @@ export interface WorkspaceUsageCounter {
 export interface UsageConsumeResult {
   allowed: boolean;
   metric: UsageMetric;
+  /** True when the idempotency key was already charged: this call charged nothing. */
+  duplicate?: boolean;
   current: number;
   limit: number | null;
   remaining: number | null;
@@ -258,6 +260,13 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_NOT_FOUND'
   | 'WORKSPACE_ACCESS_DENIED'
   | 'WORKSPACE_INACTIVE'
+  /** X-Workspace-Id (or explicit workspace id) is malformed. HTTP 400. */
+  | 'WORKSPACE_ID_INVALID'
+  /**
+   * An explicitly requested workspace does not exist, is inactive, or the caller is not an
+   * active member (stale selection). Never silently replaced by another workspace. HTTP 403.
+   */
+  | 'WORKSPACE_CONTEXT_UNAVAILABLE'
   | 'WORKSPACE_LIMIT_REACHED'
   | 'WORKSPACE_MEMBER_NOT_FOUND'
   | 'WORKSPACE_OWNER_REQUIRED'
@@ -269,6 +278,7 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_RESOURCE_ACCESS_DENIED'
   | 'FEATURE_NOT_AVAILABLE'
   | 'USAGE_LIMIT_REACHED'
+  | 'AI_OPERATION_IN_PROGRESS'
   | 'PLAN_LIMIT_EXCEEDED'
   | 'SUBSCRIPTION_REQUIRED'
   | 'SUBSCRIPTION_INACTIVE'

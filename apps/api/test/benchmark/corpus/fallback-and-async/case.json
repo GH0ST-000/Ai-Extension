@@ -1,0 +1,50 @@
+{
+  "id": "fallback-and-async",
+  "title": "Sync: retry delay fallback and fire-and-forget saves",
+  "repository": "benchmark/phase1",
+  "pullRequest": "fallback-and-async",
+  "groups": [
+    "correctness"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/sync/sync.ts",
+      "physical": "sync.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "fallback-and-async/zero-delay-overridden",
+      "path": "apps/api/src/sync/sync.ts",
+      "lines": [
+        7,
+        7
+      ],
+      "category": "correctness",
+      "severity": "medium",
+      "security": false,
+      "changeType": "introduced",
+      "description": "`||` replaces a configured retryDelayMs of 0 (retry immediately) with the 1000 ms default.",
+      "witness": "witness.spec.ts \u203a a configured delay of 0 is replaced"
+    },
+    {
+      "id": "fallback-and-async/unawaited-saves",
+      "path": "apps/api/src/sync/sync.ts",
+      "lines": [
+        14,
+        16
+      ],
+      "category": "correctness",
+      "severity": "medium",
+      "security": false,
+      "changeType": "introduced",
+      "description": "forEach does not await the async callbacks: syncAll reports success before saves finish and their errors are unhandled.",
+      "witness": "witness.spec.ts \u203a syncAll resolves before the saves complete"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

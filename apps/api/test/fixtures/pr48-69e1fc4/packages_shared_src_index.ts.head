@@ -1,0 +1,421 @@
+export { findJiraIssueKeysInText, detectJiraKeysInPrSignals } from './jira/jira-key-match';
+export {
+  validateOpenApiFetchUrl,
+  sanitizeOpenApiDocumentUrl,
+  isPrivateOrReservedIp,
+  isIPv4,
+  isIPv6,
+} from './openapi/safe-url';
+export type { SafeUrlResult, SafeUrlRejectReason } from './openapi/safe-url';
+export { findOperation, buildOperationAiContext } from './openapi/operation-context';
+export { generateApiExample } from './openapi/example';
+export { isOpenApiSpecPath, filterOpenApiSpecPaths } from './openapi/spec-path';
+
+export {
+  ENGINEERING_MAX_JIRA_CHARS,
+  ENGINEERING_MAX_ACCEPTANCE_CRITERIA,
+  ENGINEERING_MAX_PR_FILES,
+  ENGINEERING_MAX_DIFF_CHARS,
+  ENGINEERING_MAX_FINDINGS,
+  ENGINEERING_MAX_API_CONTEXT_CHARS,
+  ENGINEERING_MAX_CI_CHARS,
+  ENGINEERING_MAX_TOTAL_PROMPT_CHARS,
+  ENGINEERING_MAX_EVIDENCE_EXCERPT,
+} from './engineering/budgets';
+export { extractAcceptanceCriteriaFromPlainText } from './engineering/extract-criteria';
+export {
+  tokenizeForRelevance,
+  scoreFileRelevance,
+  buildCriteriaTokenSet,
+  buildApiPathTokenSet,
+} from './engineering/relevance';
+export { buildEngineeringContext, buildContextId } from './engineering/build-context';
+export type { EngineeringContextBuildResult } from './engineering/build-context';
+export { formatEngineeringContextPrompt } from './engineering/prompt-text';
+export { validateEngineeringEvidence } from './engineering/evidence';
+export { validateEngineeringAlignmentAnalysis } from './engineering/validate-analysis';
+export type { ValidateAnalysisResult } from './engineering/validate-analysis';
+export { isAnalysisStale, analysisBindingFromParts } from './engineering/stale';
+export type { StaleAnalysisResult } from './engineering/stale';
+
+export {
+  CAPABILITY_CATALOG,
+  getCapability,
+  getPlannerCapabilitySummaries,
+  getPlanningCapabilityDescriptions,
+  isKnownWorkflowStepType,
+} from './workflow/capabilities';
+export type { WorkflowCapabilityDefinition } from './workflow/capabilities';
+export { WORKFLOW_POLICY, assertCapabilityAllowed, normalizeStepSafety } from './workflow/policy';
+export { validateDeveloperWorkflowPlan } from './workflow/validate-plan';
+export type { ValidatePlanOptions, WorkflowAvailableContext } from './workflow/validate-plan';
+export {
+  evaluateWorkflowCondition,
+  evaluateWorkflowConditionFromFacts,
+  conditionStateFromFacts,
+} from './workflow/conditions';
+export type { WorkflowConditionState } from './workflow/conditions';
+export { isWorkflowBindingStale } from './workflow/stale';
+export type { StaleWorkflowBindingResult } from './workflow/stale';
+export { formatCapabilityCatalogForPlanner } from './workflow/prompt-catalog';
+export {
+  normalizeAgentGoal,
+  goalMentionsMultipleJiraIssues,
+  constraintsForbidWrites,
+  constraintsForbidPatchApply,
+  constraintsForbidReviewSubmission,
+  isUnsafeConstraintAttempt,
+} from './workflow/goal-normalize';
+export type { NormalizeAgentGoalInput } from './workflow/goal-normalize';
+export {
+  buildPlanningContext,
+  formatPlanningContextForPrompt,
+  defaultPlanningPolicy,
+  defaultPlanningLimits,
+  inferPlanningConfidence,
+} from './workflow/planning-context';
+export type { BuildPlanningContextInput } from './workflow/planning-context';
+export {
+  WORKFLOW_FACT_NAMES,
+  isKnownWorkflowFactName,
+  createWorkflowFact,
+  upsertWorkflowFacts,
+  sanitizeWorkflowFacts,
+  getFactValue,
+  factAsBoolean,
+  conditionTypeToFactName,
+} from './workflow/facts';
+export {
+  isCompletionCriterionSatisfied,
+  evaluateCompletionCriteria,
+  defaultCompletionCriteriaForOutcome,
+  buildWorkflowGoalOutcome,
+  isKnownCompletionCriterionType,
+} from './workflow/completion';
+export type { BuildGoalOutcomeInput } from './workflow/completion';
+export {
+  createArtifactProvenance,
+  annotateArtifact,
+  markArtifactsStaleForBindingChange,
+  consumeWorkflowArtifact,
+  findCurrentArtifact,
+} from './workflow/provenance';
+export type { ConsumeArtifactResult } from './workflow/provenance';
+export { evaluatePrecondition, evaluateCapabilityPreconditions } from './workflow/preconditions';
+export type { PreconditionRuntime, PreconditionEvalResult } from './workflow/preconditions';
+export {
+  buildPlanRevision,
+  applyApprovedRevision,
+  listCompletedStepIds,
+  listRemainingStepIds,
+  revisionIntroducesWrite,
+} from './workflow/revision';
+export {
+  createWorkflowBudget,
+  incrementBudget,
+  isBudgetExceeded,
+  wouldExceedBudget,
+  budgetExceededMessage,
+} from './workflow/budget';
+export type { BudgetCounter } from './workflow/budget';
+export {
+  validatePlanAgainstGoalConstraints,
+  validateCompletionCriteriaAgainstPlan,
+  parseCompletionCriteria,
+} from './workflow/goal-constraints';
+export { detectWorkflowContextChanges } from './workflow/context-change';
+
+export {
+  isKnownProjectMemoryCategory,
+  PROJECT_MEMORY_CATEGORY_VALUES,
+  categoryRelevanceForCapability,
+  containsSensitiveMemoryContent,
+  redactForMemoryLog,
+  isUnsafeMemoryRuleText,
+  evaluateCandidateRecommendation,
+  canAutoAcceptDeterministicFact,
+  userExplicitMayStore,
+  effectiveCapabilitiesWithProjectConstraints,
+  projectRulesCannotEnableForbidden,
+  extractDeterministicFactsFromConfigs,
+  computeMemoryVersion,
+  selectRelevantMemory,
+  formatProjectMemoryForPrompt,
+  memoryCapabilityForAiAction,
+  buildProjectConstraintContext,
+  validateMemoryValue,
+  validateScope,
+  normalizeMemoryKey,
+  validateCreateRuleInput,
+  EXPLICIT_PROJECT_RULE_CATEGORIES,
+} from './project-memory';
+export type {
+  EvaluateCandidateInput,
+  ExtractConfigFile,
+  ProjectMemoryCapability,
+  SelectRelevantMemoryOptions,
+  ValidateResult,
+  ValidatedCreateRule,
+  ExplicitProjectRuleCategory,
+} from './project-memory';
+
+export { normalizeRepositoryPath } from './ci-fix/normalize-path';
+export {
+  extractPathsFromText,
+  resolveCIFixTargets,
+  selectPrimaryCIFixTarget,
+} from './ci-fix/resolve-targets';
+export type { ResolveCIFixTargetsInput } from './ci-fix/resolve-targets';
+export { buildCIFailureSignature, compareFailureSignatures } from './ci-fix/failure-signature';
+export {
+  matchCheckOnNewHead,
+  verifyCIFixAgainstSummary,
+  verificationToSessionStatus,
+} from './ci-fix/verify-fix';
+export type { VerifyCIFixInput } from './ci-fix/verify-fix';
+
+export {
+  MULTI_REPO_MAX_REPOS_PER_SYSTEM,
+  MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
+  MULTI_REPO_MAX_FILES_PER_REPO,
+  MULTI_REPO_MAX_TOTAL_FILES,
+  MULTI_REPO_MAX_RELATIONSHIPS,
+  MULTI_REPO_MAX_HTTP_OPS,
+  MULTI_REPO_MAX_KAFKA_TOPICS,
+  clampReposPerSystem,
+  clampReposPerAnalysis,
+  clampFilesPerRepo,
+  remainingTotalFileBudget,
+  isWithinRelationshipBudget,
+  isWithinHttpOpsBudget,
+  isWithinKafkaTopicBudget,
+  truncateToBudget,
+  normalizeOwnerRepo,
+  parseOwnerRepo,
+  repositoryKey,
+  sameRepository,
+  toRepositoryIdentity,
+  knownInSelectedScope,
+  noOrgWideClaim,
+  notEvidentInScope,
+  partialScopeUnavailable,
+  systemFlowIncomplete,
+  detectHttpProviderPaths,
+  detectHttpConsumerPaths,
+  detectKafkaTopicUsages,
+  parsePackageJsonManifest,
+  findDependencyByName,
+  compareHttpRequiredFieldsAdded,
+  compareTopicRename,
+  mergeCompatibilityResults,
+  emptyAnalysisScope,
+  buildChangeImpactSkeleton,
+  validateImpactRepositoriesInScope,
+  filterImpactAnalysisToScope,
+  buildSimpleLinearFlow,
+  appendFlowGap,
+  computeSystemContextVersion,
+  validateRepositoriesInScope,
+  validateAnalysisRepositorySelection,
+  assertNoInventedRepositories,
+} from './multi-repo';
+export type {
+  OwnerRepo,
+  HttpPathEvidence,
+  KafkaTopicEvidence,
+  KafkaUsageRole,
+  ParsedPackageJson,
+  ParsedPackageDependency,
+  ParsedPackageRepositoryField,
+  MultiRepoValidateResult,
+} from './multi-repo';
+
+export {
+  RELIABILITY_MAX_AUDIT_EVENTS_PER_EXECUTION,
+  RELIABILITY_MAX_CHECKPOINTS_PER_EXECUTION,
+  RELIABILITY_MAX_TIMELINE_EVENTS,
+  RELIABILITY_MAX_ARTIFACT_LINEAGE_NODES,
+  RELIABILITY_MAX_PROMPT_SNAPSHOT_CHARS,
+  RELIABILITY_MAX_SAFE_METADATA_CHARS,
+  RELIABILITY_MAX_SNAPSHOT_GOAL_CHARS,
+  RELIABILITY_MAX_FAILURE_MESSAGE_CHARS,
+  RELIABILITY_MAX_LIST_EXECUTIONS,
+  RELIABILITY_MAX_RETRY_ATTEMPTS,
+  RELIABILITY_PROMPT_REGISTRY_NAME,
+  createWorkflowExecutionId,
+  hashStableId,
+  nextExecutionNumber,
+  isValidExecutionTrigger,
+  redactForReliability,
+  truncateSafeText,
+  sanitizeSafeMetadata,
+  preparePromptSnapshotBody,
+  AUDIT_EVENT_TYPES,
+  isAuditEventType,
+  createAuditEvent,
+  appendAuditEvent,
+  auditEventFingerprint,
+  timelineLabelForAuditType,
+  buildExecutionTimeline,
+  classifyFailure,
+  isRetryableFailure,
+  computeWorkflowHealthScore,
+  healthBandForScore,
+  emptyHealthSignals,
+  decideRetry,
+  CHECKPOINT_KINDS,
+  createCheckpoint,
+  sanitizeCheckpointState,
+  appendCheckpoint,
+  latestValidCheckpoint,
+  resumeFromCheckpoint,
+  detectContextDrift,
+  buildArtifactLineage,
+  linkArtifactParent,
+  hashPromptContent,
+  hashBoundedInput,
+  buildPromptVersionRef,
+  createPromptSnapshot,
+  resolveNextPromptVersion,
+  buildExecutionSnapshot,
+  stepTypesCompletedThroughCheckpoint,
+  shouldSkipStepForResume,
+} from './reliability';
+
+export {
+  permissionsForRole,
+  roleHasPermission,
+  normalizeWorkspaceSlug,
+  isValidWorkspaceSlug,
+  personalWorkspaceName,
+  personalWorkspaceSlug,
+} from './workspace';
+
+export {
+  PRODUCT_PLAN_CATALOG_VERSION,
+  buildProductPlanCatalog,
+  DEFAULT_PRODUCT_PLANS,
+  getProductPlan,
+  isProductPlanId,
+  entitlementsAllowFeature,
+  TECHNICAL_MAX_REPOS_PER_SYSTEM,
+  TECHNICAL_MAX_PROJECT_SYSTEMS,
+  TECHNICAL_MAX_WORKSPACE_MEMBERS,
+  effectiveMaxRepositoriesPerSystem,
+  effectiveMaxProjectSystems,
+  effectiveMaxWorkspaceMembers,
+  usagePeriodKey,
+  usagePeriodResetAt,
+  USAGE_METRICS,
+  isUsageMetric,
+} from './billing';
+
+export {
+  createRequestId,
+  createTraceId,
+  createSpanId,
+  createAiOperationId,
+  normalizeIncomingRequestId,
+  resolveRequestId,
+  hashUserIdForTelemetry,
+  isValidRequestId,
+  REDACTED,
+  DEFAULT_REDACTION_LIMITS,
+  redactSensitiveString,
+  redactForTelemetry,
+  safeTelemetryMetadata,
+  AI_MODEL_PRICING_VERSION,
+  DEFAULT_AI_MODEL_PRICING,
+  normalizeModelLabel,
+  findModelPricing,
+  estimateAiCost,
+  normalizeProviderUsage,
+  GITHUB_OPERATIONS,
+  JIRA_OPERATIONS,
+  PADDLE_OPERATIONS,
+  OPENAPI_OPERATIONS,
+  normalizeGithubOperation,
+  normalizeJiraOperation,
+  normalizePaddleOperation,
+  normalizeOpenApiOperation,
+  httpStatusClass,
+  normalizeRouteTemplate,
+  CLIENT_TELEMETRY_EVENTS,
+  isClientTelemetryEvent,
+  isSafeTelemetryComponent,
+  DEFAULT_SLOW_OPERATION_THRESHOLDS,
+  parseSlowThreshold,
+} from './observability';
+export type {
+  RedactionLimits,
+  RedactResult,
+  GithubOperation,
+  JiraOperation,
+  PaddleOperation,
+  OpenApiOperation,
+  RedisOperationGroup,
+  DbOperationGroup,
+  SlowOperationThresholds,
+} from './observability';
+
+export const APP_NAME = 'Project X' as const;
+
+export const SERVICE_NAMES = {
+  api: 'api',
+  dashboard: 'dashboard',
+  extension: 'extension',
+} as const;
+
+export type ServiceName = (typeof SERVICE_NAMES)[keyof typeof SERVICE_NAMES];
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  return 'Unknown error';
+}
+
+export function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export {
+  defaultOnboardingPreferences,
+  deriveOnboardingSteps,
+  resolveOnboardingStatus,
+  resolveNextOnboardingStep,
+  buildRecommendedAction,
+  buildOnboardingView,
+  firstValueTypeForAiAction,
+  mapToUserFacingError,
+  workflowStatusLabel,
+  GITHUB_TRUST_SUMMARY,
+  GITHUB_WHY_CONNECT,
+  GITHUB_READS,
+  GITHUB_WRITES,
+  GITHUB_WRITE_CONFIRMATION_NOTE,
+  GITHUB_PERMISSION_DETAILS,
+  formatGitHubConnectionLabel,
+  formatSafeDiagnostics,
+  copyTextToClipboard,
+} from './ux';
+export type { BuildOnboardingViewInput } from './ux';
+
+export {
+  safeInternalPath,
+  isDangerousUrlScheme,
+  sanitizeExternalHttpsUrl,
+  PROMPT_INJECTION_GUARD,
+  PROMPT_INJECTION_FIXTURES,
+} from './security';

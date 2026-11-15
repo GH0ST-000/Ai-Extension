@@ -43,6 +43,21 @@ function pathMatchesPattern(path: string, pattern: string): boolean {
   }
 }
 
+function outOfScope(item: ProjectMemoryItem, pathHints: string[]): boolean {
+  const scope = item.scope;
+  if (scope.type === 'file-pattern') {
+    return !pathHints.some((hint) => pathMatchesPattern(hint, scope.pattern));
+  }
+  if (scope.type === 'directory') {
+    const dir = scope.path.replace(/\\/g, '/').replace(/\/$/, '');
+    return !pathHints.some((hint) => {
+      const h = hint.replace(/\\/g, '/');
+      return h === dir || h.startsWith(`${dir}/`);
+    });
+  }
+  return false;
+}
+
 function confidenceScore(item: ProjectMemoryItem): number {
   if (item.confidence === 'high') return 30;
   if (item.confidence === 'medium') return 15;
@@ -81,6 +96,9 @@ export function selectRelevantMemory(
   const eligible = items.filter((item) => {
     if (item.status !== 'active') return false;
     if (categorySet && !categorySet.has(item.category)) return false;
+    // A rule scoped to some paths applies only where they are touched: with known paths and
+    // no match it is not context for this request (it would be misapplied, e.g. to apps/api).
+    if (pathHints.length > 0 && outOfScope(item, pathHints)) return false;
     return true;
   });
 

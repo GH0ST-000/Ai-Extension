@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/docs/notes.service.ts",
+            "lineStart": 12,
+            "lineEnd": 12,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Missing Workspace Membership Check",
+            "explanation": "The deletion of a note does not verify that the user is a member of the note workspace.",
+            "evidence": "-  const membership = await db.membership.findFirst({\n-    where: { workspaceId: note.workspaceId, userId },\n-  });",
+            "changeType": "removed_safeguard",
+            "trigger": "A user deletes a note of a workspace they do not belong to",
+            "failurePath": "findUnique \u2192 delete",
+            "violatedInvariant": "Only members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Missing Workspace Membership Check": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "await db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/docs/notes.service.ts:12",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A non-member deletes a note",
+          "violatedInvariant": "Only workspace members delete notes",
+          "triggerSource": "const note = await db.note.findUnique({ where: { id: noteId } });",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {\n    throw new Error('NOT_FOUND');\n}",
+              "whyNotPreventing": "Only checks that the note exists."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/docs/notes.service.ts",
+            "lineStart": 12,
+            "lineEnd": 12,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Missing Workspace Membership Check",
+            "explanation": "The deletion of a note does not verify that the user is a member of the note workspace.",
+            "evidence": "-  const membership = await db.membership.findFirst({\n-    where: { workspaceId: note.workspaceId, userId },\n-  });",
+            "changeType": "removed_safeguard",
+            "trigger": "A user deletes a note of a workspace they do not belong to",
+            "failurePath": "findUnique \u2192 delete",
+            "violatedInvariant": "Only members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Missing Workspace Membership Check": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!note) { throw new Error('NOT_FOUND'); }",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

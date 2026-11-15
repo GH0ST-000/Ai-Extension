@@ -1,0 +1,42 @@
+{
+  "id": "webhook-idempotency",
+  "title": "Payment webhook handler lost its duplicate-event check",
+  "repository": "benchmark/phase1",
+  "pullRequest": "webhook-idempotency",
+  "groups": [
+    "data"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/billing/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/billing/payment-webhook.ts",
+      "physical": "payment-webhook.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "webhook-idempotency/double-credit",
+      "path": "apps/api/src/billing/payment-webhook.ts",
+      "lines": [
+        15,
+        19
+      ],
+      "category": "data_integrity",
+      "severity": "high",
+      "security": false,
+      "changeType": "removed_safeguard",
+      "description": "The processed-event check was removed: a redelivered webhook credits the account again.",
+      "witness": "witness.spec.ts \u203a a redelivered event credits twice"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

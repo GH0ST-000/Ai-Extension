@@ -1,0 +1,24 @@
+diff --git a/apps/api/src/notes/archive.ts b/apps/api/src/notes/archive.ts
+--- a/apps/api/src/notes/archive.ts
++++ b/apps/api/src/notes/archive.ts
+@@ -5,15 +5,15 @@ export type Membership = { workspaceId: string; userId: string; role: string; st
+ export type NotesDb = { note: Table<Note>; membership: Table<Membership> };
+ 
+ export async function archiveNote(db: NotesDb, userId: string, noteId: string): Promise<void> {
++  const note = await db.note.findUnique({ where: { id: noteId } });
++  if (!note) {
++    throw new Error('NOT_FOUND');
++  }
+   const membership = await db.membership.findFirst({
+-    where: { workspaceId: 'ws1', userId },
++    where: { workspaceId: note.workspaceId, userId },
+   });
+   if (!membership) {
+     throw new Error('FORBIDDEN');
+   }
+-  const note = await db.note.findUnique({ where: { id: noteId } });
+-  if (!note) {
+-    throw new Error('NOT_FOUND');
+-  }
+   await db.note.update({ where: { id: noteId }, data: { archived: true } });
+ }

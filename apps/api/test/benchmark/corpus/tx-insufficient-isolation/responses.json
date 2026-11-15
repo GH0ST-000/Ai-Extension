@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/wallet/wallet.service.ts",
+            "lineStart": 16,
+            "lineEnd": 16,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction",
+            "explanation": "The balance is read, checked and written back inside a default-isolation transaction; two concurrent withdrawals read the same balance and both pass the check.",
+            "evidence": "await tx.account.update({ where: { id: accountId }, data: { credits: account.credits - amount } });",
+            "changeType": "removed_safeguard",
+            "trigger": "Two withdrawals of 60 from a balance of 100 at the same time",
+            "failurePath": "findUnique (100) \u00d72 \u2192 check passes \u00d72 \u2192 update 40 \u00d72",
+            "violatedInvariant": "Credits never go below zero and every withdrawal is debited",
+            "impact": "Overdraft and lost debits",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "const account = await tx.account.findUnique({ where: { id: accountId } });\nawait tx.account.update({ where: { id: accountId }, data: { credits: account.credits - amount } });",
+          "failureSite": "apps/api/src/wallet/wallet.service.ts:16",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Two concurrent withdrawals",
+          "violatedInvariant": "Credits never go below zero",
+          "triggerSource": "export async function withdraw(db: WalletDb, accountId: string, amount: number): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!account || account.credits < amount) {",
+              "whyNotPreventing": "Both transactions read the same balance before either writes."
+            },
+            {
+              "code": "await db.$transaction(async (tx) => {",
+              "whyNotPreventing": "The default READ COMMITTED transaction takes no lock on the row read by findUnique."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/wallet/wallet.service.ts",
+            "lineStart": 16,
+            "lineEnd": 16,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction",
+            "explanation": "The balance is read, checked and written back inside a default-isolation transaction; two concurrent withdrawals read the same balance and both pass the check.",
+            "evidence": "await tx.account.update({ where: { id: accountId }, data: { credits: account.credits - amount } });",
+            "changeType": "removed_safeguard",
+            "trigger": "Two withdrawals of 60 from a balance of 100 at the same time",
+            "failurePath": "findUnique (100) \u00d72 \u2192 check passes \u00d72 \u2192 update 40 \u00d72",
+            "violatedInvariant": "Credits never go below zero and every withdrawal is debited",
+            "impact": "Overdraft and lost debits",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "await db.$transaction(async (tx) => {\nconst account = await tx.account.findUnique({ where: { id: accountId } });",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

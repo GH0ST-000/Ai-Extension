@@ -1,0 +1,339 @@
+{
+  "corpusVersion": "phase1-v1",
+  "knownGaps": [],
+  "corpus": {
+    "atomic-conditional-update": {
+      "files": "8cd20fd6125ac0c252f395119c25acfb9f13b5f609843e129673693cf2391508",
+      "sources": "304c8c035b1960909dd7b0e8ec26213b23328fa0816353d7f66ea16016dd7c22",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "authz-bypass": {
+      "files": "32ab124347122f683a51881309805a40bb7c47ea68a2cc9919aacb116e894771",
+      "sources": "f4ad35e775931f3ee7065e3bf8e66470642d2bc88867f11451eb0241d3d6b117",
+      "groundTruth": [
+        "authz-bypass/delete-without-membership"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "clean-defensive": {
+      "files": "61a274a7e71849cca7e5e925a5b30d4700ea24fff63c6fdaa2251356d0ef1529",
+      "sources": "ac84ad84f0a57496dfd8fa4976c820b412c7a207000b60e0e9c90a09eff48bf1",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "clean-refactor": {
+      "files": "33b0a585c1c4d44c638ffc5f1e97f147d75e97102c8e51c9aa3e4be98afc49c2",
+      "sources": "89c10fe1c9f696a9fd217333f7ebc935474db6c01553c58a5ee3d7ab50582bc1",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "defensive-guard-bug": {
+      "files": "6497b8137f582572cd3659a0f71bd325522dfef2d3732ad5e6daa52dd34dc63f",
+      "sources": "b2f2b6cb7c26ed972713ef2138093b5a6314c122283ff3da4244a42346cba9eb",
+      "groundTruth": [
+        "defensive-guard-bug/expired-session-accepted"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "fallback-and-async": {
+      "files": "4094955a511c765f03b15376f845897e80b2dc816532451230711b2cfe1ee452",
+      "sources": "5610126208bf48764a1126aff6a5f39a749e6d6f2465f68d499448b856bcb592",
+      "groundTruth": [
+        "fallback-and-async/zero-delay-overridden",
+        "fallback-and-async/unawaited-saves"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "guard-inverted": {
+      "files": "68262f80f2d1c633b2c5f6d7c0a0a7f601d44512fd278f3220e4ee9bd52e7ed1",
+      "sources": "2b10c46c5791eecf2d1621c78f72b2ec4a6558d83f49c2c1d6b9fda6460d56e3",
+      "groundTruth": [
+        "guard-inverted/denies-members"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "guard-one-role": {
+      "files": "e68eef88037667a7a4576a9aa575ff50921748923282d7e410e0aa503d5a2986",
+      "sources": "87cda6f3e68a988e4444a44e6e5fcf86540d4af5541d197ae74c5f42c253fbba",
+      "groundTruth": [
+        "guard-one-role/guest-can-delete"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "helper-never-denies": {
+      "files": "182a407864cac45193f8a0ce36ac7975fdb9bbca3a5439d5782493e13d15ddd8",
+      "sources": "374ad8385969c66f39206f61f059124522125357ecf1738ccf4dec21c837e58d",
+      "groundTruth": [
+        "helper-never-denies/ignored-membership-result"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "helper-unavailable": {
+      "files": "95952075b9ab5af49084c9ffe60a84260fe7c71d8732d31b605a28a5e7698480",
+      "sources": "8a23646157ec59e03681c42ba67654b41f7a5f5d4a9ebf385a03abd0013c13a1",
+      "groundTruth": [
+        "helper-unavailable/membership-result-ignored"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "helper-wrong-user": {
+      "files": "382290155a5eac664cbf1e8b421e4dd0a1960084cf378760576be1e4676e80fe",
+      "sources": "32c5e0fb11a8c6a2f759e4411e5f9f125f76f1011c10e991298e1a2851bf2928",
+      "groundTruth": [
+        "helper-wrong-user/author-passed-as-member"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "membership-missing-userid": {
+      "files": "aec3348eb366e1ef8f3a0a671041467891c366265cc89a8ab5464c7f7adc5563",
+      "sources": "3febff9ffdfce2733f6ada161197ae57c347cb063eeb52ea8bd2a41843e723b9",
+      "groundTruth": [
+        "membership-missing-userid/where-without-user"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "membership-wrong-userid": {
+      "files": "1c29829e1cb322d490b4213328301bdd07b67b86a1cc062c42fe3c6111f4e185",
+      "sources": "121a7ff569165f55d931eb6668410df6c7266ed297c8ef66f637635155d96e63",
+      "groundTruth": [
+        "membership-wrong-userid/author-instead-of-caller"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "memory-contamination": {
+      "files": "dd6d7ca08ff94f6fcfd75a21ea377b4657838ec51a81b41c366c0719102960ce",
+      "sources": "741ace423b335e5eac117da26d1611e4974b43e67cdeddf553c6d63d2565b8a1",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "missing-tenant-filter": {
+      "files": "9dd6b7ccfaaf89a0d70a55b7acfdd0d788b8e6b329ad1a4322853e123465181f",
+      "sources": "0c72019aa7781045a13d8074acd018baa270578c56b36ec3fc625d4c5ff8ea10",
+      "groundTruth": [
+        "missing-tenant-filter/unscoped-find-many"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "missing-transaction": {
+      "files": "bade96c36cddfa70db67271d5882f1e36b190e068ff8c3c6d6b1d73b2d86e3a0",
+      "sources": "076790d665760e875bc1308bc56612daaf409b968e4c5779194bff0be212d28d",
+      "groundTruth": [
+        "missing-transaction/partial-transfer"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "moved-guard": {
+      "files": "fd62a74ad7363a014977c4de44e94005ab8224ad330c37f1908e4b061d89261c",
+      "sources": "162c9dbd8a164c089b7b9e20da7e36a8190c01456aa197a4ada01822bec09f9c",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "multiline-evidence": {
+      "files": "8682d7ce2997ad6705ed16a05e1dd86be1fa4241f2e20d2a2e51bc2537afcf55",
+      "sources": "f927a91d2170fcabd66ffa6c2725a69a8d7cabbc2a756d37a23631a83eb90d82",
+      "groundTruth": [
+        "multiline-evidence/delete-without-membership"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "null-and-swallowed": {
+      "files": "497c5df9b27b2c777cf9484f03fd9ba2fae7d15c23e4f97a9dd0ce324cb916bd",
+      "sources": "310f6088bc1649a94a457652e5b5c407674af5e7a42a43e546f7fc9fcafc0ed4",
+      "groundTruth": [
+        "null-and-swallowed/null-owner",
+        "null-and-swallowed/swallowed-send"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "pr48-known-fps": {
+      "files": "2f840b85c4019aa362cd92d326238087f51cbf7cfc7b0424237734f686498570",
+      "sources": "aad53575f769af6dc23fa6c8e856026e21741934b25018feefff18ec4d2fc410",
+      "fixtures": "b5da9f698b58da83e2d8a76ae7abbb1185d44f4584ebcc41c4281737b4f19dc0",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": "gpt-4o-mini (live runs; responses transcribed, not replayed byte-for-byte)"
+      }
+    },
+    "race-condition": {
+      "files": "8159ad3cd5d29198031a06d84a48229744cf269039ce4d0ae54fb63f1e65f945",
+      "sources": "14b3d23ce2ea1b382be1676d8e29853d57d0bbd4bf51c91a0341f8b812efeb18",
+      "groundTruth": [
+        "race-condition/seat-limit-exceeded"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "race-locked": {
+      "files": "f093fbd509865611fc99d82d0abd279cf493dda71492332bc189fda732990500",
+      "sources": "382c6cc6fbb7b8b424506bde230d67ee38b726e2f0ca46a403c7e0d699c2b368",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "race-unique-constraint": {
+      "files": "40bc8102fabe0ff6d9d9a78f4eeda391356f827232a3925bd7e748f3217d6ebb",
+      "sources": "72f8d777fc1c7553600d9412c4b42d629be6c9b770c07a3b2929dfd7c0612528",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "request-body-userid": {
+      "files": "e4faf35512eee7ed314f97dca05228e3f587fc2f1e754e716370ab75a36ee52b",
+      "sources": "df63fe05b7ed7e3055632f3c344e853959cbb9179b3ce85c0cf7149fd74502fd",
+      "groundTruth": [
+        "request-body-userid/client-chosen-identity"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "request-principal-userid": {
+      "files": "8bf4c51e42dee52275017e8b3d85aa14becf481d9d6d03960cfa31d51f2e0b2a",
+      "sources": "bea604d7246ea48e0664af0687ab9c63b6b8c625d99239920e4bd3b01bf42e07",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "role-check-correct": {
+      "files": "f4dd3a289f38dd9214e2f2b9ab7a78c5d51f37ee662d7fffcc8f434627646ba1",
+      "sources": "9c483921b75587cef5e4475425871ff5b4afef5d5754fe583abb0cf4be425f4e",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "tx-correct": {
+      "files": "3565ffc37c3042a501a316695f268235e0dc16e51e58776ff77a2e2083e5015f",
+      "sources": "a22925bfcc6b7a9e85504358dcfe1e97217b060e1c3bf50d1145d06df356ca2d",
+      "groundTruth": [],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "tx-insufficient-isolation": {
+      "files": "46778634a4da916236b1d89f210f66fcd1f6df8c13a45bd154696f130f29a4ab",
+      "sources": "98b94048a8be22c4c6f4fa7e7e30aca282518d67a51b99f95ee4de51fd190eaa",
+      "groundTruth": [
+        "tx-insufficient-isolation/lost-update-overdraft"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    },
+    "webhook-idempotency": {
+      "files": "3a987f6211eaa53cb4e9a3bedfb0bf0445c994f6168316f59696ad16528971db",
+      "sources": "fc6fe0d3af9866a051dd0b1cf55f25195d78b0ccc3d1f18e548ff411aaa06b8c",
+      "groundTruth": [
+        "webhook-idempotency/double-credit"
+      ],
+      "responses": {
+        "provenance": "scripted",
+        "model": null
+      }
+    }
+  },
+  "prompts": {
+    "batchInstructions": "419a5615dd60c58f6019c30d29a3d19c8028d1a21c57f2d47514f11ab06f5714",
+    "verifyInstructions": "269b0d6be3bee0afdf3745bdfbaecefd67ae47f14b778ccebad29cea298e1d28",
+    "batchSchema": "2ab97885f754874fc2da0b5b5e15a7a4861c46f7b81ddf72d5a8316910aa23aa",
+    "verifySchema": "5f9397e4919294c5c83f4b31f39f3808c0ac06bddcc6aaca79548a96154af643"
+  },
+  "review": {
+    "limits": {
+      "maxBatches": 6,
+      "concurrency": 3,
+      "batchInputTokens": 16000,
+      "maxInputTokens": 96000,
+      "maxOutputTokensPerBatch": 4096,
+      "maxTotalOutputTokens": 24576,
+      "batchTimeoutMs": 120000,
+      "reviewTimeoutMs": 240000,
+      "maxVerifications": 10,
+      "verifyInputTokens": 6000,
+      "verifyOutputTokens": 800,
+      "maxContextFiles": 12
+    },
+    "verifyRequestOverheadChars": 2300
+  },
+  "dependencies": {
+    "sourceFiles": 16,
+    "configReads": 6,
+    "missingProbes": 8,
+    "requests": 30
+  },
+  "model": {
+    "mode": "replay",
+    "costModel": "gpt-4o-mini"
+  }
+}

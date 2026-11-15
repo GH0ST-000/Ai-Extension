@@ -1,0 +1,28 @@
+diff --git a/apps/api/src/invites/invites.service.ts b/apps/api/src/invites/invites.service.ts
+--- a/apps/api/src/invites/invites.service.ts
++++ b/apps/api/src/invites/invites.service.ts
+@@ -4,10 +4,23 @@ import type { Table } from './db';
+ export type Invite = { workspaceId: string; email: string; status: string };
+ export type InviteDb = { invite: Table<Invite> };
+ 
++const UNIQUE_VIOLATION = 'P2002';
++
+ export async function inviteMember(db: InviteDb, workspaceId: string, email: string): Promise<Invite> {
+   const existing = await db.invite.findFirst({ where: { workspaceId, email } });
+   if (existing) {
+     return existing;
+   }
+-  return db.invite.create({ data: { workspaceId, email, status: 'pending' } });
++  try {
++    return await db.invite.create({ data: { workspaceId, email, status: 'pending' } });
++  } catch (error) {
++    // A concurrent invite inserted the same (workspaceId, email) first: return that one.
++    if ((error as { code?: string }).code === UNIQUE_VIOLATION) {
++      const winner = await db.invite.findFirst({ where: { workspaceId, email } });
++      if (winner) {
++        return winner;
++      }
++    }
++    throw error;
++  }
+ }

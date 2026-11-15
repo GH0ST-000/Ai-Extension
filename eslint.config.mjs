@@ -19,6 +19,11 @@ const globalIgnores = {
     '**/coverage/**',
     '**/*.d.ts',
     'pnpm-lock.yaml',
+    // Review-quality benchmark corpus: intentionally defective code under review (test data,
+    // content-hashed — never lint or auto-fix). Same exclusion as apps/api/eslint.config.mjs.
+    'apps/api/test/benchmark/corpus/*/head/**',
+    'apps/api/test/benchmark/corpus/*/base/**',
+    'apps/api/test/benchmark/corpus/*/fixed/**',
   ],
 };
 

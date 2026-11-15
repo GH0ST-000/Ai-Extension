@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import {
+  IsIn,
+  IsISO8601,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 import { PROJECT_MEMORY_MAX_SUMMARY_CHARS } from '@project-x/types';
 
 import { MemoryScopeDto } from './create-rule.dto';
@@ -33,4 +41,13 @@ export class UpdateProjectMemoryDto {
   @IsString()
   @MaxLength(PROJECT_MEMORY_MAX_SUMMARY_CHARS)
   text?: string;
+
+  /**
+   * Optimistic concurrency: the `updatedAt` the client last saw. When it no longer matches
+   * the stored rule, the update is rejected (409 PROJECT_MEMORY_CONFLICT) instead of
+   * overwriting someone else's change. Optional for older clients.
+   */
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  expectedUpdatedAt?: string;
 }

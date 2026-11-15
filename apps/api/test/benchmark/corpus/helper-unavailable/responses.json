@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Note deletion relies on a membership helper that is not shown to deny",
+            "explanation": "The inline FORBIDDEN check was replaced by requireWorkspaceMember(), whose behaviour is not visible.",
+            "evidence": "await requireWorkspaceMember(db, note.workspaceId, userId);",
+            "changeType": "removed_safeguard",
+            "trigger": "A non-member deletes a note by id",
+            "failurePath": "requireWorkspaceMember \u2192 delete",
+            "violatedInvariant": "Only workspace members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Note deletion relies on a membership helper that is not shown to deny": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "await requireWorkspaceMember(db, note.workspaceId, userId);\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:14",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A non-member deletes a note",
+          "violatedInvariant": "Only workspace members delete notes",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "await requireWorkspaceMember(db, note.workspaceId, userId);",
+              "whyNotPreventing": "It probably returns a boolean that is ignored."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Note deletion relies on a membership helper that is not shown to deny",
+            "explanation": "The inline FORBIDDEN check was replaced by requireWorkspaceMember(), whose behaviour is not visible.",
+            "evidence": "await requireWorkspaceMember(db, note.workspaceId, userId);",
+            "changeType": "removed_safeguard",
+            "trigger": "A non-member deletes a note by id",
+            "failurePath": "requireWorkspaceMember \u2192 delete",
+            "violatedInvariant": "Only workspace members delete notes",
+            "impact": "Cross-workspace deletion",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Note deletion relies on a membership helper that is not shown to deny": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "await requireWorkspaceMember(db, note.workspaceId, userId);",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "guard-one-role",
+  "title": "Delete guard only refuses viewers (guests pass)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "guard-one-role",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": true,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "guard-one-role/guest-can-delete",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        15,
+        15
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "introduced",
+      "description": "The guard denies only 'viewer'; a 'guest' member (no write permission) can delete notes.",
+      "witness": "witness.spec.ts \u203a a guest member deletes a note"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

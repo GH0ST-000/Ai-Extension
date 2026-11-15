@@ -223,13 +223,35 @@ export async function executeApiFetch(
   };
 }
 
+/** Response headers stream callers may read (everything else stays in the background). */
+const STREAM_RESPONSE_HEADER_ALLOWLIST = [
+  'x-request-id',
+  'x-pr-review-scope',
+  'x-project-memory',
+  'x-ai-operation-id',
+  'x-ai-operation-replayed',
+] as const;
+
+function pickStreamResponseHeaders(headers: Headers): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of STREAM_RESPONSE_HEADER_ALLOWLIST) {
+    const value = headers.get(name);
+    if (value !== null) {
+      picked[name] = value;
+    }
+  }
+  return picked;
+}
+
 export async function executeApiStream(
   input: Omit<ApiStreamStartMessage, 'type'>,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
-): Promise<{ ok: boolean; status: number; bodyText: string }> {
+  /** Allow-listed response headers, as soon as the response starts (before the body). */
+  onHeaders?: (headers: Record<string, string>) => void,
+): Promise<{ ok: boolean; status: number; bodyText: string; headers: Record<string, string> }> {
   if (!isAllowedExtensionApiPath(input.path)) {
-    return { ok: false, status: 0, bodyText: 'API path is not allowed.' };
+    return { ok: false, status: 0, bodyText: 'API path is not allowed.', headers: {} };
   }
   const path = input.path.startsWith('/') ? input.path : `/${input.path}`;
   const url = `${getApiBaseUrl()}/api${path}`;
@@ -239,7 +261,12 @@ export async function executeApiStream(
   const auth = input.auth !== false;
   const authState = await attachAuthHeaders(headers, auth);
   if (authState.unauthorized) {
-    return { ok: false, status: 401, bodyText: JSON.stringify({ message: 'Not signed in.' }) };
+    return {
+      ok: false,
+      status: 401,
+      bodyText: JSON.stringify({ message: 'Not signed in.' }),
+      headers: {},
+    };
   }
 
   let response = await fetch(url, {
@@ -271,9 +298,11 @@ export async function executeApiStream(
       ok: response.ok,
       status: response.status,
       bodyText: await response.text(),
+      headers: pickStreamResponseHeaders(response.headers),
     };
   }
 
+  onHeaders?.(pickStreamResponseHeaders(response.headers));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = '';
@@ -287,7 +316,12 @@ export async function executeApiStream(
     }
   }
   full += decoder.decode();
-  return { ok: true, status: response.status, bodyText: full };
+  return {
+    ok: true,
+    status: response.status,
+    bodyText: full,
+    headers: pickStreamResponseHeaders(response.headers),
+  };
 }
 
 function recordToHeaders(record: Record<string, string>): Headers {
@@ -357,6 +391,8 @@ export async function extensionApiStream(
   init: RequestInit & { auth?: boolean },
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
+  /** Allow-listed response headers as soon as the stream starts (e.g. the operation id). */
+  onHeaders?: (headers: Headers) => void,
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (!headers.has('Content-Type') && init.body) {
@@ -382,8 +418,12 @@ export async function extensionApiStream(
       },
       onChunk,
       signal,
+      onHeaders ? (h) => onHeaders(recordToHeaders(h)) : undefined,
     );
-    return new Response(result.bodyText, { status: result.status });
+    return new Response(result.bodyText, {
+      status: result.status,
+      headers: recordToHeaders(result.headers),
+    });
   }
 
   return new Promise<Response>((resolve, reject) => {
@@ -422,6 +462,7 @@ export async function extensionApiStream(
         chunk?: string;
         status?: number;
         bodyText?: string;
+        headers?: Record<string, string>;
         error?: string;
       }) => {
         if (msg.type === 'CHUNK' && typeof msg.chunk === 'string') {
@@ -429,11 +470,32 @@ export async function extensionApiStream(
           onChunk(msg.chunk);
           return;
         }
+        if (msg.type === 'HEADERS' && msg.headers && typeof msg.headers === 'object') {
+          const early = new Headers();
+          for (const name of STREAM_RESPONSE_HEADER_ALLOWLIST) {
+            const value = msg.headers[name];
+            if (typeof value === 'string') early.set(name, value);
+          }
+          onHeaders?.(early);
+          return;
+        }
         if (msg.type === 'DONE') {
           settled = true;
           status = typeof msg.status === 'number' ? msg.status : 0;
           port.disconnect();
-          resolve(new Response(typeof msg.bodyText === 'string' ? msg.bodyText : full, { status }));
+          const headers = new Headers();
+          if (msg.headers && typeof msg.headers === 'object') {
+            for (const name of STREAM_RESPONSE_HEADER_ALLOWLIST) {
+              const value = msg.headers[name];
+              if (typeof value === 'string') headers.set(name, value);
+            }
+          }
+          resolve(
+            new Response(typeof msg.bodyText === 'string' ? msg.bodyText : full, {
+              status,
+              headers,
+            }),
+          );
           return;
         }
         if (msg.type === 'ERROR') {

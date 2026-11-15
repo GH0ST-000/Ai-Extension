@@ -1,4 +1,4 @@
-import type { AIAction, WorkspaceErrorCode } from '@project-x/types';
+import type { AIAction, PR_DIFF_UNAVAILABLE_CODE, WorkspaceErrorCode } from '@project-x/types';
 
 export type SelectionRect = {
   x: number;
@@ -32,7 +32,7 @@ export type AssistantView =
       status: 'error';
       action: AIAction;
       message: string;
-      code?: WorkspaceErrorCode | null;
+      code?: WorkspaceErrorCode | typeof PR_DIFF_UNAVAILABLE_CODE | null;
       referenceId?: string | null;
       unauthorized?: boolean;
     };

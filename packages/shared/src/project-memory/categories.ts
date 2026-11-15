@@ -1,5 +1,6 @@
 import type { ProjectMemoryCategory } from '@project-x/types';
 import {
+  AIAction,
   PROJECT_MEMORY_CATEGORY_VALUES,
   ProjectMemoryCategory as Categories,
 } from '@project-x/types';
@@ -18,6 +19,8 @@ export function isKnownProjectMemoryCategory(value: string): value is ProjectMem
  */
 export function categoryRelevanceForCapability(capability: string): ProjectMemoryCategory[] {
   switch (capability) {
+    // Every category a user can pick for an explicit rule (EXPLICIT_PROJECT_RULE_CATEGORIES)
+    // must reach PR review and patch generation; otherwise a saved rule is silently inert.
     case 'PR_REVIEW':
       return [
         Categories.ARCHITECTURE,
@@ -27,6 +30,9 @@ export function categoryRelevanceForCapability(capability: string): ProjectMemor
         Categories.TESTING_CONVENTION,
         Categories.PROJECT_CONSTRAINT,
         Categories.REVIEW_CONVENTION,
+        Categories.TECHNICAL_DECISION,
+        Categories.DEPENDENCY_CONVENTION,
+        Categories.USER_PREFERENCE,
       ];
     case 'GENERATE_PATCH':
       return [
@@ -37,6 +43,9 @@ export function categoryRelevanceForCapability(capability: string): ProjectMemor
         Categories.TESTING_CONVENTION,
         Categories.PROJECT_CONSTRAINT,
         Categories.DEPENDENCY_CONVENTION,
+        Categories.TECHNICAL_DECISION,
+        Categories.REVIEW_CONVENTION,
+        Categories.USER_PREFERENCE,
       ];
     case 'JIRA_TECH_PLAN':
       return [
@@ -46,6 +55,7 @@ export function categoryRelevanceForCapability(capability: string): ProjectMemor
         Categories.DATABASE_CONVENTION,
         Categories.TESTING_CONVENTION,
         Categories.PROJECT_CONSTRAINT,
+        Categories.TECHNICAL_DECISION,
       ];
     case 'OPENAPI_ANALYSIS':
       return [
@@ -61,6 +71,7 @@ export function categoryRelevanceForCapability(capability: string): ProjectMemor
         Categories.SERVICE_RESPONSIBILITY,
         Categories.DEPENDENCY_CONVENTION,
         Categories.USER_PREFERENCE,
+        Categories.TECHNICAL_DECISION,
       ];
     case 'EXPLAIN_CODE':
       return [
@@ -73,4 +84,25 @@ export function categoryRelevanceForCapability(capability: string): ProjectMemor
     default:
       return [Categories.PROJECT_CONSTRAINT, Categories.ARCHITECTURE];
   }
+}
+
+export type ProjectMemoryCapability =
+  | 'PLANNING'
+  | 'PR_REVIEW'
+  | 'GENERATE_PATCH'
+  | 'JIRA_TECH_PLAN'
+  | 'OPENAPI_ANALYSIS'
+  | 'EXPLAIN_CODE';
+
+/** AI actions that receive project memory, and the retrieval capability each uses. */
+const MEMORY_CAPABILITY_BY_ACTION: Partial<Record<AIAction, ProjectMemoryCapability>> = {
+  [AIAction.REVIEW_ENTIRE_PR]: 'PR_REVIEW',
+  [AIAction.SUGGEST_FIX]: 'GENERATE_PATCH',
+  [AIAction.PLAN_DEVELOPER_WORKFLOW]: 'PLANNING',
+  [AIAction.ANALYZE_ENGINEERING_ALIGNMENT]: 'PLANNING',
+  [AIAction.CREATE_TECHNICAL_PLAN]: 'JIRA_TECH_PLAN',
+};
+
+export function memoryCapabilityForAiAction(action: AIAction): ProjectMemoryCapability | null {
+  return MEMORY_CAPABILITY_BY_ACTION[action] ?? null;
 }

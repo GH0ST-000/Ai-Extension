@@ -1,0 +1,19 @@
+diff --git a/apps/api/src/notifications/notify.ts b/apps/api/src/notifications/notify.ts
+--- a/apps/api/src/notifications/notify.ts
++++ b/apps/api/src/notifications/notify.ts
+@@ -9,10 +9,11 @@ export async function notifyOwner(
+   workspaceId: string,
+ ): Promise<{ sent: boolean }> {
+   const owner = await db.user.findFirst({ where: { workspaceId, role: 'owner' } });
+-  if (!owner) {
+-    return { sent: false };
++  const name = owner!.displayName!.trim();
++  try {
++    await mailer.send(owner!.email, `Hello ${name}`);
++  } catch {
++    // Mail failures are not fatal.
+   }
+-  const name = owner.displayName?.trim() ?? 'there';
+-  await mailer.send(owner.email, `Hello ${name}`);
+   return { sent: true };
+ }

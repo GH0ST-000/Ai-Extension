@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { AIAction } from '@project-x/types';
 import type {
   AnalyzeCIFailureRequest,
@@ -374,22 +374,8 @@ export class GithubCiService {
       changedFiles,
     });
 
-    let raw: string;
-    try {
-      raw = await this.aiService.generateAction(userId, {
-        action: AIAction.ANALYZE_CI_FAILURE,
-        text: analysisContext.promptText,
-      });
-    } catch {
-      throw this.errors.toHttpException(
-        'AI_ANALYSIS_FAILED',
-        'Unable to analyze this CI failure. Try again.',
-      );
-    }
-
-    let analysis;
-    try {
-      analysis = parseCIFailureAnalysisJson(raw, {
+    const parse = (raw: string) =>
+      parseCIFailureAnalysisJson(raw, {
         owner: evidence.owner,
         repository: evidence.repository,
         pullRequestNumber: evidence.pullRequestNumber,
@@ -399,7 +385,26 @@ export class GithubCiService {
         evidenceTruncated: analysisContext.truncated || Boolean(evidence.truncated),
         trustedChangedPaths: analysisContext.changedFilePaths,
       });
-    } catch {
+
+    let analysis: ReturnType<typeof parse>;
+    try {
+      // The output is validated BEFORE the usage unit is charged: an analysis that cannot be
+      // parsed into the structured result is refunded (product contract: no usable result,
+      // no charge) and reported as AI_ANALYSIS_FAILED as before.
+      const { text } = await this.aiService.generateActionWithMetadata(
+        userId,
+        { action: AIAction.ANALYZE_CI_FAILURE, text: analysisContext.promptText },
+        {
+          validate: (raw) => {
+            parse(raw);
+          },
+        },
+      );
+      analysis = parse(text);
+    } catch (error) {
+      // Plan, quota and concurrency refusals keep their own code and status (the client shows
+      // an upgrade prompt or "already running"); only real analysis failures are generic.
+      if (isEntitlementRefusal(error)) throw error;
       throw this.errors.toHttpException(
         'AI_ANALYSIS_FAILED',
         'Unable to analyze this CI failure. Try again.',
@@ -570,7 +575,8 @@ export class GithubCiService {
       source.includes('github actions') ||
       source === 'github-actions' ||
       url.includes('/actions/runs/') ||
-      (url.includes('github.com') && url.includes('/job/'))
+      // Hostname check, not a substring: `https://evil.example/?github.com/job/1` is not GitHub.
+      (isTrustedGitHubDetailsUrl(url) && url.includes('/job/'))
     );
   }
 
@@ -658,8 +664,9 @@ export class GithubCiService {
       if (!location || !isSafeHttpsUrl(location)) {
         return null;
       }
-      // Only follow redirects to GitHub-controlled hosts
-      if (!isTrustedGitHubDetailsUrl(location) && !location.includes('githubusercontent.com')) {
+      // Only follow redirects to GitHub-controlled hosts (exact host / subdomain match on the
+      // parsed hostname; a substring test would accept e.g. `https://evil.example/?githubusercontent.com`).
+      if (!isTrustedGitHubDetailsUrl(location)) {
         return null;
       }
       try {
@@ -806,4 +813,22 @@ export class GithubCiService {
       evidenceCapabilities: capabilities,
     };
   }
+}
+
+/** Coded refusals that must reach the client unchanged (not an analysis failure). */
+const PASS_THROUGH_CODES = new Set([
+  'USAGE_LIMIT_REACHED',
+  'PLAN_LIMIT_EXCEEDED',
+  'FEATURE_NOT_AVAILABLE',
+  'SUBSCRIPTION_REQUIRED',
+  'SUBSCRIPTION_INACTIVE',
+  'AI_OPERATION_IN_PROGRESS',
+]);
+
+export function isEntitlementRefusal(error: unknown): boolean {
+  if (!(error instanceof HttpException)) return false;
+  const body = error.getResponse();
+  const code =
+    typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && PASS_THROUGH_CODES.has(code);
 }

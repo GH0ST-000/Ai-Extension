@@ -1,13 +1,15 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { FIRST_VALUE_TYPES, type FirstValueType } from '@project-x/types';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 export class UpdateOnboardingDto {
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   welcomeSeen?: boolean;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   dismiss?: boolean;
 
   @IsOptional()
@@ -21,6 +23,6 @@ export class UpdateOnboardingDto {
   dismissHintId?: string;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   firstWriteEducationSeen?: boolean;
 }

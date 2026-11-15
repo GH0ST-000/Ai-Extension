@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -26,11 +27,15 @@ export function workspaceException(
       return new NotFoundException(body);
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
+    case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':
     case 'FEATURE_NOT_AVAILABLE':
       return new ForbiddenException(body);
+    case 'AI_OPERATION_IN_PROGRESS':
+      return new ConflictException(body);
+    case 'WORKSPACE_ID_INVALID':
     case 'WORKSPACE_LIMIT_REACHED':
     case 'WORKSPACE_MEMBER_LIMIT_REACHED':
     case 'WORKSPACE_INVITATION_INVALID':
@@ -57,6 +62,7 @@ function statusForCode(code: WorkspaceErrorCode): number {
       return HttpStatus.NOT_FOUND;
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
+    case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':
@@ -67,6 +73,8 @@ function statusForCode(code: WorkspaceErrorCode): number {
     case 'USAGE_LIMIT_REACHED':
     case 'PLAN_LIMIT_EXCEEDED':
       return HttpStatus.PAYMENT_REQUIRED;
+    case 'AI_OPERATION_IN_PROGRESS':
+      return HttpStatus.CONFLICT;
     case 'BILLING_PROVIDER_UNAVAILABLE':
     case 'BILLING_SUBSCRIPTION_UPDATE_FAILED':
     case 'BILLING_RECONCILIATION_REQUIRED':

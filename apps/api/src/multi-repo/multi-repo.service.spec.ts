@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MultiRepoService } from './multi-repo.service';
+import { usageStub } from '../ai/pr-review/pr-review-fixtures';
 
 function systemRow(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-09-12T12:00:00.000Z');
@@ -169,7 +170,7 @@ describe('MultiRepoService', () => {
         maxRepositoriesPerSystem: 12,
       })),
     };
-    const usage = { consume: vi.fn(async () => ({ allowed: true })) };
+    const usage = usageStub();
 
     service = new MultiRepoService(
       prisma as never,

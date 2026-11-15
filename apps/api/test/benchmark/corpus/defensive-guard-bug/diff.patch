@@ -1,0 +1,12 @@
+diff --git a/apps/api/src/auth/session.guard.ts b/apps/api/src/auth/session.guard.ts
+--- a/apps/api/src/auth/session.guard.ts
++++ b/apps/api/src/auth/session.guard.ts
+@@ -6,7 +6,7 @@ export type SessionDb = { session: Table<Session> };
+ 
+ export async function requireSession(db: SessionDb, token: string): Promise<Session> {
+   const session = await db.session.findFirst({ where: { token } });
+-  if (!session || session.expiresAt < Date.now()) {
++  if (!session || session.expiresAt < Date.now() / 1000) {
+     throw new Error('UNAUTHORIZED');
+   }
+   return session;

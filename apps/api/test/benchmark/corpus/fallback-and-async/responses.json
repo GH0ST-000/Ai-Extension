@@ -1,0 +1,83 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/sync/sync.ts",
+            "lineStart": 7,
+            "lineEnd": 7,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "A retry delay of 0 is replaced by the default",
+            "explanation": "`||` treats 0 as missing.",
+            "evidence": "return config.retryDelayMs || DEFAULT_RETRY_DELAY_MS;",
+            "changeType": "introduced",
+            "trigger": "retryDelayMs is configured as 0",
+            "failurePath": "retryDelay returns 1000",
+            "violatedInvariant": "A configured delay is respected",
+            "impact": "Retries are delayed against configuration",
+            "assumptions": "",
+            "missingContext": ""
+          },
+          {
+            "path": "apps/api/src/sync/sync.ts",
+            "lineStart": 14,
+            "lineEnd": 14,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "syncAll does not wait for saves",
+            "explanation": "forEach ignores the promises returned by the async callback.",
+            "evidence": "items.forEach(async (item) => {",
+            "changeType": "introduced",
+            "trigger": "syncAll is called with items",
+            "failurePath": "forEach \u2192 return before saves",
+            "violatedInvariant": "syncAll resolves after all saves",
+            "impact": "Lost writes and unhandled rejections",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "A retry delay of 0 is replaced by the default": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "export function retryDelay(config: SyncConfig): number {\nreturn config.retryDelayMs || DEFAULT_RETRY_DELAY_MS;",
+          "failureSite": "apps/api/src/sync/sync.ts:7",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "retryDelayMs = 0",
+          "violatedInvariant": "Configured delays are respected",
+          "triggerSource": "export function retryDelay(config: SyncConfig): number {",
+          "guardsOnPath": [
+            {
+              "code": "return config.retryDelayMs || DEFAULT_RETRY_DELAY_MS;",
+              "whyNotPreventing": "The || fallback treats a configured 0 as missing and returns 1000."
+            }
+          ]
+        },
+        "syncAll does not wait for saves": {
+          "verdict": "confirmed",
+          "severity": "medium",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "items.forEach(async (item) => {\nreturn { synced: items.length };",
+          "failureSite": "apps/api/src/sync/sync.ts:17",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Any non-empty items array",
+          "violatedInvariant": "Resolve after all saves",
+          "triggerSource": "items: Item[],",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/invoices/invoice-total.spec.ts",
+            "lineStart": 5,
+            "lineEnd": 5,
+            "category": "correctness",
+            "severity": "medium",
+            "confidence": "high",
+            "title": "Ensuring Idempotence for Payment Webhook Handlers",
+            "explanation": "Payment webhook handlers must be idempotent to avoid duplicate billing.",
+            "evidence": "const PAYMENT_RULE = 'All payment webhook handlers must be idempotent.';",
+            "changeType": "introduced",
+            "trigger": "Duplicate payment webhook event",
+            "failurePath": "billing test",
+            "violatedInvariant": "Webhooks are idempotent",
+            "impact": "Multiple charges for one event",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Ensuring Idempotence for Payment Webhook Handlers": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "never reached",
+          "failureSite": "apps/api/src/invoices/invoice-total.spec.ts:7",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "xxxxxxxxxxxxxxxxxxxx",
+          "violatedInvariant": "yyyyyyyyyyyyyyyyyyyy",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

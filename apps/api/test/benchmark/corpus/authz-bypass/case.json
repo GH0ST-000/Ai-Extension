@@ -1,0 +1,42 @@
+{
+  "id": "authz-bypass",
+  "title": "Note deletion no longer checks workspace membership",
+  "repository": "benchmark/phase1",
+  "pullRequest": "authz-bypass",
+  "groups": [
+    "security"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.service.ts",
+      "physical": "notes.service.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "authz-bypass/delete-without-membership",
+      "path": "apps/api/src/notes/notes.service.ts",
+      "lines": [
+        12,
+        12
+      ],
+      "category": "security",
+      "severity": "high",
+      "security": true,
+      "changeType": "removed_safeguard",
+      "description": "The membership check before deleting a note was removed: any authenticated user can delete a note of any workspace by id.",
+      "witness": "witness.spec.ts \u203a an outsider can delete a note of another workspace"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

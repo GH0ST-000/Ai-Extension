@@ -52,6 +52,9 @@ describe('ProjectMemoryService', () => {
     user: {
       findUnique: vi.fn(),
     },
+    $transaction: vi.fn(),
+    // Advisory lock taken by every memory write (no-op here).
+    $queryRaw: vi.fn(async () => []),
     workspaceMembership: {
       findFirst: vi.fn(),
     },
@@ -94,23 +97,56 @@ describe('ProjectMemoryService', () => {
       async ({ data }: { data: Record<string, unknown> }) =>
         memoryRow({ ...data, id: 'mem-1', updatedAt: new Date() }),
     );
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     redis.set.mockResolvedValue('OK');
     redis.get.mockResolvedValue(null);
     redis.del.mockResolvedValue(1);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.workspaceMembership.findFirst.mockResolvedValue(null);
     const featureGate = { require: vi.fn(async () => undefined) };
+    const workspaceAuthorization = { assertAccess: vi.fn(async () => ({ role: 'owner' })) };
     service = new ProjectMemoryService(
       prisma as never,
       redis as never,
       githubConnections as never,
       githubContent as never,
       featureGate as never,
+      workspaceAuthorization as never,
     );
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+  });
+
+  it('an active-slot unique violation (P2002) surfaces as 409 PROJECT_MEMORY_CONFLICT', async () => {
+    prisma.projectMemory.create.mockRejectedValueOnce(
+      Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+    );
+    const error = await service
+      .createRule('user-1', 'acme', 'app', {
+        category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+        key: 'constraint.x',
+        text: 'Webhook handlers must be idempotent.',
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(409);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      code: 'PROJECT_MEMORY_CONFLICT',
+    });
+
+    // Other database errors are not disguised as conflicts.
+    prisma.projectMemory.create.mockRejectedValueOnce(
+      Object.assign(new Error('connection lost'), { code: 'P1001' }),
+    );
+    await expect(
+      service.createRule('user-1', 'acme', 'app', {
+        category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+        key: 'constraint.y',
+        text: 'Use pnpm.',
+      }),
+    ).rejects.toThrow('connection lost');
   });
 
   it('rejects create rule when GitHub token is missing', async () => {
@@ -304,19 +340,36 @@ describe('ProjectMemoryService', () => {
     expect(redis.del).toHaveBeenCalledWith('pm:cand:user-1:acme:app:cand-1');
   });
 
-  it('denies access when GitHub returns 404 for the repository', async () => {
+  it('GitHub-dependent operations are denied when GitHub returns 404 for the repository', async () => {
     global.fetch = vi.fn(async () =>
       Response.json({ message: 'Not Found' }, { status: 404 }),
     ) as typeof fetch;
 
     try {
-      await service.list('user-1', 'acme', 'secret-repo');
+      await service.createRule('user-1', 'acme', 'secret-repo', {
+        category: ProjectMemoryCategory.PROJECT_CONSTRAINT,
+        text: 'Use pnpm.',
+      });
       expect.fail('expected throw');
     } catch (err) {
       const body = (err as HttpException).getResponse() as { code?: string };
       expect(body.code).toBe('PROJECT_MEMORY_ACCESS_DENIED');
     }
-    expect(prisma.projectMemory.findMany).not.toHaveBeenCalled();
+    expect(prisma.projectMemory.create).not.toHaveBeenCalled();
+  });
+
+  it('reading stored memory needs no GitHub call (no token or a GitHub 404 does not block it)', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ message: 'Not Found' }, { status: 404 }));
+    global.fetch = fetchMock as typeof fetch;
+    githubConnections.getDecryptedToken.mockResolvedValue(null as never);
+    prisma.projectMemory.findMany.mockResolvedValue([memoryRow()]);
+
+    const listed = await service.list('user-1', 'acme', 'app');
+    expect(listed.items.map((i) => i.id)).toEqual(['mem-1']);
+    await service.getProfile('user-1', 'acme', 'app');
+    await service.getSummary('user-1', 'acme', 'app', 'PR_REVIEW');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(githubConnections.getDecryptedToken).not.toHaveBeenCalled();
   });
 
   it('does not wipe memory on transient GitHub network failure', async () => {

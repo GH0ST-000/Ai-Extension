@@ -4,6 +4,12 @@ import type { ObservabilityContext } from '@project-x/types';
 
 export type RequestContextStore = ObservabilityContext & {
   sampled?: boolean;
+  /**
+   * True when the request carried a non-empty X-Workspace-Id that failed format validation.
+   * `workspaceId` is left unset in that case, so this flag is what stops callers from
+   * treating a malformed header as "absent" and falling back to another workspace.
+   */
+  workspaceHeaderInvalid?: boolean;
 };
 
 const storage = new AsyncLocalStorage<RequestContextStore>();
@@ -12,6 +18,11 @@ const storage = new AsyncLocalStorage<RequestContextStore>();
 export function peekRequestWorkspaceId(): string | undefined {
   const workspaceId = storage.getStore()?.workspaceId;
   return typeof workspaceId === 'string' && workspaceId.length > 0 ? workspaceId : undefined;
+}
+
+/** True when the active request sent a malformed X-Workspace-Id header. */
+export function peekRequestWorkspaceHeaderInvalid(): boolean {
+  return storage.getStore()?.workspaceHeaderInvalid === true;
 }
 
 /**

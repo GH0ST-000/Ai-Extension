@@ -1,0 +1,27 @@
+{
+  "id": "request-principal-userid",
+  "title": "Delete handler uses the authenticated principal (no bug)",
+  "repository": "benchmark/phase1",
+  "pullRequest": "request-principal-userid",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/notes/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notes/notes.handler.ts",
+      "physical": "notes.handler.ts",
+      "changed": true,
+      "status": "added"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

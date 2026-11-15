@@ -1,0 +1,56 @@
+{
+  "id": "null-and-swallowed",
+  "title": "Owner notification: null owner crash and swallowed send failure",
+  "repository": "benchmark/phase1",
+  "pullRequest": "null-and-swallowed",
+  "groups": [
+    "correctness"
+  ],
+  "clean": false,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/notifications/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/notifications/notify.ts",
+      "physical": "notify.ts",
+      "changed": true,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [
+    {
+      "id": "null-and-swallowed/null-owner",
+      "path": "apps/api/src/notifications/notify.ts",
+      "lines": [
+        12,
+        12
+      ],
+      "category": "correctness",
+      "severity": "medium",
+      "security": false,
+      "changeType": "introduced",
+      "description": "A workspace without an owner (or an owner without displayName) throws a TypeError.",
+      "witness": "witness.spec.ts \u203a a workspace without an owner crashes"
+    },
+    {
+      "id": "null-and-swallowed/swallowed-send",
+      "path": "apps/api/src/notifications/notify.ts",
+      "lines": [
+        15,
+        17
+      ],
+      "category": "correctness",
+      "severity": "medium",
+      "security": false,
+      "changeType": "introduced",
+      "description": "A failed send is swallowed and reported as sent: true.",
+      "witness": "witness.spec.ts \u203a a failed send is reported as sent"
+    }
+  ],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

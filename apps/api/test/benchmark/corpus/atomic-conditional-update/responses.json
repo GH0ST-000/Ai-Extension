@@ -1,0 +1,93 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/events/tickets.ts",
+            "lineStart": 8,
+            "lineEnd": 8,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Concurrent reservations can oversell tickets",
+            "explanation": "The remaining count is checked and decremented without a lock, so parallel requests can oversell.",
+            "evidence": "const reserved = await db.event.updateMany({",
+            "changeType": "introduced",
+            "trigger": "Many reservations for the last ticket",
+            "failurePath": "updateMany \u2192 count check",
+            "violatedInvariant": "Tickets are never oversold",
+            "impact": "Oversold events",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Concurrent reservations can oversell tickets": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "where: { id: eventId, remaining: { gt: 0 } },\ndata: { remaining: { decrement: 1 } },",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    },
+    {
+      "id": "adversarial-confirmation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/events/tickets.ts",
+            "lineStart": 8,
+            "lineEnd": 8,
+            "category": "data_integrity",
+            "severity": "high",
+            "confidence": "high",
+            "title": "Concurrent reservations can oversell tickets",
+            "explanation": "The remaining count is checked and decremented without a lock, so parallel requests can oversell.",
+            "evidence": "const reserved = await db.event.updateMany({",
+            "changeType": "introduced",
+            "trigger": "Many reservations for the last ticket",
+            "failurePath": "updateMany \u2192 count check",
+            "violatedInvariant": "Tickets are never oversold",
+            "impact": "Oversold events",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "Concurrent reservations can oversell tickets": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (reserved.count === 0) {",
+          "failureSite": "apps/api/src/events/tickets.ts:7",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "Many reservations for the last ticket",
+          "violatedInvariant": "Tickets are never oversold",
+          "triggerSource": "export async function reserveTicket(db: EventDb, eventId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (reserved.count === 0) {",
+              "whyNotPreventing": "Checked after the decrement."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

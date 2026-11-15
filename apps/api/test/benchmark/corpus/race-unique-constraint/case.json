@@ -1,0 +1,33 @@
+{
+  "id": "race-unique-constraint",
+  "title": "Return the existing invite when a concurrent invite wins the unique constraint",
+  "repository": "benchmark/phase1",
+  "pullRequest": "race-unique-constraint",
+  "groups": [
+    "clean"
+  ],
+  "clean": true,
+  "securityRegression": false,
+  "files": [
+    {
+      "path": "apps/api/src/invites/db.ts",
+      "physical": "db.ts",
+      "changed": false,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/invites/invites.service.ts",
+      "physical": "invites.service.ts",
+      "changed": true,
+      "status": "modified"
+    },
+    {
+      "path": "apps/api/src/invites/schema.prisma",
+      "physical": "schema.prisma",
+      "changed": false,
+      "status": "modified"
+    }
+  ],
+  "groundTruth": [],
+  "groundTruthSource": "executable witness (witness.spec.ts): the defect is demonstrated on head/ and absent from fixed/ (clean cases: head/ behaves correctly)"
+}

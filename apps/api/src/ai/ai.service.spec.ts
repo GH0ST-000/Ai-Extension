@@ -7,6 +7,7 @@ import type { SettingsService } from '../settings/settings.service';
 import { AiService } from './ai.service';
 import { PromptRegistry } from './prompts/prompt.registry';
 import type { AiModelFactory } from './models/ai-model.factory';
+import { usageStub } from './pr-review/pr-review-fixtures';
 
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
@@ -60,6 +61,7 @@ describe('AiService', () => {
   };
 
   const usage = {
+    ...usageStub(),
     consume: vi.fn().mockResolvedValue({
       allowed: true,
       metric: 'ai_action',
@@ -228,5 +230,130 @@ describe('AiService', () => {
 
     expect(handle.pipeTextStreamToResponse).toBeTypeOf('function');
     expect(streamTextMock).toHaveBeenCalledOnce();
+  });
+
+  describe('usage settlement (server-controlled reservations)', () => {
+    type StreamOptions = {
+      onChunk: (e: { chunk: { type: string } }) => void;
+      onFinish: (e: { text: string; usage?: unknown }) => void;
+      onError: (e: { error: unknown }) => void;
+      onAbort: () => void;
+    };
+    const lastOptions = () => streamTextMock.mock.calls.at(-1)![0] as StreamOptions;
+    const spies = () => ({
+      reserve: vi.spyOn(usage, 'reserve'),
+      commit: vi.spyOn(usage, 'commit'),
+      release: vi.spyOn(usage, 'releaseReservation'),
+    });
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      streamTextMock.mockReturnValue({ pipeTextStreamToResponse: vi.fn() });
+    });
+
+    it('reserves under a server-chosen operation id; a client executionId is never billing identity', async () => {
+      const s = spies();
+      generateTextMock.mockResolvedValue({ text: 'ok', usage: {} });
+      await service.generateAction('user-1', {
+        action: AIAction.EXPLAIN,
+        text: 'Hello',
+        executionId: 'exec-client',
+      });
+      const arg = s.reserve.mock.calls[0]![0];
+      expect(arg).toMatchObject({ userId: 'user-1', operationId: expect.any(String) });
+      expect(JSON.stringify(arg)).not.toContain('exec-client');
+      expect(s.commit).toHaveBeenCalledTimes(1);
+      expect(s.release).not.toHaveBeenCalled();
+    });
+
+    it('a failed generation is refunded, never committed', async () => {
+      const s = spies();
+      generateTextMock.mockRejectedValue(new Error('provider down'));
+      await expect(
+        service.generateAction('user-1', { action: AIAction.EXPLAIN, text: 'Hello' }),
+      ).rejects.toBeTruthy();
+      expect(s.release).toHaveBeenCalledTimes(1);
+      expect(s.commit).not.toHaveBeenCalled();
+    });
+
+    it('the first streamed output records delivery (owed even if the process dies later)', async () => {
+      const marked = vi.spyOn(usage, 'markDelivered');
+      await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'Hello' });
+      const o = lastOptions();
+      o.onChunk({ chunk: { type: 'text-delta' } });
+      o.onChunk({ chunk: { type: 'text-delta' } });
+      await vi.waitFor(() => expect(marked).toHaveBeenCalledTimes(1));
+    });
+
+    it('pipe: delivery is recorded before the first byte reaches the client', async () => {
+      const order: string[] = [];
+      vi.spyOn(usage, 'markDelivered').mockImplementation(async () => {
+        order.push('delivered');
+        return true;
+      });
+      async function* textStream() {
+        yield 'Hello';
+        yield ' world';
+      }
+      streamTextMock.mockReturnValue({ textStream: textStream() });
+      const response = {
+        statusCode: 0,
+        writableEnded: false,
+        setHeader: vi.fn(),
+        write: vi.fn((t: string) => order.push(`write:${t}`)),
+        end: vi.fn(function (this: { writableEnded: boolean }) {
+          this.writableEnded = true;
+        }),
+      };
+      await service.pipeActionStream(
+        'user-1',
+        { action: AIAction.EXPLAIN, text: 'Hello' },
+        response as never,
+      );
+      expect(order).toEqual(['delivered', 'write:Hello', 'write: world']);
+      expect(response.setHeader).toHaveBeenCalledWith('X-AI-Operation-Id', expect.any(String));
+    });
+
+    it('a stream that delivers output is committed once', async () => {
+      const s = spies();
+      await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'Hello' });
+      const o = lastOptions();
+      o.onChunk({ chunk: { type: 'text-delta' } });
+      o.onFinish({ text: 'answer' });
+      o.onAbort(); // late callbacks never settle twice
+      await vi.waitFor(() => expect(s.commit).toHaveBeenCalledTimes(1));
+      expect(s.release).not.toHaveBeenCalled();
+    });
+
+    it('a stream that fails or is aborted before any output is refunded', async () => {
+      const s = spies();
+      await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'A' });
+      lastOptions().onError({ error: new Error('boom') });
+      await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'B' });
+      lastOptions().onAbort();
+      await vi.waitFor(() => expect(s.release).toHaveBeenCalledTimes(2));
+      expect(s.commit).not.toHaveBeenCalled();
+    });
+
+    it('a stream aborted after output was delivered is charged (partial delivery)', async () => {
+      const s = spies();
+      await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'Hello' });
+      const o = lastOptions();
+      o.onChunk({ chunk: { type: 'text-delta' } });
+      o.onAbort();
+      await vi.waitFor(() => expect(s.commit).toHaveBeenCalledTimes(1));
+      expect(s.release).not.toHaveBeenCalled();
+    });
+
+    it('a stream that cannot start is refunded', async () => {
+      const s = spies();
+      streamTextMock.mockImplementation(() => {
+        throw new Error('cannot start');
+      });
+      await expect(
+        service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'Hello' }),
+      ).rejects.toBeTruthy();
+      await vi.waitFor(() => expect(s.release).toHaveBeenCalledTimes(1));
+    });
   });
 });

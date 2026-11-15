@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type {
   ProjectSystem as ProjectSystemRow,
@@ -74,7 +75,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
 import { FeatureGate } from '../entitlements/feature-gate';
 import { EntitlementService } from '../entitlements/entitlements.service';
-import { UsageService } from '../usage/usage.service';
+import { UsageService, withRetry } from '../usage/usage.service';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
 import { GithubAccessService } from '../github-app/github-access.service';
 import { multiRepoException } from './multi-repo.errors';
@@ -495,24 +496,48 @@ export class MultiRepoService {
     };
   }
 
+  /**
+   * One analysis = one unit, charged only when it completes: reserved up front (quota is
+   * enforced atomically), committed on success, refunded when the analysis fails.
+   */
+  private async charged<T>(workspaceId: string, userId: string, run: () => Promise<T>): Promise<T> {
+    const reservation = await this.usage.reserve({
+      workspaceId,
+      userId,
+      metric: 'multi_repo_analysis',
+      operationId: randomUUID(),
+    });
+    // Analyses can outlast a lease: keep it alive so recovery never settles a running one.
+    const stopHeartbeat = this.usage.startHeartbeat(reservation);
+    let result: T;
+    try {
+      result = await run();
+    } catch (error) {
+      stopHeartbeat();
+      await withRetry(() => this.usage.releaseReservation(reservation)).catch(() => false);
+      throw error;
+    }
+    stopHeartbeat();
+    // Idempotent; if it still fails, the expired lease is recovered later (refund, logged).
+    await withRetry(() => this.usage.commit(reservation)).catch(() => false);
+    return result;
+  }
+
   async discoverRelationships(
     userId: string,
     systemId: string,
   ): Promise<DiscoverRelationshipsResponse> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
-    await this.usage.consume({
-      workspaceId,
-      metric: 'multi_repo_analysis',
-      quantity: 1,
+    return this.charged(workspaceId, userId, async () => {
+      const discovery = await this.runDiscovery(userId, systemId);
+      return {
+        systemId,
+        relationships: discovery.relationships,
+        candidates: discovery.candidates,
+        truncated: discovery.truncated,
+      };
     });
-    const discovery = await this.runDiscovery(userId, systemId);
-    return {
-      systemId,
-      relationships: discovery.relationships,
-      candidates: discovery.candidates,
-      truncated: discovery.truncated,
-    };
   }
 
   async buildArchitectureContext(
@@ -620,179 +645,177 @@ export class MultiRepoService {
   ): Promise<MultiRepoChangeImpactAnalysis> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
-    await this.usage.consume({
-      workspaceId,
-      metric: 'multi_repo_analysis',
-      quantity: 1,
-    });
-    const system = await this.requireSystem(userId, input.systemId);
-    const primary = normalizeOwnerRepo(input.owner, input.repository);
-    const primaryIdentity = toRepositoryIdentity(primary.owner, primary.repository);
+    return this.charged(workspaceId, userId, async () => {
+      const system = await this.requireSystem(userId, input.systemId);
+      const primary = normalizeOwnerRepo(input.owner, input.repository);
+      const primaryIdentity = toRepositoryIdentity(primary.owner, primary.repository);
 
-    const enabledIdentities = system.repositories
-      .filter((r) => r.enabled)
-      .map((r) => toRepositoryIdentity(r.owner, r.repository));
+      const enabledIdentities = system.repositories
+        .filter((r) => r.enabled)
+        .map((r) => toRepositoryIdentity(r.owner, r.repository));
 
-    const selection = input.repositoryIds?.length
-      ? validateAnalysisRepositorySelection(
-          input.repositoryIds.map((id) => {
-            const [owner, repository] = id.includes('/') ? id.split('/') : ['', id];
-            const parsed =
-              parseOwnerRepo(id) ?? normalizeOwnerRepo(owner || primary.owner, repository || id);
-            return toRepositoryIdentity(parsed.owner, parsed.repository);
-          }),
-          enabledIdentities,
-        )
-      : {
-          ok: true as const,
-          value: truncateToBudget(
-            [
-              primaryIdentity,
-              ...enabledIdentities.filter((r) => !sameRepository(r, primaryIdentity)),
-            ],
-            MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
-          ).items,
+      const selection = input.repositoryIds?.length
+        ? validateAnalysisRepositorySelection(
+            input.repositoryIds.map((id) => {
+              const [owner, repository] = id.includes('/') ? id.split('/') : ['', id];
+              const parsed =
+                parseOwnerRepo(id) ?? normalizeOwnerRepo(owner || primary.owner, repository || id);
+              return toRepositoryIdentity(parsed.owner, parsed.repository);
+            }),
+            enabledIdentities,
+          )
+        : {
+            ok: true as const,
+            value: truncateToBudget(
+              [
+                primaryIdentity,
+                ...enabledIdentities.filter((r) => !sameRepository(r, primaryIdentity)),
+              ],
+              MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
+            ).items,
+          };
+
+      if (!selection.ok) {
+        throw multiRepoException(selection.code, selection.message);
+      }
+
+      const invented = assertNoInventedRepositories(selection.value, enabledIdentities);
+      if (!invented.ok) {
+        throw multiRepoException(invented.code, invented.message);
+      }
+
+      const context = await this.buildArchitectureContext(userId, input.systemId, {
+        maxRepos: MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
+      });
+
+      const unavailable = context.repositories.filter((r) => !r.available).map((r) => r.repository);
+      const analyzed = context.repositories.filter((r) => r.available).map((r) => r.repository);
+
+      const identifiers = await this.extractChangeIdentifiers(userId, input, primary);
+      const relationships = context.relationships.filter(
+        (rel) =>
+          sameRepository(rel.from, primaryIdentity) || sameRepository(rel.to, primaryIdentity),
+      );
+
+      const analysis = buildChangeImpactSkeleton({
+        systemId: input.systemId,
+        primaryRepository: primaryIdentity,
+        summary: input.summary?.trim() || 'Change impact analysis for selected repositories.',
+        pullRequestNumber: input.pullRequestNumber,
+        headSha: input.headSha,
+        repositoriesAnalyzed: analyzed,
+      });
+      analysis.scope.repositoriesUnavailable = unavailable;
+      analysis.scope.truncated = context.scope.truncated;
+      analysis.scope.version = context.version;
+
+      const impacted: MultiRepoImpactItem[] = [];
+      const seen = new Set<string>();
+
+      for (const rel of relationships) {
+        const other = sameRepository(rel.from, primaryIdentity) ? rel.to : rel.from;
+        if (sameRepository(other, primaryIdentity)) continue;
+        if (
+          !analyzed.some((r) => sameRepository(r, other)) &&
+          !unavailable.some((r) => sameRepository(r, other))
+        ) {
+          continue;
+        }
+        if (unavailable.some((r) => sameRepository(r, other))) continue;
+
+        const matched = this.relationshipMatchesIdentifiers(rel, identifiers);
+        const key = repositoryKey(other);
+        if (seen.has(key) && !matched) continue;
+
+        const evidence: MultiRepoEvidence[] = matched
+          ? [
+              {
+                repository: primaryIdentity,
+                type: rel.resource?.kind === 'kafka_topic' ? 'kafka_topic' : 'api_operation',
+                ref: rel.resource?.key ?? rel.type,
+                path: rel.provenance[0]?.filePath,
+                summary: rel.provenance[0]?.summary ?? `Relationship ${rel.type}`,
+                trust: 'deterministic_source',
+              },
+            ]
+          : [];
+
+        const requiresChange: MultiRepoRequiresChange = evidence.length > 0 ? 'yes' : 'not_evident';
+        const impactType = this.impactTypeForRelationship(rel.type);
+        const item: MultiRepoImpactItem = {
+          repository: other,
+          likelihood:
+            evidence.length > 0 ? (rel.confidence === 'high' ? 'high' : 'medium') : 'uncertain',
+          impactType,
+          summary:
+            evidence.length > 0
+              ? `${knownInSelectedScope('impacted repositories')} ${rel.type} via ${rel.resource?.key ?? 'relationship'}.`
+              : notEvidentInScope('Cross-repo impact'),
+          evidence,
+          requiresChange,
         };
 
-    if (!selection.ok) {
-      throw multiRepoException(selection.code, selection.message);
-    }
-
-    const invented = assertNoInventedRepositories(selection.value, enabledIdentities);
-    if (!invented.ok) {
-      throw multiRepoException(invented.code, invented.message);
-    }
-
-    const context = await this.buildArchitectureContext(userId, input.systemId, {
-      maxRepos: MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
-    });
-
-    const unavailable = context.repositories.filter((r) => !r.available).map((r) => r.repository);
-    const analyzed = context.repositories.filter((r) => r.available).map((r) => r.repository);
-
-    const identifiers = await this.extractChangeIdentifiers(userId, input, primary);
-    const relationships = context.relationships.filter(
-      (rel) => sameRepository(rel.from, primaryIdentity) || sameRepository(rel.to, primaryIdentity),
-    );
-
-    const analysis = buildChangeImpactSkeleton({
-      systemId: input.systemId,
-      primaryRepository: primaryIdentity,
-      summary: input.summary?.trim() || 'Change impact analysis for selected repositories.',
-      pullRequestNumber: input.pullRequestNumber,
-      headSha: input.headSha,
-      repositoriesAnalyzed: analyzed,
-    });
-    analysis.scope.repositoriesUnavailable = unavailable;
-    analysis.scope.truncated = context.scope.truncated;
-    analysis.scope.version = context.version;
-
-    const impacted: MultiRepoImpactItem[] = [];
-    const seen = new Set<string>();
-
-    for (const rel of relationships) {
-      const other = sameRepository(rel.from, primaryIdentity) ? rel.to : rel.from;
-      if (sameRepository(other, primaryIdentity)) continue;
-      if (
-        !analyzed.some((r) => sameRepository(r, other)) &&
-        !unavailable.some((r) => sameRepository(r, other))
-      ) {
-        continue;
-      }
-      if (unavailable.some((r) => sameRepository(r, other))) continue;
-
-      const matched = this.relationshipMatchesIdentifiers(rel, identifiers);
-      const key = repositoryKey(other);
-      if (seen.has(key) && !matched) continue;
-
-      const evidence: MultiRepoEvidence[] = matched
-        ? [
-            {
-              repository: primaryIdentity,
-              type: rel.resource?.kind === 'kafka_topic' ? 'kafka_topic' : 'api_operation',
-              ref: rel.resource?.key ?? rel.type,
-              path: rel.provenance[0]?.filePath,
-              summary: rel.provenance[0]?.summary ?? `Relationship ${rel.type}`,
-              trust: 'deterministic_source',
-            },
-          ]
-        : [];
-
-      const requiresChange: MultiRepoRequiresChange = evidence.length > 0 ? 'yes' : 'not_evident';
-      const impactType = this.impactTypeForRelationship(rel.type);
-      const item: MultiRepoImpactItem = {
-        repository: other,
-        likelihood:
-          evidence.length > 0 ? (rel.confidence === 'high' ? 'high' : 'medium') : 'uncertain',
-        impactType,
-        summary:
-          evidence.length > 0
-            ? `${knownInSelectedScope('impacted repositories')} ${rel.type} via ${rel.resource?.key ?? 'relationship'}.`
-            : notEvidentInScope('Cross-repo impact'),
-        evidence,
-        requiresChange,
-      };
-
-      if (seen.has(key)) {
-        const existing = impacted.find((i) => sameRepository(i.repository, other));
-        if (existing && evidence.length > 0 && existing.requiresChange !== 'yes') {
-          existing.requiresChange = 'yes';
-          existing.evidence = evidence;
-          existing.summary = item.summary;
-          existing.likelihood = item.likelihood;
-          existing.impactType = impactType;
+        if (seen.has(key)) {
+          const existing = impacted.find((i) => sameRepository(i.repository, other));
+          if (existing && evidence.length > 0 && existing.requiresChange !== 'yes') {
+            existing.requiresChange = 'yes';
+            existing.evidence = evidence;
+            existing.summary = item.summary;
+            existing.likelihood = item.likelihood;
+            existing.impactType = impactType;
+          }
+          continue;
         }
-        continue;
+        seen.add(key);
+        impacted.push(item);
       }
-      seen.add(key);
-      impacted.push(item);
-    }
 
-    // Compatibility helpers for topic rename / required fields when identifiers hint them.
-    for (const rename of identifiers.topicRenames) {
-      const compat = compareTopicRename(rename.before, rename.after, []);
-      if (compat.status === 'breaking_evidence' || compat.status === 'potentially_breaking') {
-        analysis.contractImpacts.push({
-          kind: 'kafka',
-          key: `${rename.before}->${rename.after}`,
-          changeSummary: compat.reasons[0]?.summary ?? 'Topic rename detected.',
-          compatibility: compat.status,
-        });
+      // Compatibility helpers for topic rename / required fields when identifiers hint them.
+      for (const rename of identifiers.topicRenames) {
+        const compat = compareTopicRename(rename.before, rename.after, []);
+        if (compat.status === 'breaking_evidence' || compat.status === 'potentially_breaking') {
+          analysis.contractImpacts.push({
+            kind: 'kafka',
+            key: `${rename.before}->${rename.after}`,
+            changeSummary: compat.reasons[0]?.summary ?? 'Topic rename detected.',
+            compatibility: compat.status,
+          });
+        }
       }
-    }
-    for (const http of identifiers.httpRequiredFieldAdds) {
-      const compat = compareHttpRequiredFieldsAdded(http.before, http.after, []);
-      if (compat.status !== 'compatible') {
-        analysis.contractImpacts.push({
-          kind: 'http',
-          key: http.path,
-          changeSummary: compat.reasons.map((r) => r.summary).join(' '),
-          compatibility: compat.status,
-        });
+      for (const http of identifiers.httpRequiredFieldAdds) {
+        const compat = compareHttpRequiredFieldsAdded(http.before, http.after, []);
+        if (compat.status !== 'compatible') {
+          analysis.contractImpacts.push({
+            kind: 'http',
+            key: http.path,
+            changeSummary: compat.reasons.map((r) => r.summary).join(' '),
+            compatibility: compat.status,
+          });
+        }
       }
-    }
 
-    analysis.impactedRepositories = impacted.filter((i) => i.requiresChange === 'yes');
-    analysis.unaffectedOrNotEvident = enabledIdentities
-      .filter(
-        (repo) =>
-          !sameRepository(repo, primaryIdentity) &&
-          !analysis.impactedRepositories.some((i) => sameRepository(i.repository, repo)),
-      )
-      .map((repository) => ({
-        repository,
-        reason: unavailable.some((u) => sameRepository(u, repository))
-          ? partialScopeUnavailable(`${repository.owner}/${repository.repository}`)
-          : notEvidentInScope('Impact'),
+      analysis.impactedRepositories = impacted.filter((i) => i.requiresChange === 'yes');
+      analysis.unaffectedOrNotEvident = enabledIdentities
+        .filter(
+          (repo) =>
+            !sameRepository(repo, primaryIdentity) &&
+            !analysis.impactedRepositories.some((i) => sameRepository(i.repository, repo)),
+        )
+        .map((repository) => ({
+          repository,
+          reason: unavailable.some((u) => sameRepository(u, repository))
+            ? partialScopeUnavailable(`${repository.owner}/${repository.repository}`)
+            : notEvidentInScope('Impact'),
+        }));
+
+      analysis.requiredCoordination = analysis.impactedRepositories.map((item) => ({
+        repository: item.repository,
+        reason: item.summary,
+        suggestedAction: 'Review consumers/providers in the selected system before merge.',
       }));
 
-    analysis.requiredCoordination = analysis.impactedRepositories.map((item) => ({
-      repository: item.repository,
-      reason: item.summary,
-      suggestedAction: 'Review consumers/providers in the selected system before merge.',
-    }));
-
-    return analysis;
+      return analysis;
+    });
   }
 
   async traceSystemFlow(userId: string, input: TraceSystemFlowRequest): Promise<SystemFlowTrace> {

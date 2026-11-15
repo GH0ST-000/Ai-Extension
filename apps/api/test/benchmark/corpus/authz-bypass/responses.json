@@ -1,0 +1,97 @@
+{
+  "provenance": "scripted",
+  "note": "Scripted model responses (not captured from a live model). They exercise the deterministic pipeline: a correct, grounded verifier in \"baseline\"; wrong refutations of real bugs in \"adversarial-refutation\"; wrong confirmations of clean code (fabricated paths, stitched quotes) in \"adversarial-confirmation\".",
+  "model": null,
+  "capturedAt": null,
+  "runs": [
+    {
+      "id": "baseline",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 12,
+            "lineEnd": 12,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "deleteNote no longer verifies workspace membership",
+            "explanation": "The PR removed the membership lookup and FORBIDDEN branch, so the note is deleted for any caller.",
+            "evidence": "if (!membership) {\nthrow new Error('FORBIDDEN');",
+            "changeType": "removed_safeguard",
+            "trigger": "A user who is not a member of ws1 calls deleteNote with a ws1 note id",
+            "failurePath": "notes.service.ts: findUnique \u2192 (removed membership check) \u2192 delete",
+            "violatedInvariant": "Only members of the note workspace can delete it",
+            "impact": "Cross-workspace deletion of notes",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "deleteNote no longer verifies workspace membership": {
+          "verdict": "confirmed",
+          "severity": "high",
+          "reasoning": "scripted confirmed",
+          "decisiveCode": "if (!note) {\nawait db.note.delete({ where: { id: noteId } });",
+          "failureSite": "apps/api/src/notes/notes.service.ts:12",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "A non-member deletes a ws1 note by id",
+          "violatedInvariant": "Only workspace members delete notes",
+          "triggerSource": "export async function deleteNote(db: NotesDb, userId: string, noteId: string): Promise<void> {",
+          "guardsOnPath": [
+            {
+              "code": "if (!note) {",
+              "whyNotPreventing": "Only rejects a missing note; any existing note of another workspace passes."
+            },
+            {
+              "code": "if (!membership) {",
+              "whyNotPreventing": "This membership check was deleted by the PR and no longer runs."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "adversarial-refutation",
+      "batch": {
+        "summary": "scripted batch",
+        "findings": [
+          {
+            "path": "apps/api/src/notes/notes.service.ts",
+            "lineStart": 12,
+            "lineEnd": 12,
+            "category": "security",
+            "severity": "high",
+            "confidence": "high",
+            "title": "deleteNote no longer verifies workspace membership",
+            "explanation": "The PR removed the membership lookup and FORBIDDEN branch, so the note is deleted for any caller.",
+            "evidence": "if (!membership) {\nthrow new Error('FORBIDDEN');",
+            "changeType": "removed_safeguard",
+            "trigger": "A user who is not a member of ws1 calls deleteNote with a ws1 note id",
+            "failurePath": "notes.service.ts: findUnique \u2192 (removed membership check) \u2192 delete",
+            "violatedInvariant": "Only members of the note workspace can delete it",
+            "impact": "Cross-workspace deletion of notes",
+            "assumptions": "",
+            "missingContext": ""
+          }
+        ]
+      },
+      "verify": {
+        "deleteNote no longer verifies workspace membership": {
+          "verdict": "refuted",
+          "severity": "low",
+          "reasoning": "scripted refuted",
+          "decisiveCode": "if (!note) {\nthrow new Error('NOT_FOUND');",
+          "failureSite": "",
+          "dependsOnCodeNotShown": false,
+          "reachableTrigger": "",
+          "violatedInvariant": "",
+          "triggerSource": "",
+          "guardsOnPath": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+diff --git a/apps/api/src/events/tickets.ts b/apps/api/src/events/tickets.ts
+--- a/apps/api/src/events/tickets.ts
++++ b/apps/api/src/events/tickets.ts
+@@ -4,9 +4,12 @@ export type Event = { id: string; remaining: number };
+ export type EventDb = { event: Table<Event> };
+ 
+ export async function reserveTicket(db: EventDb, eventId: string): Promise<void> {
+-  const event = await db.event.findUnique({ where: { id: eventId } });
+-  if (!event || event.remaining <= 0) {
++  // One statement: the stock check and the decrement cannot interleave with another request.
++  const reserved = await db.event.updateMany({
++    where: { id: eventId, remaining: { gt: 0 } },
++    data: { remaining: { decrement: 1 } },
++  });
++  if (reserved.count === 0) {
+     throw new Error('SOLD_OUT');
+   }
+-  await db.event.update({ where: { id: eventId }, data: { remaining: event.remaining - 1 } });
+ }

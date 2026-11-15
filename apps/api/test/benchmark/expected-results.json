@@ -1,0 +1,3671 @@
+{
+  "baseline": {
+    "cases": {
+      "atomic-conditional-update": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Concurrent reservations can oversell tickets",
+            "path": "apps/api/src/events/tickets.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              8,
+              8
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3260,
+          "output": 234,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006294,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "authz-bypass": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote no longer verifies workspace membership",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "authz-bypass/delete-without-membership",
+            "validation": "passed",
+            "lines": [
+              15,
+              16
+            ],
+            "gateNotes": [
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "authz-bypass/delete-without-membership",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "deleteNote no longer verifies workspace membership"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2968,
+          "output": 373,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.000669,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "clean-defensive": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Missing member is silently ignored",
+            "path": "apps/api/src/members/members.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              19,
+              19
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "restates_evidence",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "Owner check may not handle role changes",
+            "path": "apps/api/src/members/members.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              14,
+              14
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": "focus_guard_branch",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "dismissed"
+          },
+          {
+            "title": "Removal errors are only logged",
+            "path": "apps/api/src/members/members.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              23,
+              24
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "insufficient_context",
+              "decision": "verifier_insufficient",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 2
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 8189,
+          "output": 618,
+          "calls": 4,
+          "verificationCalls": 3
+        },
+        "costUsd": 0.00159915,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "clean-refactor": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Refactor may change invoice rounding",
+            "path": "apps/api/src/invoices/invoice-total.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              4,
+              4
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 1,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 1,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "found"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3231,
+          "output": 240,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00062865,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "defensive-guard-bug": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Expired sessions pass the expiry check",
+            "path": "apps/api/src/auth/session.guard.ts",
+            "truth": "defensive-guard-bug/expired-session-accepted",
+            "validation": "passed",
+            "lines": [
+              9,
+              9
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "defensive-guard-bug/expired-session-accepted",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Expired sessions pass the expiry check"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3098,
+          "output": 331,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006632999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "fallback-and-async": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "A retry delay of 0 is replaced by the default",
+            "path": "apps/api/src/sync/sync.ts",
+            "truth": "fallback-and-async/zero-delay-overridden",
+            "validation": "passed",
+            "lines": [
+              7,
+              7
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          },
+          {
+            "title": "syncAll does not wait for saves",
+            "path": "apps/api/src/sync/sync.ts",
+            "truth": "fallback-and-async/unawaited-saves",
+            "validation": "passed",
+            "lines": [
+              14,
+              14
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "fallback-and-async/zero-delay-overridden",
+            "severity": "medium",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "A retry delay of 0 is replaced by the default"
+          },
+          {
+            "id": "fallback-and-async/unawaited-saves",
+            "severity": "medium",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "syncAll does not wait for saves"
+          }
+        ],
+        "report": {
+          "risk": 2,
+          "confirmed": 2,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 4852,
+          "output": 533,
+          "calls": 3,
+          "verificationCalls": 2
+        },
+        "costUsd": 0.0010476,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "guard-inverted": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership guard is inverted",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "guard-inverted/denies-members",
+            "validation": "passed",
+            "lines": [
+              15,
+              15
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "guard-inverted/denies-members",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Membership guard is inverted"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3056,
+          "output": 303,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006402,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "guard-one-role": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Guard lets guests delete notes",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "guard-one-role/guest-can-delete",
+            "validation": "passed",
+            "lines": [
+              15,
+              15
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "guard-one-role/guest-can-delete",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Guard lets guests delete notes"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3215,
+          "output": 330,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00068025,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-never-denies": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership check result is ignored before deleting the note",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "helper-never-denies/ignored-membership-result",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 1,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 1,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-never-denies/ignored-membership-result",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Membership check result is ignored before deleting the note"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 2,
+          "total": 2
+        },
+        "tokens": {
+          "input": 3892,
+          "output": 351,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007944,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-unavailable": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Note deletion relies on a membership helper that is not shown to deny",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "helper-unavailable/membership-result-ignored",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 1,
+              "failures": {
+                "not_found_or_inaccessible": 1
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "guard_unresolved",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": "unresolved",
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-unavailable/membership-result-ignored",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Note deletion relies on a membership helper that is not shown to deny"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3349,
+          "output": 342,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007075499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-wrong-user": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote checks the author's membership through the helper",
+            "path": "apps/api/src/notes/delete-note.ts",
+            "truth": "helper-wrong-user/author-passed-as-member",
+            "validation": "passed",
+            "lines": [
+              9,
+              9
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 1,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 1,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-wrong-user/author-passed-as-member",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "deleteNote checks the author's membership through the helper"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3189,
+          "output": 352,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006895499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "membership-missing-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership lookup ignores the acting user",
+            "path": "apps/api/src/workspaces/workspace-access.ts",
+            "truth": "membership-missing-userid/where-without-user",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "membership-missing-userid/where-without-user",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Membership lookup ignores the acting user"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3232,
+          "output": 311,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006714,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "membership-wrong-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote checks the author's membership, not the caller's",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "membership-wrong-userid/author-instead-of-caller",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "membership-wrong-userid/author-instead-of-caller",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "deleteNote checks the author's membership, not the caller's"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3118,
+          "output": 351,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006783,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "memory-contamination": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Ensuring Idempotence for Payment Webhook Handlers",
+            "path": "apps/api/src/invoices/invoice-total.spec.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              5,
+              5
+            ],
+            "gateNotes": [],
+            "gate": "rejected:runtime_claim_on_test_code",
+            "dependencies": null,
+            "verification": null,
+            "final": "rejected"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 1600,
+          "output": 162,
+          "calls": 1,
+          "verificationCalls": 0
+        },
+        "costUsd": 0.0003372,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "missing-tenant-filter": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "listNotes returns notes of every workspace",
+            "path": "apps/api/src/notes/notes.query.ts",
+            "truth": "missing-tenant-filter/unscoped-find-many",
+            "validation": "passed",
+            "lines": [
+              20,
+              20
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "missing-tenant-filter/unscoped-find-many",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "listNotes returns notes of every workspace"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2892,
+          "output": 306,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006173999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "missing-transaction": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Transfer debits without a transaction",
+            "path": "apps/api/src/billing/transfer.ts",
+            "truth": "missing-transaction/partial-transfer",
+            "validation": "passed",
+            "lines": [
+              20,
+              20
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "missing-transaction/partial-transfer",
+            "severity": "high",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "Transfer debits without a transaction"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3704,
+          "output": 344,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.000762,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "moved-guard": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Membership check removed from archiveNote",
+            "path": "apps/api/src/notes/archive.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              15,
+              16
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "context_only_evidence",
+              "defensive_evidence",
+              "reclassified_exposed_existing"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": "focus_guard_branch",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3450,
+          "output": 238,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006603,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "multiline-evidence": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Missing Workspace Membership Check",
+            "path": "apps/api/src/docs/notes.service.ts",
+            "truth": "multiline-evidence/delete-without-membership",
+            "validation": "passed",
+            "lines": [
+              12,
+              13
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "multiline-evidence/delete-without-membership",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Missing Workspace Membership Check"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2926,
+          "output": 317,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006291000000000001,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "null-and-swallowed": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Failed notification emails are reported as sent",
+            "path": "apps/api/src/notifications/notify.ts",
+            "truth": "null-and-swallowed/swallowed-send",
+            "validation": "passed",
+            "lines": [
+              16,
+              16
+            ],
+            "gateNotes": [
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          },
+          {
+            "title": "notifyOwner crashes when the workspace has no owner",
+            "path": "apps/api/src/notifications/notify.ts",
+            "truth": "null-and-swallowed/null-owner",
+            "validation": "passed",
+            "lines": [
+              12,
+              12
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "null-and-swallowed/null-owner",
+            "severity": "medium",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "notifyOwner crashes when the workspace has no owner"
+          },
+          {
+            "id": "null-and-swallowed/swallowed-send",
+            "severity": "medium",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "Failed notification emails are reported as sent"
+          }
+        ],
+        "report": {
+          "risk": 2,
+          "confirmed": 2,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 5147,
+          "output": 558,
+          "calls": 3,
+          "verificationCalls": 2
+        },
+        "costUsd": 0.00110685,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "pr48-known-fps": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "L4: Potential Incorrect Workspace Resolution",
+            "path": "apps/api/src/workspaces/resolve-workspace-id.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              29,
+              29
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 3,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 1,
+                "path": 1,
+                "function": 1,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "site_not_executable",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "L5: Ensuring Idempotence for Payment Webhook Handlers",
+            "path": "apps/api/src/project-memory/memory-hardening.spec.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              245,
+              245
+            ],
+            "gateNotes": [
+              "line_mismatch"
+            ],
+            "gate": "rejected:runtime_claim_on_test_code",
+            "dependencies": null,
+            "verification": null,
+            "final": "rejected"
+          },
+          {
+            "title": "L5: Incomplete default message for skipped project memory",
+            "path": "apps/extension/lib/selection/utils/project-memory-metadata.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              20,
+              20
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_range_narrowed"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "restates_evidence",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "L5: Potential PR diff fetching failure handling",
+            "path": "apps/api/src/ai/pr-review/pull-request-diff.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              105,
+              105
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 3,
+              "partial": 0,
+              "maxDepth": 2,
+              "unresolved": 7,
+              "failures": {
+                "depth_limit": 5,
+                "context_budget": 2
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 3,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 2
+            },
+            "verification": {
+              "verifierVerdict": "insufficient_context",
+              "decision": "verifier_insufficient",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "L6: Possible Inadequate User Membership Checking",
+            "path": "apps/api/src/workspaces/resolve-workspace-id.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              35,
+              35
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 3,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 3,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": "focus_guard_branch",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          },
+          {
+            "title": "L6: Potential Error Handling Gap for GitHub Diff Fetching",
+            "path": "apps/api/src/ai/pr-review/pull-request-diff.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              104,
+              104
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 3,
+              "partial": 0,
+              "maxDepth": 2,
+              "unresolved": 7,
+              "failures": {
+                "depth_limit": 5,
+                "context_budget": 2
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 3,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 2
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "restates_evidence",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "L6: Potential Management Denial Message Exposure",
+            "path": "apps/dashboard/src/app/app/memory/page.tsx",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              284,
+              284
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 4,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 2,
+              "failures": {
+                "definition_not_found": 2
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 2,
+                "function": 1,
+                "other": 1
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "depends_on_code_not_shown",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          },
+          {
+            "title": "L6: Project Memory Handling May Return Incorrect Results",
+            "path": "apps/extension/lib/project-memory/project-memory.store.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              108,
+              108
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 4,
+              "partial": 0,
+              "maxDepth": 2,
+              "unresolved": 1,
+              "failures": {
+                "not_found_or_inaccessible": 1
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 3,
+                "function": 0,
+                "other": 1
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "restates_evidence",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "found"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 6
+        },
+        "coverage": {
+          "reviewed": 8,
+          "total": 8
+        },
+        "tokens": {
+          "input": 44021,
+          "output": 1882,
+          "calls": 9,
+          "verificationCalls": 7
+        },
+        "costUsd": 0.007732349999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "race-condition": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Concurrent invitations can exceed the seat limit",
+            "path": "apps/api/src/workspaces/seats.ts",
+            "truth": "race-condition/seat-limit-exceeded",
+            "validation": "passed",
+            "lines": [
+              19,
+              19
+            ],
+            "gateNotes": [
+              "evidence_moved"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "race-condition/seat-limit-exceeded",
+            "severity": "medium",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "Concurrent invitations can exceed the seat limit"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3414,
+          "output": 330,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007101,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "race-locked": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Seat count and insert can race under concurrent invitations",
+            "path": "apps/api/src/workspaces/seats.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              17,
+              17
+            ],
+            "gateNotes": [
+              "evidence_moved"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3546,
+          "output": 257,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006861,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "race-unique-constraint": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Duplicate invites under concurrent requests (check-then-insert)",
+            "path": "apps/api/src/invites/invites.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              10,
+              10
+            ],
+            "gateNotes": [
+              "context_only_evidence",
+              "reclassified_exposed_existing"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3713,
+          "output": 271,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007195499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "request-body-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership check trusts a user id from the request body",
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "truth": "request-body-userid/client-chosen-identity",
+            "validation": "passed",
+            "lines": [
+              10,
+              10
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "complete",
+              "callers": "none_in_changed_files"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "request-body-userid/client-chosen-identity",
+            "severity": "high",
+            "security": true,
+            "outcome": "confirmed",
+            "by": "Membership check trusts a user id from the request body"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3279,
+          "output": 385,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007228499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "request-principal-userid": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Membership check may use the wrong user",
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              16,
+              16
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": "before_focus",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3605,
+          "output": 230,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00067875,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "role-check-correct": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Role check lets non-owners archive notes",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              18,
+              18
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": "focus_guard_branch",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3698,
+          "output": 242,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "tx-correct": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Credit failure leaves the debit applied (partial transfer)",
+            "path": "apps/api/src/wallet/transfer.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              20,
+              20
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refuted",
+              "outcome": "dismissed",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "dismissed"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3534,
+          "output": 240,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006741,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "tx-insufficient-isolation": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction",
+            "path": "apps/api/src/wallet/wallet.service.ts",
+            "truth": "tx-insufficient-isolation/lost-update-overdraft",
+            "validation": "passed",
+            "lines": [
+              16,
+              16
+            ],
+            "gateNotes": [
+              "change_type_corrected"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "tx-insufficient-isolation/lost-update-overdraft",
+            "severity": "high",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3353,
+          "output": 444,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007693499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "webhook-idempotency": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Redelivered payment webhooks credit the account again",
+            "path": "apps/api/src/billing/payment-webhook.ts",
+            "truth": "webhook-idempotency/double-credit",
+            "validation": "passed",
+            "lines": [
+              15,
+              15
+            ],
+            "gateNotes": [
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "confirmed",
+              "outcome": "confirmed",
+              "guardRelation": null,
+              "guardCoverage": "none_found",
+              "callers": "not_applicable"
+            },
+            "final": "confirmed"
+          }
+        ],
+        "truth": [
+          {
+            "id": "webhook-idempotency/double-credit",
+            "severity": "high",
+            "security": false,
+            "outcome": "confirmed",
+            "by": "Redelivered payment webhooks credit the account again"
+          }
+        ],
+        "report": {
+          "risk": 1,
+          "confirmed": 1,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 0
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3157,
+          "output": 367,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006937499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      }
+    },
+    "metrics": {
+      "cases": 29,
+      "truthBugs": 20,
+      "reported": 19,
+      "truePositives": 19,
+      "falsePositives": 0,
+      "precision": 1,
+      "recall": 0.95,
+      "confirmedRecall": 0.95,
+      "recallIncludingNeedsInvestigation": 1,
+      "highOrSecurityRecall": 0.933,
+      "falsePositiveRate": 0,
+      "cleanCaseFalsePositiveRate": 0,
+      "falseNegativeRate": 0.05,
+      "needsInvestigationRate": 0.237,
+      "bugsStuckInNeedsInvestigation": [
+        "helper-unavailable/membership-result-ignored"
+      ],
+      "bugsDismissed": [],
+      "bugsRejected": [],
+      "bugsNotGenerated": [],
+      "funnel": {
+        "generated": 40,
+        "passedValidation": 40,
+        "passedGates": 38,
+        "verified": 38,
+        "confirmed": 19,
+        "dismissed": 10,
+        "needsInvestigation": 9,
+        "reported": 19
+      },
+      "coverage": {
+        "reviewed": 37,
+        "total": 37,
+        "ratio": 1
+      },
+      "tokens": {
+        "input": 143688,
+        "output": 11242,
+        "calls": 68,
+        "verificationCalls": 38
+      },
+      "estimatedCostUsd": 0.028298,
+      "usageUnits": 29
+    }
+  },
+  "adversarial-refutation": {
+    "cases": {
+      "authz-bypass": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote no longer verifies workspace membership",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "authz-bypass/delete-without-membership",
+            "validation": "passed",
+            "lines": [
+              15,
+              16
+            ],
+            "gateNotes": [
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "authz-bypass/delete-without-membership",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "deleteNote no longer verifies workspace membership"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2968,
+          "output": 257,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0005993999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "defensive-guard-bug": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Expired sessions pass the expiry check",
+            "path": "apps/api/src/auth/session.guard.ts",
+            "truth": "defensive-guard-bug/expired-session-accepted",
+            "validation": "passed",
+            "lines": [
+              9,
+              9
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "defensive-guard-bug/expired-session-accepted",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Expired sessions pass the expiry check"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3098,
+          "output": 244,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006111,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "guard-inverted": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership guard is inverted",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "guard-inverted/denies-members",
+            "validation": "passed",
+            "lines": [
+              15,
+              15
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "guard-inverted/denies-members",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Membership guard is inverted"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3056,
+          "output": 203,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0005802,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "guard-one-role": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Guard lets guests delete notes",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "guard-one-role/guest-can-delete",
+            "validation": "passed",
+            "lines": [
+              15,
+              15
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "guard-one-role/guest-can-delete",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Guard lets guests delete notes"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3215,
+          "output": 225,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00061725,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-never-denies": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership check result is ignored before deleting the note",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "helper-never-denies/ignored-membership-result",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 1,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 1,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-never-denies/ignored-membership-result",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Membership check result is ignored before deleting the note"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 2,
+          "total": 2
+        },
+        "tokens": {
+          "input": 3892,
+          "output": 247,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.000732,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-unavailable": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Note deletion relies on a membership helper that is not shown to deny",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "helper-unavailable/membership-result-ignored",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [
+              "change_type_corrected",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 1,
+              "failures": {
+                "not_found_or_inaccessible": 1
+              },
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-unavailable/membership-result-ignored",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Note deletion relies on a membership helper that is not shown to deny"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3349,
+          "output": 245,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006493499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "helper-wrong-user": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote checks the author's membership through the helper",
+            "path": "apps/api/src/notes/delete-note.ts",
+            "truth": "helper-wrong-user/author-passed-as-member",
+            "validation": "passed",
+            "lines": [
+              9,
+              9
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 1,
+              "partial": 0,
+              "maxDepth": 1,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 1,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "helper-wrong-user/author-passed-as-member",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "deleteNote checks the author's membership through the helper"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3189,
+          "output": 235,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00061935,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "membership-missing-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership lookup ignores the acting user",
+            "path": "apps/api/src/workspaces/workspace-access.ts",
+            "truth": "membership-missing-userid/where-without-user",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "membership-missing-userid/where-without-user",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Membership lookup ignores the acting user"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3232,
+          "output": 255,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006378,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "membership-wrong-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "deleteNote checks the author's membership, not the caller's",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": "membership-wrong-userid/author-instead-of-caller",
+            "validation": "passed",
+            "lines": [
+              13,
+              13
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "membership-wrong-userid/author-instead-of-caller",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "deleteNote checks the author's membership, not the caller's"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3118,
+          "output": 252,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006188999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "missing-tenant-filter": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "listNotes returns notes of every workspace",
+            "path": "apps/api/src/notes/notes.query.ts",
+            "truth": "missing-tenant-filter/unscoped-find-many",
+            "validation": "passed",
+            "lines": [
+              20,
+              20
+            ],
+            "gateNotes": [],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_not_grounded",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "missing-tenant-filter/unscoped-find-many",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "listNotes returns notes of every workspace"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2892,
+          "output": 251,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0005843999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "multiline-evidence": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Missing Workspace Membership Check",
+            "path": "apps/api/src/docs/notes.service.ts",
+            "truth": "multiline-evidence/delete-without-membership",
+            "validation": "passed",
+            "lines": [
+              12,
+              13
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "multiline-evidence/delete-without-membership",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Missing Workspace Membership Check"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 2926,
+          "output": 244,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0005853,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "request-body-userid": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Membership check trusts a user id from the request body",
+            "path": "apps/api/src/notes/notes.handler.ts",
+            "truth": "request-body-userid/client-chosen-identity",
+            "validation": "passed",
+            "lines": [
+              10,
+              10
+            ],
+            "gateNotes": [
+              "defensive_evidence",
+              "line_mismatch"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_security_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": "not_established",
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "request-body-userid/client-chosen-identity",
+            "severity": "high",
+            "security": true,
+            "outcome": "needs_investigation",
+            "by": "Membership check trusts a user id from the request body"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3279,
+          "output": 250,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006418499999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "tx-insufficient-isolation": {
+        "provenance": "scripted",
+        "clean": false,
+        "candidates": [
+          {
+            "title": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction",
+            "path": "apps/api/src/wallet/wallet.service.ts",
+            "truth": "tx-insufficient-isolation/lost-update-overdraft",
+            "validation": "passed",
+            "lines": [
+              16,
+              16
+            ],
+            "gateNotes": [
+              "change_type_corrected"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "refuted",
+              "decision": "refute_concurrency_gap",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [
+          {
+            "id": "tx-insufficient-isolation/lost-update-overdraft",
+            "severity": "high",
+            "security": false,
+            "outcome": "needs_investigation",
+            "by": "Concurrent withdrawals can overdraw: read-check-write in a READ COMMITTED transaction"
+          }
+        ],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3353,
+          "output": 308,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.00068775,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      }
+    },
+    "metrics": {
+      "cases": 13,
+      "truthBugs": 13,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "precision": null,
+      "recall": 0,
+      "confirmedRecall": 0,
+      "recallIncludingNeedsInvestigation": 1,
+      "highOrSecurityRecall": 0,
+      "falsePositiveRate": null,
+      "cleanCaseFalsePositiveRate": null,
+      "falseNegativeRate": 1,
+      "needsInvestigationRate": 1,
+      "bugsStuckInNeedsInvestigation": [
+        "authz-bypass/delete-without-membership",
+        "defensive-guard-bug/expired-session-accepted",
+        "guard-inverted/denies-members",
+        "guard-one-role/guest-can-delete",
+        "helper-never-denies/ignored-membership-result",
+        "helper-unavailable/membership-result-ignored",
+        "helper-wrong-user/author-passed-as-member",
+        "membership-missing-userid/where-without-user",
+        "membership-wrong-userid/author-instead-of-caller",
+        "missing-tenant-filter/unscoped-find-many",
+        "multiline-evidence/delete-without-membership",
+        "request-body-userid/client-chosen-identity",
+        "tx-insufficient-isolation/lost-update-overdraft"
+      ],
+      "bugsDismissed": [],
+      "bugsRejected": [],
+      "bugsNotGenerated": [],
+      "funnel": {
+        "generated": 13,
+        "passedValidation": 13,
+        "passedGates": 13,
+        "verified": 13,
+        "confirmed": 0,
+        "dismissed": 0,
+        "needsInvestigation": 13,
+        "reported": 0
+      },
+      "coverage": {
+        "reviewed": 14,
+        "total": 14,
+        "ratio": 1
+      },
+      "tokens": {
+        "input": 41567,
+        "output": 3216,
+        "calls": 26,
+        "verificationCalls": 13
+      },
+      "estimatedCostUsd": 0.008165,
+      "usageUnits": 13
+    }
+  },
+  "adversarial-confirmation": {
+    "cases": {
+      "atomic-conditional-update": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Concurrent reservations can oversell tickets",
+            "path": "apps/api/src/events/tickets.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              8,
+              8
+            ],
+            "gateNotes": [
+              "unsupported_failure_path"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "concurrency_protected",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3260,
+          "output": 287,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0006611999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "race-locked": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Seat count and insert can race under concurrent invitations",
+            "path": "apps/api/src/workspaces/seats.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              17,
+              17
+            ],
+            "gateNotes": [
+              "evidence_moved"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "concurrency_protected",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "not_applicable"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3546,
+          "output": 310,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007178999999999999,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      },
+      "role-check-correct": {
+        "provenance": "scripted",
+        "clean": true,
+        "candidates": [
+          {
+            "title": "Role check lets non-owners archive notes",
+            "path": "apps/api/src/notes/notes.service.ts",
+            "truth": null,
+            "validation": "passed",
+            "lines": [
+              18,
+              18
+            ],
+            "gateNotes": [
+              "defensive_evidence"
+            ],
+            "gate": "passed",
+            "dependencies": {
+              "resolved": 0,
+              "partial": 0,
+              "maxDepth": 0,
+              "unresolved": 0,
+              "failures": {},
+              "byPath": {
+                "focus": 0,
+                "path": 0,
+                "function": 0,
+                "other": 0
+              },
+              "relevantNotShown": 0
+            },
+            "verification": {
+              "verifierVerdict": "confirmed",
+              "decision": "not_grounded",
+              "outcome": "needs_investigation",
+              "guardRelation": null,
+              "guardCoverage": null,
+              "callers": "none_in_changed_files"
+            },
+            "final": "needs_investigation"
+          }
+        ],
+        "truth": [],
+        "report": {
+          "risk": 0,
+          "confirmed": 0,
+          "unverified": 0,
+          "uncheckedLow": 0,
+          "investigation": 1
+        },
+        "coverage": {
+          "reviewed": 1,
+          "total": 1
+        },
+        "tokens": {
+          "input": 3698,
+          "output": 312,
+          "calls": 2,
+          "verificationCalls": 1
+        },
+        "costUsd": 0.0007419,
+        "usageUnits": 1,
+        "modelLatencyMs": null
+      }
+    },
+    "metrics": {
+      "cases": 3,
+      "truthBugs": 0,
+      "reported": 0,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "precision": null,
+      "recall": null,
+      "confirmedRecall": null,
+      "recallIncludingNeedsInvestigation": null,
+      "highOrSecurityRecall": null,
+      "falsePositiveRate": null,
+      "cleanCaseFalsePositiveRate": 0,
+      "falseNegativeRate": null,
+      "needsInvestigationRate": 1,
+      "bugsStuckInNeedsInvestigation": [],
+      "bugsDismissed": [],
+      "bugsRejected": [],
+      "bugsNotGenerated": [],
+      "funnel": {
+        "generated": 3,
+        "passedValidation": 3,
+        "passedGates": 3,
+        "verified": 3,
+        "confirmed": 0,
+        "dismissed": 0,
+        "needsInvestigation": 3,
+        "reported": 0
+      },
+      "coverage": {
+        "reviewed": 3,
+        "total": 3,
+        "ratio": 1
+      },
+      "tokens": {
+        "input": 10504,
+        "output": 909,
+        "calls": 6,
+        "verificationCalls": 3
+      },
+      "estimatedCostUsd": 0.002121,
+      "usageUnits": 3
+    }
+  }
+}

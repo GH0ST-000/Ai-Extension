@@ -1,5 +1,7 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { RESPONSE_STYLES, type ResponseStyle } from '@project-x/types';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 
 export class UpdateSettingsDto {
   @IsOptional()
@@ -13,6 +15,6 @@ export class UpdateSettingsDto {
   responseStyle?: ResponseStyle;
 
   @IsOptional()
-  @IsBoolean()
+  @StrictBoolean()
   includePageContext?: boolean;
 }

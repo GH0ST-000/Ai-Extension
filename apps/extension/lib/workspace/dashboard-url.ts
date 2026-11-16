@@ -18,6 +18,11 @@ export function getDashboardAppUrl(path = '/app', workspaceId?: string | null): 
   return url.toString();
 }
 
+/** Password reset lives on the dashboard; the extension only links to it. */
+export function getDashboardForgotPasswordUrl(): string {
+  return getDashboardAppUrl('/forgot-password');
+}
+
 export function getDashboardBillingUrl(workspaceId?: string | null): string {
   return getDashboardAppUrl('/app/billing', workspaceId);
 }

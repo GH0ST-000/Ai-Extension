@@ -16,7 +16,11 @@ import {
 import { AuthClientError, login, register, signOut } from './lib/services/auth-client';
 import { getStoredSessionFast } from './lib/services/auth-storage';
 import { getGithubConnection } from './lib/services/github-api';
-import { getDashboardAppUrl, getDashboardBillingUrl } from './lib/workspace/dashboard-url';
+import {
+  getDashboardAppUrl,
+  getDashboardBillingUrl,
+  getDashboardForgotPasswordUrl,
+} from './lib/workspace/dashboard-url';
 import { useWorkspaceStore } from './lib/workspace/workspace.store';
 import { WorkspaceSwitcher } from './lib/workspace/workspace-switcher';
 
@@ -545,6 +549,16 @@ function IndexPopup() {
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
+        {mode === 'login' ? (
+          <a
+            href={getDashboardForgotPasswordUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="-mt-1 text-[11px] font-semibold text-[var(--px-accent)] hover:underline"
+          >
+            Forgot password?
+          </a>
+        ) : null}
 
         {error ? <p className="text-[12px] font-medium text-red-500">{error}</p> : null}
 

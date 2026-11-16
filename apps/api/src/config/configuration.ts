@@ -59,6 +59,12 @@ export interface ApiConfig {
     /** Key material for AES-GCM encryption of per-user secrets. */
     encryptionKey: string;
   };
+  /** Transactional email via Resend; `enabled` only when both values are set. */
+  mail: {
+    resendApiKey: string;
+    from: string;
+    enabled: boolean;
+  };
   githubApp: {
     appId: string;
     privateKeyPem: string;
@@ -182,6 +188,11 @@ export default (): ApiConfig => {
     },
     secrets: {
       encryptionKey,
+    },
+    mail: {
+      resendApiKey: env.RESEND_API_KEY.trim(),
+      from: env.MAIL_FROM.trim(),
+      enabled: env.RESEND_API_KEY.trim().length > 0 && env.MAIL_FROM.trim().length > 0,
     },
     githubApp: {
       appId: env.GITHUB_APP_ID?.trim() ?? '',

@@ -127,6 +127,13 @@ export const apiEnvSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z.string().min(16).optional(),
   /** Public app URL for invite links — never trust request Host. */
   APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  /**
+   * Transactional email (Resend). Both empty = email disabled: password reset requests are
+   * accepted but no email is sent (logged as mail_not_configured). Never logged.
+   */
+  RESEND_API_KEY: z.string().optional().default(''),
+  /** Verified sender, e.g. `Project X <no-reply@mail.example.com>`. */
+  MAIL_FROM: z.string().max(320).optional().default(''),
   /** Paddle Merchant of Record — optional in development/test. */
   PADDLE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
   PADDLE_API_KEY: z.string().optional().default(''),
@@ -439,7 +446,29 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
   }
 
   issues.push(...collectGitHubAppConfigIssues(env));
+  issues.push(...collectMailConfigIssues(env));
 
+  return issues;
+}
+
+/** Mail must be fully configured or fully off; a half configuration fails at startup. */
+export function collectMailConfigIssues(env: ApiEnv): ProductionSecurityIssue[] {
+  const key = env.RESEND_API_KEY.trim();
+  const from = env.MAIL_FROM.trim();
+  if (!key && !from) return [];
+  const issues: ProductionSecurityIssue[] = [];
+  if (!key || !from) {
+    issues.push({
+      code: 'MAIL_CONFIG_PAIR',
+      message: 'RESEND_API_KEY and MAIL_FROM must both be set or both omitted.',
+    });
+  }
+  if (from && !/<[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>$|^[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+$/.test(from)) {
+    issues.push({
+      code: 'MAIL_FROM_INVALID',
+      message: 'MAIL_FROM must be an address or "Name <address>".',
+    });
+  }
   return issues;
 }
 

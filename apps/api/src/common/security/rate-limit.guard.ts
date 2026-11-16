@@ -83,7 +83,12 @@ export class RateLimitGuard implements CanActivate {
         throw error;
       }
       // Auth buckets fail closed; other buckets fail open to preserve availability.
-      if (policy.bucket === 'auth' || policy.bucket === 'billing') {
+      if (
+        policy.bucket === 'auth' ||
+        policy.bucket === 'billing' ||
+        policy.bucket === 'password_reset' ||
+        policy.bucket === 'password_reset_confirm'
+      ) {
         throw new HttpException(
           {
             statusCode: HttpStatus.SERVICE_UNAVAILABLE,

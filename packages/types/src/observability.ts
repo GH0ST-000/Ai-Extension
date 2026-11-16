@@ -168,7 +168,9 @@ export type SecurityAuditEventType =
   | 'auth.register'
   | 'auth.logout'
   | 'auth.refresh.reuse_detected'
-  | 'auth.session.invalidated';
+  | 'auth.session.invalidated'
+  | 'auth.password_reset.requested'
+  | 'auth.password_reset.completed';
 
 export type SecurityAuditOutcome = 'success' | 'failure' | 'blocked';
 

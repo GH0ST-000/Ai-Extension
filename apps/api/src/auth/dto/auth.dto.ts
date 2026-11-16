@@ -43,3 +43,24 @@ export class RefreshDto {
   @MaxLength(512)
   refreshToken?: string;
 }
+
+/** Same email normalization as registration (trim here, lowercase in the service). */
+export class PasswordResetRequestDto {
+  @Transform(trimString)
+  @IsEmail()
+  @MaxLength(255)
+  email!: string;
+}
+
+/** Same password rules as registration. */
+export class PasswordResetConfirmDto {
+  @IsString()
+  @MinLength(20)
+  @MaxLength(200)
+  token!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  newPassword!: string;
+}

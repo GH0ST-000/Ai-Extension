@@ -49,6 +49,7 @@ model User {
   createdProjectSystems ProjectSystem[] @relation("ProjectSystemCreator")
   prReviewReports  PrReviewReport[]
   projectMemoryAuditEvents ProjectMemoryAuditEvent[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -694,4 +695,23 @@ model ProjectMemoryAuditEvent {
   @@index([workspaceId, owner, repository, createdAt(sort: Desc)])
   @@index([actorUserId])
   @@map("project_memory_audit_events")
+}
+
+/**
+ * Single-use password reset tokens. Only the SHA-256 hash of the high-entropy random token is
+ * stored (never the token). Valid for 30 minutes; consumed atomically (used_at) together with
+ * the password change and session revocation. Rows are removed with the user.
+ */
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }

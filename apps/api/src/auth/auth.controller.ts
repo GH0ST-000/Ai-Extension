@@ -24,7 +24,14 @@ import {
 } from './auth-cookies';
 import { AuthService, RefreshTokenRotatedException } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
-import { LoginDto, RefreshDto, RegisterDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  PasswordResetConfirmDto,
+  PasswordResetRequestDto,
+  RefreshDto,
+  RegisterDto,
+} from './dto/auth.dto';
+import { PASSWORD_RESET_REQUEST_MESSAGE, PasswordResetService } from './password-reset.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import type { AuthRequestUser } from './jwt.strategy';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
@@ -39,7 +46,30 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService<ApiConfig, true>,
+    private readonly passwordReset: PasswordResetService,
   ) {}
+
+  /**
+   * Always 202 with the same body: whether the email belongs to an account, was throttled, or
+   * the email provider failed is never revealed. The work runs after the response.
+   */
+  @Public()
+  @Post('password-reset/request')
+  @HttpCode(202)
+  @RateLimit({ bucket: 'password_reset', limit: 5, windowSeconds: 900 })
+  requestPasswordReset(@Body() body: PasswordResetRequestDto, @Req() req: Request) {
+    this.passwordReset.requestReset(body.email, requestContext(req));
+    return { ok: true as const, message: PASSWORD_RESET_REQUEST_MESSAGE };
+  }
+
+  /** Sets the new password and signs out every session. Does not sign in. */
+  @Public()
+  @Post('password-reset/confirm')
+  @HttpCode(200)
+  @RateLimit({ bucket: 'password_reset_confirm', limit: 10, windowSeconds: 900 })
+  async confirmPasswordReset(@Body() body: PasswordResetConfirmDto, @Req() req: Request) {
+    return this.passwordReset.confirmReset(body.token, body.newPassword, requestContext(req));
+  }
 
   @Public()
   @Post('register')

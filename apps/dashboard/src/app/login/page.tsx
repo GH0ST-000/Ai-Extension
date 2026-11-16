@@ -194,9 +194,19 @@ function LoginPageContent() {
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-semibold text-ink">
-                Password
-              </label>
+              <div className="flex items-baseline justify-between gap-3">
+                <label htmlFor="password" className="text-sm font-semibold text-ink">
+                  Password
+                </label>
+                {mode === 'login' ? (
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs font-semibold text-accent underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                ) : null}
+              </div>
               <input
                 id="password"
                 name="password"

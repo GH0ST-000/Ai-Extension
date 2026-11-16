@@ -463,13 +463,39 @@ export function collectMailConfigIssues(env: ApiEnv): ProductionSecurityIssue[] 
       message: 'RESEND_API_KEY and MAIL_FROM must both be set or both omitted.',
     });
   }
-  if (from && !/<[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>$|^[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+$/.test(from)) {
+  if (from && !isValidMailFrom(from)) {
     issues.push({
       code: 'MAIL_FROM_INVALID',
       message: 'MAIL_FROM must be an address or "Name <address>".',
     });
   }
   return issues;
+}
+
+/**
+ * `address` or `Name <address>`. Plain string checks only (linear time, no backtracking):
+ * one `@`, no whitespace or angle brackets in the address, and a dotted domain without empty
+ * labels.
+ */
+export function isValidMailFrom(value: string): boolean {
+  const from = value.trim();
+  let address = from;
+  if (from.endsWith('>')) {
+    const open = from.lastIndexOf('<');
+    if (open < 0) return false;
+    const name = from.slice(0, open);
+    if (name.includes('<') || name.includes('>')) return false;
+    address = from.slice(open + 1, -1);
+  }
+  if (address.length === 0 || address.length > 254) return false;
+  for (const char of address) {
+    if (char === '<' || char === '>' || char.trim() === '') return false;
+  }
+  const at = address.indexOf('@');
+  if (at <= 0 || at !== address.lastIndexOf('@')) return false;
+  const domain = address.slice(at + 1);
+  const labels = domain.split('.');
+  return labels.length >= 2 && labels.every((label) => label.length > 0);
 }
 
 export function assertProductionSecurity(env: ApiEnv): void {

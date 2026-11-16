@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { apiEnvSchema, collectMailConfigIssues, collectProductionSecurityIssues } from './index';
+import {
+  apiEnvSchema,
+  collectMailConfigIssues,
+  collectProductionSecurityIssues,
+  isValidMailFrom,
+} from './index';
 
 function env(overrides: Record<string, string | undefined> = {}) {
   return apiEnvSchema.parse({
@@ -53,5 +58,39 @@ describe('mail configuration (Resend)', () => {
     expect(
       collectProductionSecurityIssues(env({ NODE_ENV: 'development', RESEND_API_KEY: 're_x' })),
     ).toEqual([]);
+  });
+
+  it('MAIL_FROM parsing: accepts address / Name <address>, rejects malformed values', () => {
+    for (const ok of [
+      'no-reply@mail.example.com',
+      'Project X <no-reply@mail.example.com>',
+      '"Project X" <no-reply@example.co.uk>',
+    ]) {
+      expect(isValidMailFrom(ok), ok).toBe(true);
+    }
+    for (const bad of [
+      '',
+      'not an address',
+      'Project X <no-reply@example>',
+      'no-reply@example',
+      'a@b@c.com',
+      '@example.com',
+      'user@.example.com',
+      'user@example..com',
+      'user@example.com.',
+      'Project X no-reply@example.com>',
+      'Name <user name@example.com>',
+      'Name <<user@example.com>',
+    ]) {
+      expect(isValidMailFrom(bad), bad).toBe(false);
+    }
+  });
+
+  it('MAIL_FROM parsing is linear: adversarial input is rejected immediately', () => {
+    for (const attack of [`<!@!.${'!.'.repeat(50_000)}`, `!@!.${'!.'.repeat(50_000)}`]) {
+      const started = performance.now();
+      isValidMailFrom(attack);
+      expect(performance.now() - started).toBeLessThan(100);
+    }
   });
 });

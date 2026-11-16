@@ -99,4 +99,15 @@ describe('/login', () => {
     render(<LoginPage />);
     await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/app'));
   });
+
+  it('sign-in shows "Forgot password?"; registration does not', async () => {
+    await renderLogin();
+    expect(screen.getByRole('link', { name: 'Forgot password?' }).getAttribute('href')).toBe(
+      '/forgot-password',
+    );
+    cleanup();
+    nav.params = new URLSearchParams('mode=register');
+    await renderLogin();
+    expect(screen.queryByRole('link', { name: 'Forgot password?' })).toBeNull();
+  });
 });

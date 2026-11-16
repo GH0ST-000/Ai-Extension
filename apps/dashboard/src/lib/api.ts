@@ -280,6 +280,32 @@ export async function register(input: RegisterRequest): Promise<AuthTokenRespons
   return result;
 }
 
+/**
+ * Ask for a password reset email. The response is the same whether or not the email belongs
+ * to an account (no enumeration).
+ */
+export async function requestPasswordReset(email: string): Promise<{ ok: true; message: string }> {
+  return apiFetch<{ ok: true; message: string }>('/auth/password-reset/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+    auth: false,
+    workspaceId: null,
+  });
+}
+
+/** Set a new password with a reset token. Signs out every session; does not sign in. */
+export async function confirmPasswordReset(input: {
+  token: string;
+  newPassword: string;
+}): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>('/auth/password-reset/confirm', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    auth: false,
+    workspaceId: null,
+  });
+}
+
 export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
   const result = await apiFetch<AuthTokenResponse>('/auth/login', {
     method: 'POST',

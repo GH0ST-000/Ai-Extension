@@ -62,6 +62,15 @@ const nextConfig: NextConfig = {
         source: '/:path*',
         headers: securityHeaders,
       },
+      // Account recovery: never cached, never send a Referer (the reset token lives only in the
+      // URL fragment, which browsers never send — this is defence in depth).
+      ...['/forgot-password', '/reset-password'].map((source) => ({
+        source,
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, max-age=0' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      })),
     ];
   },
 };

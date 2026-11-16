@@ -127,6 +127,13 @@ export const apiEnvSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z.string().min(16).optional(),
   /** Public app URL for invite links — never trust request Host. */
   APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  /**
+   * Transactional email (Resend). Both empty = email disabled: password reset requests are
+   * accepted but no email is sent (logged as mail_not_configured). Never logged.
+   */
+  RESEND_API_KEY: z.string().optional().default(''),
+  /** Verified sender, e.g. `Project X <no-reply@mail.example.com>`. */
+  MAIL_FROM: z.string().max(320).optional().default(''),
   /** Paddle Merchant of Record — optional in development/test. */
   PADDLE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
   PADDLE_API_KEY: z.string().optional().default(''),
@@ -439,8 +446,56 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
   }
 
   issues.push(...collectGitHubAppConfigIssues(env));
+  issues.push(...collectMailConfigIssues(env));
 
   return issues;
+}
+
+/** Mail must be fully configured or fully off; a half configuration fails at startup. */
+export function collectMailConfigIssues(env: ApiEnv): ProductionSecurityIssue[] {
+  const key = env.RESEND_API_KEY.trim();
+  const from = env.MAIL_FROM.trim();
+  if (!key && !from) return [];
+  const issues: ProductionSecurityIssue[] = [];
+  if (!key || !from) {
+    issues.push({
+      code: 'MAIL_CONFIG_PAIR',
+      message: 'RESEND_API_KEY and MAIL_FROM must both be set or both omitted.',
+    });
+  }
+  if (from && !isValidMailFrom(from)) {
+    issues.push({
+      code: 'MAIL_FROM_INVALID',
+      message: 'MAIL_FROM must be an address or "Name <address>".',
+    });
+  }
+  return issues;
+}
+
+/**
+ * `address` or `Name <address>`. Plain string checks only (linear time, no backtracking):
+ * one `@`, no whitespace or angle brackets in the address, and a dotted domain without empty
+ * labels.
+ */
+export function isValidMailFrom(value: string): boolean {
+  const from = value.trim();
+  let address = from;
+  if (from.endsWith('>')) {
+    const open = from.lastIndexOf('<');
+    if (open < 0) return false;
+    const name = from.slice(0, open);
+    if (name.includes('<') || name.includes('>')) return false;
+    address = from.slice(open + 1, -1);
+  }
+  if (address.length === 0 || address.length > 254) return false;
+  for (const char of address) {
+    if (char === '<' || char === '>' || char.trim() === '') return false;
+  }
+  const at = address.indexOf('@');
+  if (at <= 0 || at !== address.lastIndexOf('@')) return false;
+  const domain = address.slice(at + 1);
+  const labels = domain.split('.');
+  return labels.length >= 2 && labels.every((label) => label.length > 0);
 }
 
 export function assertProductionSecurity(env: ApiEnv): void {

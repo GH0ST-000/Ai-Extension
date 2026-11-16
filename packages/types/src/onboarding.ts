@@ -60,6 +60,11 @@ export interface OnboardingView {
     ctaLabel: string;
     ctaHref?: string;
   } | null;
+  /**
+   * True when the user has at least one successful (completed or partial) PR review in the
+   * server's review history. Server-derived only; absent from older servers.
+   */
+  firstPrReviewCompleted?: boolean;
 }
 
 export type UserFacingErrorSeverity = 'info' | 'warning' | 'error';

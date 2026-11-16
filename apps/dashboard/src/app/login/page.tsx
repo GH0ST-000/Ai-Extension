@@ -11,13 +11,27 @@ import { setSession } from '../../lib/auth-storage';
 import { publishExtensionSync } from '../../lib/extension-handoff';
 import { BrandMark } from '../../components/brand-mark';
 import { ThemeToggle } from '../../components/theme-toggle';
+import { authModeFromParam, authModeHref, type AuthMode } from './auth-mode';
 
-type Mode = 'login' | 'register';
+type Mode = AuthMode;
 
 function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<Mode>('login');
+  const modeParam = searchParams.get('mode');
+  // `/login?mode=register` opens the registration form; `/login` stays sign-in.
+  const [mode, setModeState] = useState<Mode>(() => authModeFromParam(modeParam));
+
+  // Follow client-side navigation between /login and /login?mode=register.
+  useEffect(() => {
+    setModeState(authModeFromParam(modeParam));
+  }, [modeParam]);
+
+  /** Switch form and keep the URL in sync (refresh / share keeps the same form, `next` kept). */
+  function setMode(next: Mode) {
+    setModeState(next);
+    router.replace(authModeHref(next, searchParams), { scroll: false });
+  }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -25,10 +39,13 @@ function LoginPageContent() {
   const [pending, setPending] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
 
+  const nextParam = searchParams.get('next');
+
   // If the extension (or a prior tab) already set API cookies, skip the form.
+  // Depends on `next` only, so switching sign-in / register does not re-check the session.
   useEffect(() => {
     let alive = true;
-    const next = safeInternalPath(searchParams.get('next'));
+    const next = safeInternalPath(nextParam);
     const controller = new AbortController();
     const timers: number[] = [];
     const stopChecking = () => {
@@ -77,7 +94,7 @@ function LoginPageContent() {
       controller.abort();
       timers.forEach((id) => window.clearTimeout(id));
     };
-  }, [router, searchParams]);
+  }, [router, nextParam]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

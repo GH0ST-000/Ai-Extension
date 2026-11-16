@@ -134,7 +134,7 @@ export function buildRecommendedAction(input: {
     case 'connect_github':
       return {
         title: 'Connect GitHub',
-        body: 'Optional for selected-text AI. Required for PR reviews, CI analysis, and confirmed writes.',
+        body: 'Optional for a first review: a basic PR review reads the diff shown on the pull request page. Connect GitHub for full-diff coverage, CI analysis, and confirmed writes.',
         ctaLabel: 'Connect GitHub',
         ctaHref: settingsHref(dashboardBaseUrl, '/app/settings'),
       };
@@ -142,7 +142,7 @@ export function buildRecommendedAction(input: {
       return steps.githubConnected
         ? {
             title: 'Try your first review',
-            body: 'Open a pull request and click Review PR — or select text anywhere and Ask AI.',
+            body: 'Open a pull request and choose Review Entire PR — or select text anywhere and Ask AI.',
             ctaLabel: 'Open a PR',
           }
         : {

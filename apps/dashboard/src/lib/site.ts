@@ -24,13 +24,15 @@ export function getSiteUrl(): string {
 
 export const SITE_NAME = APP_NAME;
 
-export const SITE_TAGLINE = 'AI that reads the page with you.';
+export const SITE_TAGLINE = "AI code reviews that remember your team's rules.";
 
 export const SITE_DESCRIPTION =
-  'Project X works inside your browser with the development context already on the page — selections, GitHub PRs, Jira issues, and API contracts. GitHub writes always require your confirmation.';
+  "Project X reviews GitHub pull requests with AI that follows your team's coding conventions, architectural decisions, and engineering standards. Catch bugs and risks before merge — GitHub writes always require your confirmation.";
 
 export const SITE_KEYWORDS = [
   'Project X',
+  'AI code review',
+  'GitHub pull request review',
   'Chrome extension AI',
   'contextual AI',
   'GitHub AI reviews',

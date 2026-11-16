@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { buildOnboardingView, defaultOnboardingPreferences } from '@project-x/shared';
@@ -10,7 +10,10 @@ import {
   type OnboardingView,
 } from '@project-x/types';
 
+import { GithubAppInstallationService } from '../github-app/github-app-installation.service';
+import { GithubAppTokenService } from '../github-app/github-app-token.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
 import { GithubConnectionService } from './github-connection.service';
 import type { UpdateOnboardingDto } from './dto/update-onboarding.dto';
 
@@ -45,27 +48,53 @@ export class OnboardingService {
     private readonly prisma: PrismaService,
     private readonly githubConnectionService: GithubConnectionService,
     private readonly configService: ConfigService,
+    // Optional so unit tests can build the service without GitHub App wiring.
+    @Optional() private readonly installations?: GithubAppInstallationService,
+    @Optional() private readonly appTokens?: GithubAppTokenService,
   ) {}
 
   async getView(userId: string): Promise<OnboardingView> {
     const settings = await this.ensureSettings(userId);
-    const [membershipCount, github] = await Promise.all([
+    const [membershipCount, github, workspaceApp, firstPrReviewCompleted] = await Promise.all([
       this.prisma.workspaceMembership.count({
         where: { userId, status: 'active' },
       }),
       this.githubConnectionService.getStatus(userId),
+      this.hasWorkspaceGithubApp(userId),
+      this.hasSuccessfulPrReview(userId),
     ]);
 
-    return buildOnboardingView({
+    const view = buildOnboardingView({
       authenticated: true,
       workspaceReady: membershipCount > 0,
-      githubConnected: github.connected,
+      // A personal token OR a verified, active GitHub App installation on the current
+      // workspace both give PR reviews GitHub access (same precedence as GithubAccessService).
+      githubConnected: github.connected || workspaceApp,
       preferences: this.toPreferences(settings),
       dashboardBaseUrl:
         this.configService.get<string>('appBaseUrl') ||
         process.env.APP_BASE_URL ||
         'http://localhost:3000',
     });
+    return { ...view, firstPrReviewCompleted };
+  }
+
+  /**
+   * Reliable, server-side evidence of a first PR review: a saved report of this user's own
+   * review that delivered results (completed or partial). Generic AI actions and client-reported
+   * "first value" markers do not count. One indexed lookup (pr_review_reports.user_id); a read
+   * failure is treated as "not yet" so the guidance stays visible.
+   */
+  private async hasSuccessfulPrReview(userId: string): Promise<boolean> {
+    try {
+      const report = await this.prisma.prReviewReport.findFirst({
+        where: { userId, status: { in: ['completed', 'partial'] } },
+        select: { id: true },
+      });
+      return report !== null;
+    } catch {
+      return false;
+    }
   }
 
   async update(userId: string, input: UpdateOnboardingDto): Promise<OnboardingView> {
@@ -98,6 +127,22 @@ export class OnboardingService {
     });
 
     return this.getView(userId);
+  }
+
+  /**
+   * True when the user's current workspace (X-Workspace-Id, else their last workspace; active
+   * membership required) has a GitHub App installation that is active AND ownership-verified —
+   * the same check that gates installation tokens. Database only: no GitHub API call. Any
+   * failure (no membership, unknown workspace, App disabled) counts as not connected.
+   */
+  private async hasWorkspaceGithubApp(userId: string): Promise<boolean> {
+    if (!this.installations || !this.appTokens?.isAppAuthEnabled()) return false;
+    try {
+      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+      return (await this.installations.getActiveInstallationId(workspaceId)) !== null;
+    } catch {
+      return false;
+    }
   }
 
   private toPreferences(settings: SettingsRow): OnboardingPreferences {

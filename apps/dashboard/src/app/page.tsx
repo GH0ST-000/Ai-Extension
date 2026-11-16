@@ -26,18 +26,18 @@ export const metadata: Metadata = {
 const HOW_IT_WORKS = [
   {
     step: '01',
-    title: 'Open the page you already use',
-    line: 'GitHub PR, Jira issue, API docs, or any selection on the page.',
+    title: 'Add the browser extension',
+    line: 'Create a free account and sign in once — the extension and dashboard share it.',
   },
   {
     step: '02',
-    title: 'Ask Project X to understand or act',
-    line: 'Stay in the workflow — no rebuilding context in another chat.',
+    title: 'Open a GitHub pull request',
+    line: 'Run Review entire PR. Findings come with severity, evidence, and the exact lines.',
   },
   {
     step: '03',
-    title: 'Review results. Confirm writes.',
-    line: 'Read-only analysis can run after you approve a plan. External changes wait for you.',
+    title: "Teach it your team's rules",
+    line: 'Project Memory keeps your conventions and decisions for every future review. Available on Pro and Team plans.',
   },
 ] as const;
 
@@ -118,7 +118,7 @@ function landingJsonLd() {
         applicationCategory: 'BrowserApplication',
         operatingSystem: 'Chrome',
         description:
-          'Contextual AI selection toolbar for explanations, GitHub reviews, Jira alignment, and OpenAPI analysis.',
+          'AI review for GitHub pull requests, with team rules from Project Memory. Also explains selections, CI failures, Jira issues, and API contracts.',
         offers: {
           '@type': 'Offer',
           price: '0',
@@ -168,9 +168,10 @@ export default function HomePage() {
               {SITE_TAGLINE}
             </p>
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground md:mt-4 md:text-lg">
-              Works inside your browser with the development context already on the page —
-              selections, PRs, Jira issues, API contracts, and CI. GitHub writes never happen
-              silently.
+              Review GitHub pull requests with AI that understands your team&rsquo;s coding
+              conventions, architectural decisions, and engineering standards. Find bugs and risks
+              before merge — for individual developers and small teams. Nothing is posted to GitHub
+              without your confirmation.
             </p>
             <LandingHeroCtas />
           </div>
@@ -205,7 +206,7 @@ export default function HomePage() {
               id="how-heading"
               className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink md:text-3xl"
             >
-              Three steps. Same mental model everywhere.
+              From pull request to review in three steps.
             </h2>
           </div>
           <ol className="grid gap-6 sm:grid-cols-3 sm:gap-8">
@@ -225,7 +226,7 @@ export default function HomePage() {
           <div className="mb-6 flex flex-col gap-2 md:mb-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-                Product surface
+                Beyond PR review
               </p>
               <h2
                 id="surface-heading"
@@ -235,7 +236,8 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground md:text-right">
-              What Project X can do for you in each place you already work.
+              The same extension also helps with selected text, CI failures, Jira issues, and API
+              contracts.
             </p>
           </div>
           <LandingProductStage />

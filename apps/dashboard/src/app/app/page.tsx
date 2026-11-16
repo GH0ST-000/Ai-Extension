@@ -5,14 +5,19 @@ import { OnboardingChecklist } from '../../components/onboarding-checklist';
 
 const CAPABILITIES = [
   {
+    label: 'PR review',
+    value: 'Findings with evidence',
+    copy: 'Review entire pull requests, analyze CI, suggest fixes, and post comments or apply patches only after you confirm.',
+  },
+  {
+    label: 'Project Memory',
+    value: "Your team's rules",
+    copy: 'Keep coding conventions and decisions that every future review follows. Pro and Team plans.',
+  },
+  {
     label: 'Ask AI',
     value: 'Selected text, ranked actions',
     copy: 'Explain, summarize, improve writing, review code, and more — ranked on-device for what you selected.',
-  },
-  {
-    label: 'GitHub',
-    value: 'Review with confirmation',
-    copy: 'Review PRs, analyze CI, suggest fixes, and post comments or apply patches only after you confirm.',
   },
   {
     label: 'Jira',
@@ -29,17 +34,12 @@ const CAPABILITIES = [
     value: 'Covered · Partial · Not evident',
     copy: 'Compare requirements with PR and API context. Evidence stays scoped to what Project X can see.',
   },
-  {
-    label: 'Developer workflows',
-    value: 'Plan first, then confirm writes',
-    copy: 'Approve a plan before multi-step analysis. GitHub writes still need explicit confirmation.',
-  },
 ] as const;
 
 const FLOW_STEPS = [
-  'Select text, or open a PR, Jira issue, or API docs page',
-  'Choose a relevant action — Ask AI ranks the useful ones first',
-  'Review the result. Writes only happen after you confirm',
+  'Open a GitHub pull request in your browser',
+  'Choose Review Entire PR from the Project X menu',
+  'Act on the findings. Comments are posted only after you confirm',
 ] as const;
 
 export default function DashboardHomePage() {
@@ -61,11 +61,12 @@ export default function DashboardHomePage() {
           Project X
         </p>
         <h1 className="mt-3 max-w-2xl font-display text-4xl font-semibold tracking-tight text-ink text-balance md:text-5xl">
-          Understand, review, and act where you work.
+          AI code reviews that remember your team&rsquo;s rules.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-          Use the Chrome extension for Ask AI on any page. Connect GitHub here for PR reviews, CI
-          analysis, and confirmed writes. The extension and dashboard share the same account.
+          Review GitHub pull requests from the Chrome extension. Connect GitHub for full-diff
+          coverage, CI analysis, and confirmed writes. The extension and dashboard share the same
+          account.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -109,11 +110,11 @@ export default function DashboardHomePage() {
               First value
             </p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-balance">
-              Select text → Ask AI → or open a PR and Review.
+              Open a PR → Review Entire PR → act on the findings.
             </h2>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-inverse/65">
-              GitHub is optional for selected-text actions. Project X never posts or changes code
-              without your confirmation.
+              A basic review needs no GitHub connection — it reads the diff on the PR page. Project
+              X never posts or changes code without your confirmation.
             </p>
           </div>
           <div className="relative border-t border-inverse/10 p-7 md:border-l md:border-t-0 md:p-9">

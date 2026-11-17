@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { getStoredUser } from '@/lib/auth-storage';
-import { REGISTER_HREF } from '@/app/login/auth-mode';
+import { useRegisterHref } from './use-register-href';
 
 export function LandingHeroCtas() {
   const [signedIn, setSignedIn] = useState(false);
+  const registerHref = useRegisterHref();
 
   useEffect(() => {
     setSignedIn(Boolean(getStoredUser()));
@@ -35,7 +36,7 @@ export function LandingHeroCtas() {
   return (
     <div className="mt-5 flex flex-wrap gap-3 md:mt-7">
       <Link
-        href={REGISTER_HREF}
+        href={registerHref}
         className="rounded-2xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         Get Started

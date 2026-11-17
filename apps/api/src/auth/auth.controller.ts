@@ -80,7 +80,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.register(body, requestContext(req));
+    const result = await this.authService.register(body, {
+      ...requestContext(req),
+      client: isExtensionClient(req) ? 'extension' : 'dashboard',
+    });
     this.writeSessionCookies(res, result.accessToken!, result.refreshToken!);
     return this.shapeAuthResponse(req, result);
   }
@@ -190,6 +193,15 @@ export class AuthController {
   private cookieSecure(): boolean {
     return this.config.get('nodeEnv', { infer: true }) === 'production';
   }
+}
+
+/** Explicit extension signals only (header or chrome-extension:// Origin). */
+function isExtensionClient(req: Request): boolean {
+  const header = req.headers[EXTENSION_CLIENT_HEADER];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value === 'string' && value.trim().toLowerCase() === 'extension') return true;
+  const origin = req.headers.origin;
+  return typeof origin === 'string' && origin.startsWith('chrome-extension://');
 }
 
 function wantsBodyTokens(req: Request): boolean {

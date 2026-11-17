@@ -1,11 +1,23 @@
-import { Body, Controller, Delete, Get, HttpCode, Patch, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Patch,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
 import { UpsertJiraConnectionDto } from '../jira/dto/upsert-jira-connection.dto';
 import { JiraConnectionService } from '../jira/jira-connection.service';
+import { UpdateGrowthProfileDto, UpdateMarketingConsentDto } from './dto/growth-profile.dto';
 import { UpdateOnboardingDto } from './dto/update-onboarding.dto';
+import { GrowthProfileService } from './growth-profile.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UpsertGithubConnectionDto } from './dto/upsert-github-connection.dto';
 import { GithubConnectionService } from './github-connection.service';
@@ -20,7 +32,33 @@ export class SettingsController {
     private readonly githubConnectionService: GithubConnectionService,
     private readonly jiraConnectionService: JiraConnectionService,
     private readonly onboardingService: OnboardingService,
+    private readonly growthProfile: GrowthProfileService,
   ) {}
+
+  /** Optional profile questions + marketing consent of the signed-in user. */
+  @Get('profile')
+  getProfile(@CurrentUser() user: AuthRequestUser) {
+    return this.growthProfile.get(user.id);
+  }
+
+  @Patch('profile')
+  updateProfile(@CurrentUser() user: AuthRequestUser, @Body() body: UpdateGrowthProfileDto) {
+    return this.growthProfile.update(user.id, body);
+  }
+
+  @Post('profile/skip')
+  @HttpCode(200)
+  skipProfile(@CurrentUser() user: AuthRequestUser) {
+    return this.growthProfile.skip(user.id);
+  }
+
+  @Put('marketing-consent')
+  setMarketingConsent(
+    @CurrentUser() user: AuthRequestUser,
+    @Body() body: UpdateMarketingConsentDto,
+  ) {
+    return this.growthProfile.setMarketingConsent(user.id, body.granted, 'settings');
+  }
 
   @Get()
   get(@CurrentUser() user: AuthRequestUser) {

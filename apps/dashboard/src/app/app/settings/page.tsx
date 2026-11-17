@@ -11,6 +11,7 @@ import type {
 import { RESPONSE_STYLES } from '@project-x/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { ProfileSettings } from '../../../components/profile-settings';
 
 import { GithubPatGuide } from '../../../components/github-pat-guide';
 import { JiraConnectGuide } from '../../../components/jira-connect-guide';
@@ -327,6 +328,8 @@ export default function SettingsPage() {
           and read-only Jira Cloud access.
         </p>
       </header>
+
+      <ProfileSettings />
 
       <section className="rise-in-delay-1 space-y-3">
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Assistant</h2>

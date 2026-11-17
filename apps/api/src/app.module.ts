@@ -5,6 +5,7 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { validateEnv } from './config/env.validation';
 import configuration from './config/configuration';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -97,6 +98,7 @@ import { SecurityModule } from './common/security/security.module';
     RedisModule,
     QueuesModule,
     HealthModule,
+    AnalyticsModule,
     AuthModule,
     SettingsModule,
     GithubModule,

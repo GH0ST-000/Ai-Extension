@@ -50,6 +50,8 @@ model User {
   prReviewReports  PrReviewReport[]
   projectMemoryAuditEvents ProjectMemoryAuditEvent[]
   passwordResetTokens PasswordResetToken[]
+  marketingConsentEvents MarketingConsentEvent[]
+  acquisition      UserAcquisition?
 
   @@map("users")
 }
@@ -93,6 +95,16 @@ model UserSettings {
   firstValueType     String?       @map("first_value_type")
   dismissedHintIds   Json          @default("[]") @map("dismissed_hint_ids")
   firstWriteEducationSeenAt DateTime? @map("first_write_education_seen_at")
+  /// Optional growth profile (segmentation only — not a workspace role). Stable enum values,
+  /// validated by the API; see packages/types/src/growth-profile.ts.
+  professionalRole   String?       @map("professional_role")
+  usageIntent        String?       @map("usage_intent")
+  primaryGoal        String?       @map("primary_goal")
+  profileCompletedAt DateTime?     @map("profile_completed_at")
+  profileSkippedAt   DateTime?     @map("profile_skipped_at")
+  /// Current marketing email consent; history in marketing_consent_events.
+  marketingEmailConsent     Boolean   @default(false) @map("marketing_email_consent")
+  marketingConsentUpdatedAt DateTime? @map("marketing_consent_updated_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   @@map("user_settings")
@@ -714,4 +726,44 @@ model PasswordResetToken {
   @@index([userId, createdAt])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+/**
+ * Evidence of marketing email consent: one row per grant or withdrawal (no IP, no content).
+ * The current state is UserSettings.marketingEmailConsent.
+ */
+model MarketingConsentEvent {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  granted       Boolean
+  /// dashboard_signup | extension_signup | settings
+  source        String
+  /// Version id of the consent wording shown (MARKETING_CONSENT_VERSION).
+  policyVersion String   @map("policy_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("marketing_consent_events")
+}
+
+/**
+ * First-touch acquisition of an account, written once at registration and never overwritten.
+ * Only allowlisted, length-limited UTM values, a referral slug and a referrer host.
+ */
+model UserAcquisition {
+  userId       String   @id @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// dashboard | extension
+  signupClient String   @map("signup_client")
+  utmSource    String?  @map("utm_source")
+  utmMedium    String?  @map("utm_medium")
+  utmCampaign  String?  @map("utm_campaign")
+  utmContent   String?  @map("utm_content")
+  referral     String?
+  referrerHost String?  @map("referrer_host")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([utmSource, createdAt])
+  @@map("user_acquisitions")
 }

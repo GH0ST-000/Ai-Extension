@@ -6,10 +6,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { personalWorkspaceName, personalWorkspaceSlug } from '@project-x/shared';
 
 import type { AuthTokenResponse } from '@project-x/types';
+import { MARKETING_CONSENT_VERSION } from '@project-x/types';
 
 import type { ApiConfig } from '../config/configuration';
 import { PrismaService } from '../prisma/prisma.service';
 import { durationToSeconds } from './auth-cookies';
+import { sanitizeSignupAttribution } from './signup-attribution';
 import type { LoginDto, RegisterDto } from './dto/auth.dto';
 import { SecurityAuditService } from '../observability/security-audit.service';
 
@@ -31,6 +33,8 @@ export class RefreshTokenRotatedException extends UnauthorizedException {
 export type AuthIssueContext = {
   userAgent?: string | null;
   ip?: string | null;
+  /** Which first-party client registered (labels consent / attribution; not trusted for auth). */
+  client?: 'dashboard' | 'extension';
 };
 
 @Injectable()
@@ -53,6 +57,11 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(input.password, 12);
     const name = input.name?.trim() || null;
+    const client = ctx.client ?? 'dashboard';
+    // Only an explicit `true` is consent; absent / false = no marketing email.
+    const marketingConsent = input.marketingConsent === true;
+    const attribution = sanitizeSignupAttribution(input.attribution);
+    const consentAt = new Date();
 
     const user = await this.prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
@@ -61,8 +70,24 @@ export class AuthService {
           passwordHash,
           name,
           settings: {
-            create: {},
+            create: marketingConsent
+              ? { marketingEmailConsent: true, marketingConsentUpdatedAt: consentAt }
+              : {},
           },
+          // First-touch attribution, written once and never overwritten.
+          acquisition: { create: { signupClient: client, ...attribution } },
+          ...(marketingConsent
+            ? {
+                marketingConsentEvents: {
+                  create: {
+                    granted: true,
+                    source: client === 'extension' ? 'extension_signup' : 'dashboard_signup',
+                    policyVersion: MARKETING_CONSENT_VERSION,
+                    createdAt: consentAt,
+                  },
+                },
+              }
+            : {}),
         },
         select: { id: true, email: true, name: true, sessionVersion: true },
       });

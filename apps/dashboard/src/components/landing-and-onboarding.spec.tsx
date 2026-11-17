@@ -74,6 +74,26 @@ describe('landing registration CTAs', () => {
   });
 });
 
+describe('landing attribution', () => {
+  it('Get Started carries allowlisted campaign parameters (and nothing else) to sign-up', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?utm_source=newsletter&utm_campaign=launch&token=secret',
+    );
+    try {
+      render(<LandingHeroCtas />);
+      await waitFor(() =>
+        expect(screen.getByRole('link', { name: 'Get Started' }).getAttribute('href')).toBe(
+          '/login?mode=register&utm_source=newsletter&utm_campaign=launch',
+        ),
+      );
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+});
+
 describe('extension install URL', () => {
   it('accepts only a configured https URL', () => {
     expect(getExtensionInstallUrl(undefined)).toBeNull();

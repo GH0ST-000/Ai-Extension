@@ -26,3 +26,13 @@ export function getDashboardForgotPasswordUrl(): string {
 export function getDashboardBillingUrl(workspaceId?: string | null): string {
   return getDashboardAppUrl('/app/billing', workspaceId);
 }
+
+/**
+ * The dashboard's optional "three quick questions" page. Carries no credentials: the dashboard
+ * uses its own session (shared API cookies when present, otherwise the normal sign-in page).
+ */
+export function getDashboardWelcomeUrl(): string {
+  const url = new URL(getDashboardAppUrl('/app/welcome'));
+  url.searchParams.set('next', '/app');
+  return url.toString();
+}

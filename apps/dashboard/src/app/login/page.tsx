@@ -11,6 +11,8 @@ import { setSession } from '../../lib/auth-storage';
 import { publishExtensionSync } from '../../lib/extension-handoff';
 import { BrandMark } from '../../components/brand-mark';
 import { ThemeToggle } from '../../components/theme-toggle';
+import { signupAttributionFrom } from '../../lib/attribution';
+import { MARKETING_CONSENT_LABEL } from '../../lib/growth-profile';
 import { authModeFromParam, authModeHref, type AuthMode } from './auth-mode';
 
 type Mode = AuthMode;
@@ -35,6 +37,8 @@ function LoginPageContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  /** Optional, unchecked by default, separate from the Terms notice. */
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -103,11 +107,20 @@ function LoginPageContent() {
 
     try {
       if (mode === 'register') {
+        const attribution = signupAttributionFrom(searchParams);
         await register({
           email,
           password,
           name: name.trim() || undefined,
+          ...(marketingConsent ? { marketingConsent: true } : {}),
+          ...(attribution ? { attribution } : {}),
         });
+        publishExtensionSync();
+        // New accounts get the optional three questions once, then their destination.
+        router.replace(
+          `/app/welcome?next=${encodeURIComponent(safeInternalPath(searchParams.get('next')))}`,
+        );
+        return;
       } else {
         await login({ email, password });
       }
@@ -220,6 +233,19 @@ function LoginPageContent() {
                 className="w-full rounded-xl border border-line bg-panel/80 px-3.5 py-2.5 text-sm text-ink outline-none ring-accent/30 placeholder:text-muted-foreground focus:ring-2"
               />
             </div>
+
+            {mode === 'register' ? (
+              <label className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  name="marketing-consent"
+                  checked={marketingConsent}
+                  onChange={(event) => setMarketingConsent(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>{MARKETING_CONSENT_LABEL}</span>
+              </label>
+            ) : null}
 
             {error ? (
               <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">

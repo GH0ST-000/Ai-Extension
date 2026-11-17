@@ -6,11 +6,12 @@ import { useEffect, useState } from 'react';
 import { BrandMark } from './brand-mark';
 import { ThemeToggle } from './theme-toggle';
 import { getStoredUser, type StoredAuthUser } from '../lib/auth-storage';
-import { REGISTER_HREF } from '../app/login/auth-mode';
+import { useRegisterHref } from './use-register-href';
 
 export function LandingHeader() {
   const [user, setUser] = useState<StoredAuthUser | null>(null);
   const [ready, setReady] = useState(false);
+  const registerHref = useRegisterHref();
 
   useEffect(() => {
     setUser(getStoredUser());
@@ -61,7 +62,7 @@ export function LandingHeader() {
                 Sign in
               </Link>
               <Link
-                href={REGISTER_HREF}
+                href={registerHref}
                 className="rounded-xl bg-ink px-3 py-2 text-xs font-semibold text-inverse transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 sm:px-3.5 sm:text-sm"
               >
                 Get Started

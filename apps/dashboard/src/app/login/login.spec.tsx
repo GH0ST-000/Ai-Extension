@@ -9,13 +9,14 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => nav.params,
 }));
 const fetchMe = vi.fn();
+const registerMock = vi.fn();
 vi.mock('../../lib/api', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     fetchMe: (...a: unknown[]) => fetchMe(...a),
     login: vi.fn(),
-    register: vi.fn(),
+    register: (...a: unknown[]) => registerMock(...a),
   };
 });
 
@@ -26,6 +27,7 @@ beforeEach(() => {
   nav.params = new URLSearchParams();
   nav.replace.mockReset();
   fetchMe.mockReset().mockRejectedValue(new Error('no session'));
+  registerMock.mockReset().mockResolvedValue({ user: { id: 'u1', email: 'a@b.c', name: null } });
 });
 afterEach(() => cleanup());
 
@@ -109,5 +111,44 @@ describe('/login', () => {
     nav.params = new URLSearchParams('mode=register');
     await renderLogin();
     expect(screen.queryByRole('link', { name: 'Forgot password?' })).toBeNull();
+  });
+
+  it('registration: consent unchecked by default, attribution from the URL, then the welcome questions', async () => {
+    nav.params = new URLSearchParams(
+      'mode=register&next=%2Fapp%2Freviews&utm_source=newsletter&utm_campaign=launch&ref=friend&email=x%40y.com',
+    );
+    await renderLogin();
+    const consent = screen.getByRole('checkbox');
+    expect((consent as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 'password-123' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    });
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'new@example.com',
+      password: 'password-123',
+      name: undefined,
+      attribution: { utmSource: 'newsletter', utmCampaign: 'launch', referral: 'friend' },
+    });
+    expect(nav.replace).toHaveBeenLastCalledWith('/app/welcome?next=%2Fapp%2Freviews');
+  });
+
+  it('registration with the box ticked sends explicit consent; without UTM sends no attribution', async () => {
+    nav.params = new URLSearchParams('mode=register');
+    await renderLogin();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'opt@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 'password-123' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    });
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'opt@example.com',
+      password: 'password-123',
+      name: undefined,
+      marketingConsent: true,
+    });
+    expect(nav.replace).toHaveBeenLastCalledWith('/app/welcome?next=%2Fapp');
   });
 });

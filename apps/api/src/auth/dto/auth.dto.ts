@@ -1,4 +1,6 @@
-import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsObject, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+
+import { StrictBoolean } from '../../common/validation/strict-boolean';
 import { Transform } from 'class-transformer';
 
 function trimString({ value }: { value: unknown }): unknown {
@@ -21,6 +23,19 @@ export class RegisterDto {
   @IsString()
   @MaxLength(120)
   name?: string;
+
+  /** Optional marketing email consent — unchecked by default, never required. */
+  @IsOptional()
+  @StrictBoolean()
+  marketingConsent?: boolean;
+
+  /**
+   * Optional first-touch attribution. Accepted as an object and sanitized server-side
+   * (invalid values are dropped, never rejected) so it can never block account creation.
+   */
+  @IsOptional()
+  @IsObject()
+  attribution?: Record<string, unknown>;
 }
 
 export class LoginDto {

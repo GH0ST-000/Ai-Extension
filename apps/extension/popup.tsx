@@ -13,6 +13,10 @@ import {
   fetchOnboarding,
   markWelcomeSeen,
 } from './lib/onboarding/onboarding-api';
+import {
+  offerProfileQuestionsAfterAuth,
+  PROFILE_QUESTIONS_PROMPT,
+} from './lib/onboarding/profile-questions';
 import { AuthClientError, login, register, signOut } from './lib/services/auth-client';
 import { getStoredSessionFast } from './lib/services/auth-storage';
 import { getGithubConnection } from './lib/services/github-api';
@@ -20,6 +24,7 @@ import {
   getDashboardAppUrl,
   getDashboardBillingUrl,
   getDashboardForgotPasswordUrl,
+  getDashboardWelcomeUrl,
 } from './lib/workspace/dashboard-url';
 import { useWorkspaceStore } from './lib/workspace/workspace.store';
 import { WorkspaceSwitcher } from './lib/workspace/workspace-switcher';
@@ -171,9 +176,13 @@ function IndexPopup() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  /** Optional marketing email consent — unchecked by default, never required. */
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [github, setGithub] = useState<GitHubConnectionStatus | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingView | null>(null);
   const [showWelcome, setShowWelcome] = useState(false);
+  /** Session-only: true right after a successful sign-up in this popup. */
+  const [offerProfileQuestions, setOfferProfileQuestions] = useState(false);
 
   const workspace = useWorkspaceStore((state) => state.current);
   const workspaceLoading = useWorkspaceStore((state) => state.loading);
@@ -285,9 +294,11 @@ function IndexPopup() {
               email,
               password,
               name: name.trim() || undefined,
+              ...(marketingConsent ? { marketingConsent: true } : {}),
             })
           : await login({ email, password });
       setUser(result.user);
+      setOfferProfileQuestions(offerProfileQuestionsAfterAuth(mode));
       setPassword('');
       setShowWelcome(false);
       setLoading(false);
@@ -310,6 +321,7 @@ function IndexPopup() {
     await signOut();
     await useWorkspaceStore.getState().clear();
     setUser(null);
+    setOfferProfileQuestions(false);
     setGithub(null);
     setOnboarding(null);
     setShowWelcome(true);
@@ -431,6 +443,35 @@ function IndexPopup() {
           />
           <StatusPill label="Plan" value={planLabel} />
         </div>
+
+        {offerProfileQuestions ? (
+          <div className="rounded-3xl border border-[var(--px-border)] bg-[var(--px-surface-elevated)] p-3.5">
+            <p className="text-[13px] font-semibold tracking-tight text-[var(--px-text-primary)]">
+              {PROFILE_QUESTIONS_PROMPT.title}
+            </p>
+            <p className="mt-1 text-[12px] leading-relaxed text-[var(--px-text-secondary)]">
+              {PROFILE_QUESTIONS_PROMPT.body}
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <a
+                href={getDashboardWelcomeUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOfferProfileQuestions(false)}
+                className="text-[12px] font-semibold text-[var(--px-accent)] hover:underline"
+              >
+                {PROFILE_QUESTIONS_PROMPT.cta}
+              </a>
+              <button
+                type="button"
+                onClick={() => setOfferProfileQuestions(false)}
+                className="text-[11px] font-semibold text-[var(--px-text-muted)] hover:text-[var(--px-text-primary)]"
+              >
+                {PROFILE_QUESTIONS_PROMPT.dismiss}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {showChecklist && onboarding.recommendedAction ? (
           <div className="rounded-3xl border border-[var(--px-accent)]/30 bg-[var(--px-accent-soft)] p-3.5">
@@ -560,6 +601,20 @@ function IndexPopup() {
           </a>
         ) : null}
 
+        {mode === 'register' ? (
+          <label className="flex items-start gap-2 text-[11px] leading-snug text-[var(--px-text-secondary)]">
+            <input
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(event) => setMarketingConsent(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Email me occasional product updates and tips. Optional — unsubscribe anytime.
+            </span>
+          </label>
+        ) : null}
+
         {error ? <p className="text-[12px] font-medium text-red-500">{error}</p> : null}
 
         <button
@@ -581,6 +636,20 @@ function IndexPopup() {
       >
         {mode === 'login' ? 'Need an account? Register' : 'Have an account? Sign in'}
       </button>
+      {mode === 'register' ? (
+        <p className="text-[11px] leading-snug text-[var(--px-text-muted)]">
+          By creating an account you agree to the{' '}
+          <a
+            href={getDashboardAppUrl('/terms')}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-[var(--px-accent)] hover:underline"
+          >
+            Terms and Conditions
+          </a>
+          .
+        </p>
+      ) : null}
     </Shell>
   );
 }

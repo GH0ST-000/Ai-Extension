@@ -1,3 +1,5 @@
+import type { SignupAttribution } from './growth-profile';
+
 /**
  * Shared domain types for Project X.
  * Keep this package free of framework dependencies.
@@ -456,6 +458,10 @@ export interface RegisterRequest {
   email: string;
   password: string;
   name?: string;
+  /** Optional, unchecked by default; never required to create an account. */
+  marketingConsent?: boolean;
+  /** Optional first-touch attribution (validated server-side; never required). */
+  attribution?: SignupAttribution;
 }
 
 export interface LoginRequest {
@@ -3640,3 +3646,4 @@ export * from './saas';
 export * from './observability';
 export * from './pr-review-history';
 export * from './project-memory-audit';
+export * from './growth-profile';

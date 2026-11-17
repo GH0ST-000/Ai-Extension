@@ -22,14 +22,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@project-x/eslint-config": "workspace:*",
     "@project-x/tsconfig": "workspace:*",
     "@types/node": "22",
     "eslint": "^9.17.0",
-    "typescript": "^5.7.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
 }

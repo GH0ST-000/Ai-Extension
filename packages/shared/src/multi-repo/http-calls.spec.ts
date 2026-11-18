@@ -73,6 +73,11 @@ await fetch(\`\${API}\${USERS_PATH}\`);
     const hostile = 'fetch(`${(() => { throw new Error("x") })()}/api/x`);';
     expect(() => detectHttpCalls(hostile)).not.toThrow();
     expect(detectHttpCalls('fetch('.repeat(20000))).toEqual([]);
+    // Deeply nested non-HTTP calls exercise the function collector's scan budget.
+    // …and a real call after them is still found.
+    expect(detectHttpCalls(`${'f('.repeat(200_000)}fetch('/a')`).map((c) => c.path)).toEqual([
+      '/a',
+    ]);
     expect(detectHttpCalls('x'.repeat(600_000))).toEqual([]);
   });
 

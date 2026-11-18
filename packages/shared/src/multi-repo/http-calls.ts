@@ -36,6 +36,8 @@ export interface HttpCall {
 const MAX_SOURCE_CHARS = 512_000;
 const MAX_ARG_CHARS = 2_000;
 const MAX_CALLS = 200;
+/** Call-site candidates examined per file, matched or not (bounds hostile/minified input). */
+const MAX_CANDIDATES = 1_000;
 const MAX_CONSTS = 500;
 const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|host\.docker\.internal)(:\d+)?$/i;
 
@@ -508,6 +510,12 @@ const NOT_FUNCTIONS = new Set([
   'delete',
 ]);
 const MAX_FUNCTIONS = 300;
+/**
+ * Characters the function collector may scan while matching parentheses, across all
+ * candidates. Real code has short argument lists and stays far below this; hostile input
+ * (e.g. thousands of nested `f(`) would otherwise cost candidates × MAX_ARG_CHARS.
+ */
+const MAX_FUNCTION_SCAN_CHARS = 4_000_000;
 
 function paramNames(text: string): Array<string | null> {
   return splitTopLevel(text, ',').map((p) => {
@@ -520,12 +528,18 @@ function paramNames(text: string): Array<string | null> {
 function collectFunctions(src: string): FunctionScope[] {
   const out: FunctionScope[] = [];
   const nameRe = /([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g;
+  let scanned = 0;
   let m: RegExpExecArray | null;
-  while ((m = nameRe.exec(src)) !== null && out.length < MAX_FUNCTIONS) {
+  while (
+    scanned < MAX_FUNCTION_SCAN_CHARS &&
+    (m = nameRe.exec(src)) !== null &&
+    out.length < MAX_FUNCTIONS
+  ) {
     const name = m[1]!;
     if (NOT_FUNCTIONS.has(name)) continue;
     const open = m.index + m[0].length - 1;
     const close = skipBalanced(src, open, Math.min(src.length, open + MAX_ARG_CHARS));
+    scanned += close - open;
     const after = src.slice(close, close + 200);
     // `name(params) [: Type] {` — function declaration or method.
     const decl = after.match(/^\s*(?::\s*[^{};=()]*)?\{/);
@@ -547,9 +561,15 @@ function collectFunctions(src: string): FunctionScope[] {
   }
   // `name = [async] (params) [: T] => body` (variables and class properties)
   const arrowRe = /\b([A-Za-z_$][\w$]*)\s*(?::[^=;{}()]{0,200})?=\s*(?:async\s*)?\(/g;
-  while ((m = arrowRe.exec(src)) !== null && out.length < MAX_FUNCTIONS) {
+  scanned = 0;
+  while (
+    scanned < MAX_FUNCTION_SCAN_CHARS &&
+    (m = arrowRe.exec(src)) !== null &&
+    out.length < MAX_FUNCTIONS
+  ) {
     const open = m.index + m[0].length - 1;
     const close = skipBalanced(src, open, Math.min(src.length, open + MAX_ARG_CHARS));
+    scanned += close - open;
     const arrow = src.slice(close, close + 200).match(/^\s*(?::\s*[^=;{}()]*)?=>\s*/);
     if (!arrow) continue;
     const bodyStart = close + arrow[0].length;
@@ -668,7 +688,12 @@ export function detectHttpCalls(content: string, _filePath?: string): HttpCall[]
   const wrappers: Wrapper[] = [];
   CALL_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = CALL_RE.exec(content)) !== null && calls.length < MAX_CALLS) {
+  let candidates = 0;
+  while (
+    calls.length < MAX_CALLS &&
+    candidates++ < MAX_CANDIDATES &&
+    (m = CALL_RE.exec(content)) !== null
+  ) {
     const receiver = m[1];
     const fetchName = m[2];
     const before = content.slice(Math.max(0, m.index - 16), m.index);

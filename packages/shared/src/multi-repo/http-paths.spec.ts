@@ -83,3 +83,10 @@ describe('matching', () => {
     expect(parseEndpointSpec(42)).toBeNull();
   });
 });
+
+describe('joinHttpPath', () => {
+  it('trims slashes in linear time', () => {
+    expect(joinHttpPath('/api/', '//users/:id//')).toBe('/api/users/{param}');
+    expect(joinHttpPath('a' + '/'.repeat(200_000) + 'b')).not.toBeUndefined();
+  });
+});

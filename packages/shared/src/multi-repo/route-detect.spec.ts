@@ -85,3 +85,41 @@ describe('detectRouteDefinitions', () => {
     ).toEqual(['GET /api/users (high)', 'GET /api/users/{param} (high)']);
   });
 });
+
+describe('detectRouteDefinitions — regex shapes (CodeQL polynomial-regex fixes)', () => {
+  it('typed declarations, aliased named imports and controller path objects still match', () => {
+    expect(
+      routes([
+        [
+          'src/app.ts',
+          "import { usersRouter as users } from './routes/users';\nconst app: Express = express();\napp.use('/api/users', users);",
+        ],
+        [
+          'src/routes/users.ts',
+          "export const usersRouter: Router = Router();\nconst r : Router = Router();\nusersRouter.get('/:id', h);",
+        ],
+        [
+          'src/teams.controller.ts',
+          "@Controller({ version: '1', path: 'teams' })\nexport class T {\n  @Get( ':id' )\n  one() {}\n}",
+        ],
+      ]),
+    ).toEqual(
+      expect.arrayContaining(['GET /api/users/{param} (medium)', 'GET /teams/{param} (high)']),
+    );
+  });
+
+  it('long whitespace and repeated tokens are processed in linear time', () => {
+    const sp = ' '.repeat(100_000);
+    const started = Date.now();
+    for (const content of [
+      `import x${sp}`,
+      `import {a${sp}} from 'x'`,
+      `const x${sp}`,
+      `@Controller(${sp}`,
+      `@Controller({${'('.repeat(100_000)}`,
+    ]) {
+      expect(detectRouteDefinitions([{ path: 'src/a.ts', content }])).toEqual([]);
+    }
+    expect(Date.now() - started).toBeLessThan(2_000); // was minutes (cubic) before the fix
+  });
+});

@@ -55,29 +55,28 @@ function collectFacts(file: SourceFile): FileFacts {
     clientIdents: new Set(),
   };
   const clientRe =
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+)?\s*=\s*(?:axios|ky|got)\s*\.\s*(?:create|extend)\s*\(/g;
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:axios|ky|got)\s*\.\s*(?:create|extend)\s*\(/g;
   let c: RegExpExecArray | null;
   while ((c = clientRe.exec(src)) !== null) facts.clientIdents.add(c[1]!);
   let m: RegExpExecArray | null;
 
   const appRe =
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+)?\s*=\s*(?:express|fastify|Fastify|polka)\s*\(/g;
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:express|fastify|Fastify|polka)\s*\(/g;
   while ((m = appRe.exec(src)) !== null) facts.appIdents.add(m[1]!);
   const routerRe =
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+)?\s*=\s*(?:new\s+)?(?:express\s*\.\s*)?Router\s*\(/g;
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w$.<>]+\s*)?=\s*(?:new\s+)?(?:express\s*\.\s*)?Router\s*\(/g;
   while ((m = routerRe.exec(src)) !== null) facts.routerIdents.add(m[1]!);
 
   const importRe =
-    /\bimport\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\}|\*\s+as\s+([A-Za-z_$][\w$]*))?\s*from\s*['"]([^'"]+)['"]/g;
+    /\bimport\s+(?:([A-Za-z_$][\w$]*)\s*(?:,\s*)?)?(?:\{([^}]*)\}\s*|\*\s+as\s+([A-Za-z_$][\w$]*)\s*)?from\s*['"]([^'"]+)['"]/g;
   while ((m = importRe.exec(src)) !== null) {
     const spec = m[4]!;
     if (m[1]) facts.imports.set(m[1], spec);
     if (m[3]) facts.imports.set(m[3], spec);
     for (const named of (m[2] ?? '').split(',')) {
-      const local = named
-        .split(/\s+as\s+/)
-        .pop()
-        ?.trim();
+      // `a` or `a as b` → the local name (token split: no backtracking on long whitespace).
+      const tokens = named.trim().split(/\s+/);
+      const local = tokens.length === 3 && tokens[1] === 'as' ? tokens[2] : tokens[0];
       if (local) facts.imports.set(local, spec);
     }
   }
@@ -258,17 +257,18 @@ function detectNestRoutes(files: SourceFile[]): RouteDefinition[] {
     if (!SOURCE_EXT.test(f.path) || !f.content.includes('@Controller')) continue;
     const src = f.content;
     const controllers = [
-      ...src.matchAll(
-        /@Controller\(\s*(?:(['"`])([^'"`]*)\1|\{[^}]*?path\s*:\s*(['"`])([^'"`]*)\3[^}]*\})?\s*\)/g,
-      ),
+      ...src.matchAll(/@Controller\(\s*(?:(['"`])([^'"`]*)\1\s*|(\{[^}]*\})\s*)?\)/g),
     ];
     controllers.forEach((ctrl, index) => {
       const start = ctrl.index!;
       const end = controllers[index + 1]?.index ?? src.length;
-      const prefix = ctrl[2] ?? ctrl[4] ?? '';
+      const prefix =
+        ctrl[2] ??
+        (ctrl[3] ? /\bpath\s*:\s*(['"`])([^'"`]*)\1/.exec(ctrl[3])?.[2] : undefined) ??
+        '';
       const body = src.slice(start, end);
       for (const d of body.matchAll(
-        /@(Get|Post|Put|Patch|Delete|Head|Options|All)\(\s*(?:(['"`])([^'"`]*)\2)?\s*\)/g,
+        /@(Get|Post|Put|Patch|Delete|Head|Options|All)\(\s*(?:(['"`])([^'"`]*)\2\s*)?\)/g,
       )) {
         const path = joinHttpPath(globalPrefix, prefix, d[3] ?? '');
         if (!path) continue;

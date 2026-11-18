@@ -166,12 +166,10 @@ describe('diffApiContracts — nested response fields', () => {
 
   it('response enums: removed values are compatible, added values are uncertain', () => {
     const base = usersApi(USER_BASE);
-    const narrowed = base
-      .replace('enum: [ok]', 'enum: [ok]')
-      .replace(
-        'status: { type: string, enum: [ok] }',
-        'status: { type: string, enum: [ok, degraded] }',
-      );
+    const narrowed = base.replace(
+      'status: { type: string, enum: [ok] }',
+      'status: { type: string, enum: [ok, degraded] }',
+    );
     expect(diff(base, narrowed).uncertainChanges.map((c) => c.kind)).toEqual(['enum-widening']);
     expect(diff(narrowed, base).nonBreakingChanges.map((c) => c.kind)).toEqual(['enum-narrowing']);
     expect(diff(narrowed, base).breakingChanges).toEqual([]);

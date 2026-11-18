@@ -764,7 +764,7 @@ export function detectHttpCalls(content: string, _filePath?: string): HttpCall[]
 
   // One level of request wrappers in the same file: `getJson(path)` → `this.getJson(MAP.users)`.
   for (const w of wrappers) {
-    const name = w.fn.name.replace(/\$/g, '\\$');
+    const name = w.fn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // full RegExp escape
     const siteRe = new RegExp(
       `(?:\\bthis\\s*\\.\\s*|(?<![\\w$.]))${name}\\s*(?:<[^<>()]*>)?\\s*\\(`,
       'g',

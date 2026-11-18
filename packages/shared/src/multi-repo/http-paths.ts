@@ -74,11 +74,20 @@ export function normalizeHttpPath(raw: string | undefined | null): string | null
   return path.length > MAX_PATH_LENGTH ? null : path;
 }
 
+/** Strip leading and trailing `/` (linear; a `/+$` regex backtracks on long `/` runs). */
+function trimSlashes(p: string): string {
+  let start = 0;
+  let end = p.length;
+  while (start < end && p[start] === '/') start += 1;
+  while (end > start && p[end - 1] === '/') end -= 1;
+  return p.slice(start, end);
+}
+
 /** Join route prefixes (`/api` + `users/:id`) and normalize. */
 export function joinHttpPath(...parts: Array<string | undefined | null>): string | null {
   const joined = parts
     .filter((p): p is string => typeof p === 'string' && p.length > 0)
-    .map((p) => p.replace(/^\/+|\/+$/g, ''))
+    .map(trimSlashes)
     .filter(Boolean)
     .join('/');
   return normalizeHttpPath(`/${joined}`);

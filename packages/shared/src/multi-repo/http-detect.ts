@@ -1,5 +1,8 @@
 import type { RelationshipConfidence } from '@project-x/types';
 
+import { detectHttpCalls } from './http-calls';
+import { extractOpenApiOperations } from './openapi-detect';
+
 export interface HttpPathEvidence {
   method?: string;
   path: string;
@@ -74,6 +77,18 @@ export function detectHttpProviderPaths(content: string, path: string): HttpPath
       summary: `Express-style ${method} ${routePath}`,
       line: lineNumberAt(content, match.index),
       excerpt: excerptAround(content, match.index),
+    });
+  }
+
+  // Structured OpenAPI (JSON, or YAML with quoted / unquoted path keys).
+  for (const op of extractOpenApiOperations(content).operations) {
+    pushUnique(out, {
+      ...(op.method ? { method: op.method } : {}),
+      path: op.path,
+      kind: 'provider',
+      confidence: 'high',
+      summary: `OpenAPI ${op.method ?? ''} ${op.path}`.replace(/\s+/g, ' ').trim(),
+      ...(op.line ? { line: op.line } : {}),
     });
   }
 
@@ -168,6 +183,19 @@ export function detectHttpConsumerPaths(content: string, path: string): HttpPath
       summary: `Path string ${staticShape}`,
       line: lineNumberAt(content, match.index),
       excerpt: excerptAround(content, match.index),
+    });
+  }
+
+  // Calls whose URL is built from a base URL (`${USER_API_BASE_URL}/api/users`), axios config, ...
+  for (const call of detectHttpCalls(content, path)) {
+    if (call.external) continue;
+    pushUnique(out, {
+      ...(call.method ? { method: call.method } : {}),
+      path: call.path,
+      kind: 'consumer',
+      confidence: call.confidence,
+      summary: call.summary,
+      line: call.line,
     });
   }
 

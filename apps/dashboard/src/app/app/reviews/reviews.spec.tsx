@@ -276,3 +276,31 @@ describe('short server pages', () => {
     expect(screen.getByRole('status').textContent).toMatch(/GitHub could not confirm access/);
   });
 });
+
+describe('buildHistoryMarkdown — downstream impact', () => {
+  it('the export includes the viewer-authorized impact; old reviews export unchanged', () => {
+    const base = detail();
+    const withImpact = buildHistoryMarkdown({
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        downstreamImpact: {
+          status: 'no_known_consumers',
+          provider: { provider: 'github', owner: 'acme', repository: 'app' },
+          contracts: [
+            { path: 'openapi.yaml', status: 'compared', breaking: 1, nonBreaking: 0, uncertain: 0 },
+          ],
+          findings: [],
+          withheldConsumers: 0,
+          warnings: [],
+          analyzedAt: '2026-11-18T00:00:00.000Z',
+        },
+      },
+    });
+    expect(withImpact).toContain('## Downstream Impact');
+    expect(withImpact.indexOf('## Downstream Impact')).toBeLessThan(
+      withImpact.indexOf('## Summary'),
+    );
+    expect(buildHistoryMarkdown(base)).not.toContain('Downstream Impact');
+  });
+});

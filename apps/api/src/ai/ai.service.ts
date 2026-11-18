@@ -31,6 +31,7 @@ import {
   estimateAiCost,
   memoryCapabilityForAiAction,
   redactSensitiveString,
+  toRepositoryIdentity,
 } from '@project-x/shared';
 import {
   AIAction,
@@ -38,6 +39,7 @@ import {
   PR_REVIEW_SCOPE_HEADER,
   PROJECT_MEMORY_METADATA_HEADER,
   type PageContextGitHub,
+  type PrReviewDownstreamImpact,
   type PRReviewCoverage,
   type PrReviewHistoryPersistence,
   type PRReviewScope,
@@ -68,6 +70,11 @@ import {
   type PrReviewPlan,
 } from './pr-review/pr-review-plan';
 import { renderPrReview } from './pr-review/pr-review-render';
+import { renderDownstreamImpactSection } from './pr-review/pr-review-impact-render';
+import {
+  PrReviewImpactService,
+  type PrReviewImpactInput,
+} from './pr-review/pr-review-impact.service';
 import { PullRequestDiffService } from './pr-review/pull-request-diff.service';
 
 export interface AiTextStreamHandle {
@@ -142,6 +149,9 @@ type ResolvedAiRun = {
 };
 
 /** A REVIEW_ENTIRE_PR run resolved and authorized, ready for the batched orchestrator. */
+/** Deadline of the deterministic downstream impact analysis (runs alongside the batches). */
+const PR_IMPACT_BUDGET_MS = 45_000;
+
 type PrReviewRun = {
   request: AiActionRequest;
   workspaceId: string;
@@ -164,6 +174,8 @@ type PrReviewRun = {
   fileProvider?: FileContentProvider;
   /** Same access path, separate budget: cross-file dependencies for verification. */
   dependencyProvider?: FileContentProvider;
+  /** Inputs of the deterministic downstream impact analysis (contract diff + Systems graph). */
+  impactInput?: Omit<PrReviewImpactInput, 'userId' | 'signal' | 'now'>;
 };
 
 export type PrReviewExecution = {
@@ -177,6 +189,8 @@ export type PrReviewExecution = {
   replayed?: boolean;
   /** History snapshot status as confirmed by PostgreSQL (absent when not recorded). */
   reviewHistory?: PrReviewHistoryPersistence;
+  /** Deterministic cross-repository contract impact (consumers authorized for this reviewer). */
+  downstreamImpact?: PrReviewDownstreamImpact;
 };
 
 /** Metadata stored (as JSON) with a delivered result. */
@@ -234,6 +248,7 @@ export class AiService {
     @Optional()
     private readonly prReviewOrchestrator?: PrReviewOrchestrator,
     @Optional() private readonly prReviewHistory?: PrReviewHistoryService,
+    @Optional() private readonly prReviewImpact?: PrReviewImpactService,
   ) {}
 
   /** REVIEW_ENTIRE_PR runs through the batched orchestrator when the diff service exists. */
@@ -265,6 +280,7 @@ export class AiService {
     operationId?: string;
     replayed?: boolean;
     reviewHistory?: PrReviewHistoryPersistence;
+    downstreamImpact?: PrReviewDownstreamImpact;
   }> {
     if (this.usesPrOrchestrator(input)) {
       const run = await this.resolvePrReviewRun(userId, input);
@@ -1008,9 +1024,25 @@ export class AiService {
         : undefined;
     if (reservation) this.holdLease(reservation);
 
+    // Deterministic contract impact inputs: only path/status metadata and immutable SHAs.
+    const impactInput: PrReviewRun['impactInput'] = {
+      workspaceId,
+      owner,
+      repository,
+      source: diff.source,
+      ...(diff.baseSha ? { baseSha: diff.baseSha } : {}),
+      ...(diff.headSha ? { headSha: diff.headSha } : {}),
+      files: diff.files.map((f) => ({
+        path: f.path,
+        status: f.status,
+        ...(f.previousPath ? { previousPath: f.previousPath } : {}),
+      })),
+    };
+
     return {
       request,
       workspaceId,
+      impactInput,
       ...(fileProvider ? { fileProvider } : {}),
       ...(dependencyProvider ? { dependencyProvider } : {}),
       plan,
@@ -1075,8 +1107,11 @@ export class AiService {
       tokens: { input: 0, output: 0, calls: 0 },
       verificationTokens: { input: 0, output: 0, calls: 0 },
     };
+    // Runs alongside the AI batches; isolated: it can never fail or block the review.
+    const impact = this.startDownstreamImpact(userId, run, abortSignal);
     if (run.plan.batches.length > 0) {
       if (!this.prReviewOrchestrator) {
+        impact?.cancel();
         await this.releaseCharge(run, 'not_configured');
         throw new ServiceUnavailableException('Unable to generate a response.');
       }
@@ -1102,6 +1137,7 @@ export class AiService {
           ...(run.dependencyProvider ? { dependencyProvider: run.dependencyProvider } : {}),
         });
       } catch (error) {
+        impact?.cancel();
         await this.releaseCharge(run, 'orchestrator_error');
         await this.recordHistory(userId, run, {
           status: 'failed',
@@ -1122,6 +1158,7 @@ export class AiService {
     const anySucceeded = result.outcomes.some((o) => o.status === 'succeeded');
     const cancelled = result.cancelled || abortSignal?.aborted === true;
     if (run.plan.batches.length > 0 && (!anySucceeded || cancelled)) {
+      impact?.cancel();
       await this.releaseCharge(run, cancelled ? 'cancelled' : 'all_batches_failed');
       this.logPrReview(run, result, null, startedAt);
       await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
@@ -1160,11 +1197,16 @@ export class AiService {
       findings: result.findings,
     });
     this.logPrReview(run, result, coverage, startedAt);
+    const downstreamImpact = impact ? await impact.result : undefined;
+    // The reviewer's live (and replayed) response shows the section; the shared history
+    // Markdown does not — history renders the structured snapshot, re-authorized per viewer.
+    const impactSection = downstreamImpact ? renderDownstreamImpactSection(downstreamImpact) : null;
+    const liveText = impactSection ? `${impactSection}\n\n${text}` : text;
 
     let reviewHistory: PrReviewHistoryPersistence | undefined;
     if (anySucceeded) {
       await this.commitCharge(run, {
-        text,
+        text: liveText,
         meta: jsonMeta({
           reviewScope: scopeFromCoverage(coverage),
           coverage,
@@ -1195,16 +1237,18 @@ export class AiService {
         startedAt,
         coverage,
         text,
+        ...(downstreamImpact ? { downstreamImpact } : {}),
       });
     }
 
     return {
-      text,
+      text: liveText,
       reviewScope: scopeFromCoverage(coverage),
       coverage,
       ...(run.memoryMetadata ? { projectMemory: run.memoryMetadata } : {}),
       ...(run.reservation ? { operationId: run.reservation.operationId } : {}),
       ...(reviewHistory ? { reviewHistory } : {}),
+      ...(downstreamImpact ? { downstreamImpact } : {}),
     };
   }
 
@@ -1270,6 +1314,46 @@ export class AiService {
   }
 
   /**
+   * Deterministic downstream impact, started with the batches: own deadline, follows the
+   * review's cancellation, never throws (failures become an `unavailable` result). No AI
+   * call and no usage charge.
+   */
+  private startDownstreamImpact(
+    userId: string,
+    run: PrReviewRun,
+    abortSignal?: AbortSignal,
+  ): { result: Promise<PrReviewDownstreamImpact>; cancel: () => void } | null {
+    if (!this.prReviewImpact || !run.impactInput || run.replay) return null;
+    const input = run.impactInput;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PR_IMPACT_BUDGET_MS);
+    const onAbort = () => controller.abort();
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+    const result = this.prReviewImpact
+      .analyze({ ...input, userId, signal: controller.signal })
+      .catch((error: unknown): PrReviewDownstreamImpact => {
+        this.logger.warn({
+          msg: 'pr_review.impact.failed',
+          errorName: error instanceof Error ? error.name : 'unknown',
+        });
+        return {
+          status: 'unavailable',
+          provider: toRepositoryIdentity(input.owner, input.repository),
+          contracts: [],
+          findings: [],
+          withheldConsumers: 0,
+          warnings: [controller.signal.aborted ? 'timeout' : 'contract_unavailable'],
+          analyzedAt: new Date().toISOString(),
+        };
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        abortSignal?.removeEventListener('abort', onAbort);
+      });
+    return { result, cancel: () => controller.abort() };
+  }
+
+  /**
    * Persist the immutable history snapshot of a settled, charged-or-refunded execution.
    * Only real executions (with a usage reservation) are recorded — never replays, cancelled
    * runs or reviews that needed no AI call — so there is exactly one row per operation id.
@@ -1285,6 +1369,7 @@ export class AiService {
       startedAt: number;
       coverage?: PRReviewCoverage;
       text?: string;
+      downstreamImpact?: PrReviewDownstreamImpact;
     },
   ): Promise<PrReviewHistoryPersistence | undefined> {
     if (!this.prReviewHistory || !run.reservation || run.replay) return undefined;
@@ -1324,6 +1409,7 @@ export class AiService {
       durationMs: Date.now() - outcome.startedAt,
       batchCount: run.plan.batches.length,
       markdown: outcome.text ?? null,
+      ...(outcome.downstreamImpact ? { downstreamImpact: outcome.downstreamImpact } : {}),
       startedAt: new Date(outcome.startedAt),
       completedAt: new Date(),
     });

@@ -46,6 +46,8 @@ export type ParsedPrReview = {
   coverage: PRReviewCoverage | null;
   /** "## Needs Investigation": unresolved MEDIUM/HIGH candidates (not findings). */
   investigation: ParsedPrFinding[];
+  /** "## Downstream Impact": deterministic cross-repository contract impact (plain text). */
+  downstreamImpact: string;
 };
 
 // Severity tag forms seen from models: **[high]**, [HIGH], **high**, (high), **[High]**:
@@ -59,8 +61,9 @@ const SUMMARY_HEADING_RE = /^#{2,3}\s*\**\s*Summary\b.*$/im;
 const FINDINGS_HEADING_RE = /^#{2,3}\s*\**\s*(?:Risk\s+)?Findings\b.*$/im;
 const INVESTIGATION_HEADING_RE = /^#{2,3}\s*\**\s*Needs\s+Investigation\b.*$/im;
 /** Section boundaries only — sub-headings inside a legacy findings list must not cut it. */
+const DOWNSTREAM_IMPACT_HEADING_RE = /^#{2,3}\s*\**\s*Downstream\s+Impact\b.*$/im;
 const SECTION_HEADING_RE =
-  /^#{2,3}\s*\**\s*(?:Needs\s+Investigation|Summary|(?:Risk\s+)?Findings)\b.*$/gim;
+  /^#{2,3}\s*\**\s*(?:Needs\s+Investigation|Summary|(?:Risk\s+)?Findings|Downstream\s+Impact)\b.*$/gim;
 const NO_RISKS_RE =
   /\bno\s+(?:material\s+|significant\s+|notable\s+)?(?:risks?|issues?|findings?)\b/i;
 const INCOMPLETE_MARKER_RE = new RegExp(
@@ -240,16 +243,18 @@ export function parsePrReviewContent(content: string): ParsedPrReview {
     incompleteReason,
     coverage,
     investigation: [],
+    downstreamImpact: '',
   };
   if (!trimmed) {
     return empty;
   }
+  const downstreamImpact = sectionBody(trimmed, DOWNSTREAM_IMPACT_HEADING_RE.exec(trimmed));
 
   const summaryHeading = SUMMARY_HEADING_RE.exec(trimmed);
   const findingsHeading = FINDINGS_HEADING_RE.exec(trimmed);
 
   if (!summaryHeading && !findingsHeading) {
-    return { ...empty, summary: trimmed };
+    return { ...empty, summary: trimmed, downstreamImpact };
   }
 
   let summary = '';
@@ -278,5 +283,6 @@ export function parsePrReviewContent(content: string): ParsedPrReview {
     incompleteReason,
     coverage,
     investigation,
+    downstreamImpact,
   };
 }

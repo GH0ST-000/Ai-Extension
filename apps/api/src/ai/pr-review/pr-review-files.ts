@@ -12,6 +12,8 @@ export type GitHubPullFile = {
   changes?: number;
   /** Absent for binary files and for patches GitHub considers too large. */
   patch?: string;
+  /** Set by GitHub for renamed files. */
+  previous_filename?: string;
 };
 
 /** A changed file normalized from the GitHub API or the page fallback. */
@@ -21,6 +23,8 @@ export type ChangedFile = {
   status: string;
   changes: number;
   patch: string | null;
+  /** Old path of a renamed file (GitHub API only). */
+  previousPath?: string;
 };
 
 export type FileCategory =
@@ -55,6 +59,9 @@ export function normalizeGitHubFiles(files: GitHubPullFile[]): ChangedFile[] {
           ? file.changes
           : (file.additions ?? 0) + (file.deletions ?? 0),
       patch: typeof file.patch === 'string' && file.patch.length > 0 ? file.patch : null,
+      ...(typeof file.previous_filename === 'string' && file.previous_filename.trim()
+        ? { previousPath: file.previous_filename.trim() }
+        : {}),
     });
   }
   return out;

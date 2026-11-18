@@ -1,805 +1,626 @@
 'use client';
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MultiRepoRepositoryRole,
   ProjectSystem,
+  ProjectSystemRepositoryRef,
   RelatedRepositoryCandidate,
+  RepositoryIdentity,
   RepositoryRelationship,
 } from '@project-x/types';
-import { knownInSelectedScope, noOrgWideClaim, partialScopeUnavailable } from '@project-x/shared';
 
+import { EmptyState } from '../../../components/empty-state';
+import { AnalysisResult, type AnalysisState } from '../../../components/systems/analysis-result';
 import {
-  ApiError,
+  AddRepositoryDialog,
+  ConfirmRemoveDialog,
+  CreateSystemDialog,
+  SystemSettingsDialog,
+} from '../../../components/systems/system-dialogs';
+import {
+  CandidateList,
+  GithubConnectionNotice,
+  RelationshipList,
+  RepositoryList,
+  SystemOverview,
+  SystemSelectorCard,
+  type Operation,
+} from '../../../components/systems/system-sections';
+import {
+  analysisUsage,
+  candidateKey,
+  describeError,
+  lastValidatedAt,
+  repoLabel,
+  sameRepo,
+  summarizeDiscovery,
+  summarizeRefresh,
+  type ErrorGuidance,
+} from '../../../components/systems/systems-model';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  Callout,
+  Spinner,
+} from '../../../components/systems/systems-ui';
+import {
   addSystemRepository,
   createSystem,
   deleteSystem,
   discoverRelationships,
+  getGithubConnection,
   listRelationships,
   listSystems,
   refreshSystem,
   removeSystemRepository,
+  updateSystem,
   updateSystemRepository,
-  type RefreshSystemResponse,
 } from '../../../lib/api';
-import { StudioSelect } from '../../../components/studio-select';
+import { notify } from '../../../lib/notify';
+import { useWorkspace } from '../../../lib/workspace-context';
 
-const ROLE_OPTIONS: { value: MultiRepoRepositoryRole; label: string }[] = [
-  { value: 'frontend', label: 'Frontend' },
-  { value: 'backend', label: 'Backend' },
-  { value: 'gateway', label: 'Gateway' },
-  { value: 'worker', label: 'Worker' },
-  { value: 'shared-contract', label: 'Shared contract' },
-  { value: 'library', label: 'Library' },
-  { value: 'infrastructure', label: 'Infrastructure' },
-  { value: 'unknown', label: 'Unknown' },
-];
-
-const CONFIDENCE_STYLES: Record<string, string> = {
-  high: 'border-accent bg-accent-soft text-ink',
-  medium: 'border-line bg-mist text-ink',
-  low: 'border-line bg-panel text-muted-foreground',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  active: 'Active',
-  superseded: 'Superseded',
-  disputed: 'Disputed',
-};
-
-function apiMessage(err: unknown, fallback: string): string {
-  return err instanceof ApiError ? err.message : fallback;
-}
-
-function repoLabel(owner: string, repository: string): string {
-  return `${owner}/${repository}`;
-}
-
-function candidateKey(candidate: RelatedRepositoryCandidate): string {
-  return `${candidate.repository.owner}/${candidate.repository.repository}:${candidate.relationship}`;
-}
+type Dialogs = 'create' | 'add' | 'settings' | null;
 
 export default function SystemsPage() {
-  const [systems, setSystems] = useState<ProjectSystem[]>([]);
+  const {
+    ready: workspaceReady,
+    workspaceRevision,
+    current: workspaceContext,
+    refresh: refreshWorkspace,
+  } = useWorkspace();
+  const usage = analysisUsage(workspaceContext?.usage);
+  /** Plan without Systems (known from the workspace bootstrap; the API still enforces it). */
+  const featureMissing = workspaceContext?.entitlements.multiRepoIntelligence === false;
+  const analysisBlocked = featureMissing || usage?.remaining === 0;
+
+  const [systems, setSystems] = useState<ProjectSystem[] | null>(null);
+  const [loadError, setLoadError] = useState<ErrorGuidance | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<RepositoryRelationship[]>([]);
-  const [candidates, setCandidates] = useState<RelatedRepositoryCandidate[]>([]);
-  const [ignoredCandidateKeys, setIgnoredCandidateKeys] = useState<string[]>([]);
-  const [refreshMeta, setRefreshMeta] = useState<RefreshSystemResponse | null>(null);
+  const [relationshipsLoaded, setRelationshipsLoaded] = useState(false);
+  const [relationshipsError, setRelationshipsError] = useState<ErrorGuidance | null>(null);
+  /** null until an analysis ran for this system in this visit (never an invented 0). */
+  const [candidates, setCandidates] = useState<RelatedRepositoryCandidate[] | null>(null);
+  const [unavailable, setUnavailable] = useState<RepositoryIdentity[] | null>(null);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle' });
+  const [operation, setOperation] = useState<Operation>(null);
+  const [dialog, setDialog] = useState<Dialogs>(null);
+  const [removing, setRemoving] = useState<ProjectSystemRepositoryRef | null>(null);
+  const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
 
-  const [name, setName] = useState('');
-  const [primaryOwner, setPrimaryOwner] = useState('');
-  const [primaryRepo, setPrimaryRepo] = useState('');
-  const [addOwner, setAddOwner] = useState('');
-  const [addRepo, setAddRepo] = useState('');
-  const [addRole, setAddRole] = useState<MultiRepoRepositoryRole>('unknown');
-  const [addEnabled, setAddEnabled] = useState(true);
-
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Scope guard: bumps whenever the workspace or the selected system changes (and on
+   * unmount). Async results from an older scope are dropped, so a slow response can never
+   * show one system's (or workspace's) data under another.
+   */
+  const scopeRef = useRef(0);
+  /** Bumps only on workspace change / unmount (system list, GitHub status). */
+  const workspaceScopeRef = useRef(0);
+  /** Synchronous lock against double clicks before React re-renders. */
+  const lockRef = useRef(false);
 
   const selected = useMemo(
-    () => systems.find((system) => system.id === selectedId) ?? null,
+    () => systems?.find((s) => s.id === selectedId) ?? null,
     [systems, selectedId],
   );
-
+  /** Hides dismissed suggestions and ones already added to the system (e.g. manually). */
   const visibleCandidates = useMemo(
-    () => candidates.filter((c) => !ignoredCandidateKeys.includes(candidateKey(c))),
-    [candidates, ignoredCandidateKeys],
+    () =>
+      candidates?.filter(
+        (c) =>
+          !dismissed.includes(candidateKey(c)) &&
+          !selected?.repositories.some((r) => sameRepo(r.repository, c.repository)),
+      ) ?? null,
+    [candidates, dismissed, selected],
   );
 
-  const loadSystems = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const replaceSystem = useCallback((updated: ProjectSystem) => {
+    setSystems((prev) => prev?.map((s) => (s.id === updated.id ? updated : s)) ?? prev);
+  }, []);
+
+  const loadSystems = useCallback(async (preferId?: string | null) => {
+    const scope = workspaceScopeRef.current;
+    setLoadError(null);
     try {
       const list = await listSystems();
+      if (scope !== workspaceScopeRef.current) return;
       setSystems(list);
       setSelectedId((prev) => {
-        if (prev && list.some((s) => s.id === prev)) {
-          return prev;
-        }
-        return list[0]?.id ?? null;
+        const wanted = preferId ?? prev;
+        return wanted && list.some((s) => s.id === wanted) ? wanted : (list[0]?.id ?? null);
       });
     } catch (err) {
-      setSystems([]);
-      setError(apiMessage(err, 'Unable to load systems.'));
-    } finally {
-      setLoading(false);
+      if (scope !== workspaceScopeRef.current) return;
+      setSystems(null);
+      setLoadError(describeError(err, 'Systems could not be loaded'));
     }
   }, []);
 
-  const loadRelationships = useCallback(async (systemId: string) => {
-    try {
-      const list = await listRelationships(systemId);
-      setRelationships(list);
-    } catch (err) {
-      setRelationships([]);
-      setError(apiMessage(err, 'Unable to load relationships.'));
-    }
-  }, []);
-
+  // Workspace change: forget everything from the previous workspace, then reload.
   useEffect(() => {
-    void loadSystems();
-  }, [loadSystems]);
+    if (!workspaceReady) return;
+    workspaceScopeRef.current += 1;
+    scopeRef.current += 1;
+    lockRef.current = false;
+    setSystems(null);
+    setSelectedId(null);
+    setOperation(null);
+    setDialog(null);
+    setRemoving(null);
+    setGithubConnected(null);
+    void loadSystems(null);
+    const scope = workspaceScopeRef.current;
+    getGithubConnection()
+      .then((status) => {
+        if (scope === workspaceScopeRef.current) setGithubConnected(status.connected);
+      })
+      .catch(() => undefined); // unknown → no notice rather than a wrong one
+  }, [workspaceReady, workspaceRevision, loadSystems]);
 
+  // System change: results of one system never carry over to another.
   useEffect(() => {
-    if (!selectedId) {
-      setRelationships([]);
-      setCandidates([]);
-      setRefreshMeta(null);
-      return;
-    }
-    void loadRelationships(selectedId);
-  }, [selectedId, loadRelationships]);
-
-  async function onCreate(event: FormEvent) {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    const owner = primaryOwner.trim();
-    const repository = primaryRepo.trim();
-    if (!trimmedName || !owner || !repository) {
-      setError('Name, primary owner, and repository are required.');
-      return;
-    }
-    setCreating(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const created = await createSystem({
-        name: trimmedName,
-        primaryOwner: owner,
-        primaryRepository: repository,
+    scopeRef.current += 1;
+    lockRef.current = false;
+    setOperation(null);
+    setAnalysis({ status: 'idle' });
+    setCandidates(null);
+    setUnavailable(null);
+    setDismissed([]);
+    setRelationships([]);
+    setRelationshipsLoaded(false);
+    setRelationshipsError(null);
+    if (!selectedId) return;
+    const scope = scopeRef.current;
+    listRelationships(selectedId)
+      .then((list) => {
+        if (scope !== scopeRef.current) return;
+        setRelationships(list);
+        setRelationshipsLoaded(true);
+      })
+      .catch((err: unknown) => {
+        if (scope !== scopeRef.current) return;
+        setRelationshipsLoaded(true);
+        setRelationshipsError(describeError(err, 'Relationships could not be loaded'));
       });
-      setName('');
-      setPrimaryOwner('');
-      setPrimaryRepo('');
-      setMessage(`Created system “${created.name}”.`);
-      await loadSystems();
-      setSelectedId(created.id);
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to create system.'));
+  }, [selectedId]);
+
+  useEffect(
+    () => () => {
+      scopeRef.current += 1; // unmount: ignore late responses
+      workspaceScopeRef.current += 1;
+    },
+    [],
+  );
+
+  /** Runs one mutation/analysis at a time; returns undefined if the scope changed. */
+  async function exclusive<T>(
+    kind: Exclude<Operation, null>,
+    run: () => Promise<T>,
+  ): Promise<{ ok: true; value: T } | { ok: false; error: unknown } | undefined> {
+    if (lockRef.current) return undefined;
+    lockRef.current = true;
+    const scope = scopeRef.current;
+    setOperation(kind);
+    try {
+      const value = await run();
+      return scope === scopeRef.current ? { ok: true, value } : undefined;
+    } catch (error) {
+      return scope === scopeRef.current ? { ok: false, error } : undefined;
     } finally {
-      setCreating(false);
+      if (scope === scopeRef.current) {
+        lockRef.current = false;
+        setOperation(null);
+      }
     }
   }
 
-  async function onDeleteSystem() {
-    if (!selected) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await deleteSystem(selected.id);
-      setMessage(`Deleted system “${selected.name}”.`);
-      setSelectedId(null);
-      await loadSystems();
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to delete system.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onAddRepository(event: FormEvent) {
-    event.preventDefault();
-    if (!selected) {
-      return;
-    }
-    const owner = addOwner.trim();
-    const repository = addRepo.trim();
-    if (!owner || !repository) {
-      setError('Owner and repository are required.');
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const updated = await addSystemRepository(selected.id, {
-        owner,
-        repository,
-        role: addRole,
-        enabled: addEnabled,
-        source: 'user_selected',
-      });
-      setAddOwner('');
-      setAddRepo('');
-      setAddRole('unknown');
-      setAddEnabled(true);
-      setSystems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setMessage(`Added ${repoLabel(owner, repository)}.`);
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to add repository.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onRemoveRepository(owner: string, repository: string) {
-    if (!selected) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const updated = await removeSystemRepository(selected.id, owner, repository);
-      setSystems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setMessage(`Removed ${repoLabel(owner, repository)}.`);
-      await loadRelationships(selected.id);
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to remove repository.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onToggleEnabled(
-    owner: string,
-    repository: string,
-    role: MultiRepoRepositoryRole,
-    enabled: boolean,
-  ) {
-    if (!selected) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateSystemRepository(selected.id, owner, repository, {
-        role,
-        enabled: !enabled,
-      });
-      setSystems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setMessage(
-        `${repoLabel(owner, repository)} ${!enabled ? 'enabled' : 'disabled'} for analysis.`,
-      );
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to update repository.'));
-      await loadSystems();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onChangeRole(
-    owner: string,
-    repository: string,
-    enabled: boolean,
-    nextRole: MultiRepoRepositoryRole,
-  ) {
-    if (!selected) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateSystemRepository(selected.id, owner, repository, {
-        role: nextRole,
-        enabled,
-      });
-      setSystems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setMessage(`Updated role for ${repoLabel(owner, repository)}.`);
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to update repository role.'));
-      await loadSystems();
-    } finally {
-      setBusy(false);
-    }
-  }
+  // ── analysis ──────────────────────────────────────────────────────────────
 
   async function onRefresh() {
-    if (!selected) {
+    if (!selected) return;
+    const system = selected;
+    setAnalysis({ status: 'running', kind: 'refresh' });
+    const result = await exclusive('refresh', () => refreshSystem(system.id));
+    refreshWorkspace().catch(() => undefined); // charged like Discover
+    if (!result) return;
+    if (!result.ok) {
+      setAnalysis({
+        status: 'error',
+        kind: 'refresh',
+        error: describeError(result.error, 'Analysis failed'),
+      });
       return;
     }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await refreshSystem(selected.id);
-      setRefreshMeta(result);
-      setCandidates(result.candidates);
-      setMessage(
-        `Refreshed context — analyzed ${result.analyzed}, checked ${result.relationshipsChecked} relationships.`,
-      );
-      await loadRelationships(selected.id);
-      await loadSystems();
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to refresh system context.'));
-    } finally {
-      setBusy(false);
-    }
+    const value = result.value;
+    setCandidates(value.candidates);
+    setUnavailable(value.unavailable);
+    setAnalysis({
+      status: 'done',
+      kind: 'refresh',
+      summary: summarizeRefresh(value, system.repositories.length),
+      raw: value,
+      finishedAt: new Date().toISOString(),
+    });
+    const scope = scopeRef.current;
+    listRelationships(system.id)
+      .then((list) => {
+        if (scope === scopeRef.current) setRelationships(list);
+      })
+      .catch(() => undefined);
   }
 
   async function onDiscover() {
-    if (!selected) {
+    if (!selected) return;
+    const system = selected;
+    setAnalysis({ status: 'running', kind: 'discover' });
+    const result = await exclusive('discover', () => discoverRelationships(system.id));
+    // Each scan is charged: re-read the workspace usage counter (does not change workspace).
+    refreshWorkspace().catch(() => undefined);
+    if (!result) return;
+    if (!result.ok) {
+      setAnalysis({
+        status: 'error',
+        kind: 'discover',
+        error: describeError(result.error, 'Discovery failed'),
+      });
       return;
     }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await discoverRelationships(selected.id);
-      setRelationships(result.relationships);
-      setCandidates(result.candidates);
-      setMessage(
-        result.truncated
-          ? 'Discovery finished (truncated). Candidates are suggestions only — not auto-added.'
-          : 'Discovery finished. Candidates are suggestions only — not auto-added.',
-      );
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to discover relationships.'));
-    } finally {
-      setBusy(false);
-    }
+    const value = result.value;
+    setRelationships(value.relationships);
+    setRelationshipsLoaded(true);
+    setRelationshipsError(null);
+    setCandidates(value.candidates);
+    setAnalysis({
+      status: 'done',
+      kind: 'discover',
+      summary: summarizeDiscovery(value, system.repositories.length),
+      raw: value,
+      finishedAt: new Date().toISOString(),
+    });
   }
 
-  async function onAddCandidate(candidate: RelatedRepositoryCandidate) {
-    if (!selected) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await addSystemRepository(selected.id, {
+  // ── systems & repositories ────────────────────────────────────────────────
+
+  async function onCreate(input: { name: string; owner: string; repository: string }) {
+    const result = await exclusive('mutate', () =>
+      createSystem({
+        name: input.name,
+        primaryOwner: input.owner,
+        primaryRepository: input.repository,
+      }),
+    );
+    if (!result) return null;
+    if (!result.ok) return describeError(result.error, 'System could not be created');
+    setDialog(null);
+    notify.success(`Created “${result.value.name}”`);
+    await loadSystems(result.value.id);
+    return null;
+  }
+
+  async function onAddRepository(input: {
+    owner: string;
+    repository: string;
+    role: MultiRepoRepositoryRole;
+    enabled: boolean;
+  }) {
+    if (!selected) return null;
+    const systemId = selected.id;
+    const result = await exclusive('mutate', () =>
+      addSystemRepository(systemId, { ...input, source: 'user_selected' }),
+    );
+    if (!result) return null;
+    if (!result.ok) return describeError(result.error, 'Repository could not be added');
+    replaceSystem(result.value);
+    setDialog(null);
+    notify.success(`Added ${input.owner}/${input.repository}`);
+    return null;
+  }
+
+  async function onAcceptCandidate(candidate: RelatedRepositoryCandidate) {
+    if (!selected) return;
+    const systemId = selected.id;
+    const result = await exclusive('mutate', () =>
+      addSystemRepository(systemId, {
         owner: candidate.repository.owner,
         repository: candidate.repository.repository,
         role: 'unknown',
         enabled: true,
         source: 'deterministic_link',
-      });
-      setSystems((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setCandidates((prev) => prev.filter((c) => candidateKey(c) !== candidateKey(candidate)));
-      setMessage(
-        `Added ${repoLabel(candidate.repository.owner, candidate.repository.repository)}.`,
-      );
-    } catch (err) {
-      setError(apiMessage(err, 'Unable to add candidate repository.'));
-    } finally {
-      setBusy(false);
+      }),
+    );
+    if (!result) return;
+    if (!result.ok) {
+      const error = describeError(result.error, 'Repository could not be added');
+      notify.apiError(error.title, result.error);
+      return;
+    }
+    replaceSystem(result.value);
+    setCandidates(
+      (prev) => prev?.filter((c) => candidateKey(c) !== candidateKey(candidate)) ?? prev,
+    );
+    notify.success(`Added ${repoLabel(candidate.repository)}`);
+  }
+
+  function onDismissCandidate(candidate: RelatedRepositoryCandidate) {
+    const key = candidateKey(candidate);
+    setDismissed((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  }
+
+  async function onUpdateRepository(
+    ref: ProjectSystemRepositoryRef,
+    patch: { role: MultiRepoRepositoryRole; enabled: boolean },
+    errorTitle: string,
+  ) {
+    if (!selected) return;
+    const systemId = selected.id;
+    const result = await exclusive('mutate', () =>
+      updateSystemRepository(systemId, ref.repository.owner, ref.repository.repository, patch),
+    );
+    if (!result) return;
+    if (result.ok) {
+      replaceSystem(result.value);
+    } else {
+      notify.apiError(errorTitle, result.error);
+      await loadSystems(systemId);
     }
   }
 
-  function onIgnoreCandidate(candidate: RelatedRepositoryCandidate) {
-    const key = candidateKey(candidate);
-    setIgnoredCandidateKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
-    setMessage('Candidate ignored locally (not persisted).');
+  async function onConfirmRemove() {
+    if (!selected || !removing) return;
+    const systemId = selected.id;
+    const target = removing;
+    const result = await exclusive('mutate', () =>
+      removeSystemRepository(systemId, target.repository.owner, target.repository.repository),
+    );
+    if (!result) return;
+    setRemoving(null);
+    if (!result.ok) {
+      notify.apiError('Repository could not be removed', result.error);
+      return;
+    }
+    replaceSystem(result.value);
+    notify.success(`Removed ${repoLabel(target.repository)}`);
+    const scope = scopeRef.current;
+    listRelationships(systemId)
+      .then((list) => {
+        if (scope === scopeRef.current) setRelationships(list);
+      })
+      .catch(() => undefined);
   }
 
-  const systemOptions = useMemo(
-    () =>
-      systems.map((system) => ({
-        value: system.id,
-        label: `${system.name} (${repoLabel(system.primaryRepository.owner, system.primaryRepository.repository)})`,
-      })),
-    [systems],
+  async function onRename(name: string) {
+    if (!selected) return null;
+    const systemId = selected.id;
+    const result = await exclusive('mutate', () => updateSystem(systemId, { name }));
+    if (!result) return null;
+    if (!result.ok) return describeError(result.error, 'System could not be renamed');
+    replaceSystem(result.value);
+    setDialog(null);
+    notify.success('System renamed');
+    return null;
+  }
+
+  async function onDelete() {
+    if (!selected) return null;
+    const system = selected;
+    const result = await exclusive('mutate', () => deleteSystem(system.id));
+    if (!result) return null;
+    if (!result.ok) return describeError(result.error, 'System could not be deleted');
+    setDialog(null);
+    notify.success(`Deleted “${system.name}”`);
+    setSelectedId(null);
+    await loadSystems(null);
+    return null;
+  }
+
+  // ── render ────────────────────────────────────────────────────────────────
+
+  const header = (
+    <header className="rise-in space-y-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+            Multi-repo
+          </p>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-ink">
+            Systems
+          </h1>
+          <p className="mt-2 text-base text-ink">Understand how your repositories work together.</p>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Group repositories into a system to discover dependencies and analyze changes across
+            services.
+          </p>
+        </div>
+        {systems && systems.length > 0 ? (
+          <button
+            type="button"
+            disabled={operation !== null || featureMissing}
+            onClick={() => setDialog('create')}
+            className={BUTTON_PRIMARY}
+          >
+            Create system
+          </button>
+        ) : null}
+      </div>
+      <dl className="grid gap-2 text-xs sm:grid-cols-3">
+        {[
+          ['Repository', 'One GitHub repository you can access.'],
+          ['System', 'A group of repositories that work together, e.g. a web app and its APIs.'],
+          ['Relationship', 'A dependency Project X found between two repositories, with evidence.'],
+        ].map(([term, definition]) => (
+          <div key={term} className="rounded-2xl border border-line/80 bg-panel/50 px-3 py-2">
+            <dt className="font-semibold text-ink">{term}</dt>
+            <dd className="mt-0.5 text-muted-foreground">{definition}</dd>
+          </div>
+        ))}
+      </dl>
+    </header>
   );
+
+  let body: React.ReactNode;
+  if (loadError) {
+    body = (
+      <Callout
+        tone="error"
+        role="alert"
+        title={loadError.title}
+        action={
+          <button type="button" onClick={() => void loadSystems()} className={BUTTON_PRIMARY}>
+            Try again
+          </button>
+        }
+      >
+        {loadError.message}
+      </Callout>
+    );
+  } else if (systems === null) {
+    body = (
+      <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner /> Loading systems…
+      </p>
+    );
+  } else if (systems.length === 0 || !selected) {
+    body = (
+      <EmptyState
+        title="Create your first system"
+        description="Pick a primary repository — usually the main app or service — then add the repositories it depends on. Project X can then find dependencies between them. Nothing changes in GitHub."
+        action={
+          <button
+            type="button"
+            disabled={featureMissing}
+            onClick={() => setDialog('create')}
+            className={BUTTON_PRIMARY}
+          >
+            Create system
+          </button>
+        }
+      />
+    );
+  } else {
+    body = (
+      <div className="space-y-5">
+        <SystemSelectorCard
+          systems={systems}
+          selected={selected}
+          operation={operation}
+          lastValidated={lastValidatedAt(relationships)}
+          usage={usage}
+          analysisBlocked={analysisBlocked}
+          onSelect={setSelectedId}
+          onRefresh={() => void onRefresh()}
+          onDiscover={() => void onDiscover()}
+          onOpenSettings={() => setDialog('settings')}
+        />
+        <AnalysisResult
+          state={analysis}
+          onRetry={() =>
+            void (analysis.status === 'error' && analysis.kind === 'discover'
+              ? onDiscover()
+              : onRefresh())
+          }
+          onAddRepository={() => setDialog('add')}
+          onDismiss={() => setAnalysis({ status: 'idle' })}
+        />
+        <SystemOverview
+          system={selected}
+          relationshipCount={relationships.filter((r) => r.status === 'active').length}
+          relationshipsLoaded={relationshipsLoaded && !relationshipsError}
+          candidateCount={visibleCandidates?.length ?? null}
+          unavailableCount={unavailable?.length ?? null}
+        />
+        <RepositoryList
+          system={selected}
+          operation={operation}
+          onAdd={() => setDialog('add')}
+          onToggleEnabled={(ref) =>
+            void onUpdateRepository(
+              ref,
+              { role: ref.role, enabled: !ref.enabled },
+              'Repository could not be updated',
+            )
+          }
+          onChangeRole={(ref, role) =>
+            void onUpdateRepository(
+              ref,
+              { role, enabled: ref.enabled },
+              'Repository role could not be updated',
+            )
+          }
+          onRemove={setRemoving}
+        />
+        <div className="grid gap-5 xl:grid-cols-2">
+          {relationshipsError ? (
+            <Callout tone="error" role="alert" title={relationshipsError.title}>
+              {relationshipsError.message}
+            </Callout>
+          ) : (
+            <RelationshipList
+              relationships={relationships}
+              loaded={relationshipsLoaded}
+              analyzed={candidates !== null}
+              operation={operation}
+              onAnalyze={() => void onRefresh()}
+            />
+          )}
+          <CandidateList
+            candidates={visibleCandidates ?? []}
+            analyzed={visibleCandidates !== null}
+            operation={operation}
+            onAccept={(c) => void onAcceptCandidate(c)}
+            onDismiss={onDismissCandidate}
+            onRefresh={() => void onRefresh()}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
-      <header className="rise-in">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
-          Multi-repo
-        </p>
-        <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-ink">
-          Systems
-        </h1>
-        <p className="mt-3 max-w-xl text-base text-muted-foreground">
-          Group repositories you own into a system for read-only impact and flow analysis.{' '}
-          {knownInSelectedScope('relationships')} {noOrgWideClaim()}
-        </p>
-      </header>
-
-      {(message || error) && (
-        <div className="rise-in-delay-1 space-y-1 px-1" role="status">
-          {message ? <p className="text-sm text-ink">{message}</p> : null}
-          {error ? (
-            <p className="text-sm text-[#b42318]" role="alert">
-              {error}
-            </p>
-          ) : null}
-        </div>
-      )}
-
-      <section className="rise-in-delay-1 space-y-3">
-        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Create system</h2>
-        <form
-          onSubmit={onCreate}
-          className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel"
+      {header}
+      {featureMissing ? (
+        <Callout
+          title="Systems are not included in your current plan"
+          action={
+            <Link href="/app/billing" className={BUTTON_SECONDARY}>
+              View plans
+            </Link>
+          }
         >
-          <div className="grid gap-4 border-b border-line/80 px-5 py-4 sm:grid-cols-3">
-            <div>
-              <label htmlFor="system-name" className="text-sm font-semibold text-ink">
-                Name
-              </label>
-              <input
-                id="system-name"
-                type="text"
-                autoComplete="off"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 text-sm text-ink outline-none ring-accent/30 focus:ring-2"
-              />
-            </div>
-            <div>
-              <label htmlFor="system-owner" className="text-sm font-semibold text-ink">
-                Primary owner
-              </label>
-              <input
-                id="system-owner"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="octocat"
-                value={primaryOwner}
-                onChange={(event) => setPrimaryOwner(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
-              />
-            </div>
-            <div>
-              <label htmlFor="system-repo" className="text-sm font-semibold text-ink">
-                Primary repository
-              </label>
-              <input
-                id="system-repo"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="hello-world"
-                value={primaryRepo}
-                onChange={(event) => setPrimaryRepo(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
-              />
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 bg-mist/50 px-5 py-4">
-            <button
-              type="submit"
-              disabled={creating}
-              className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
-            >
-              {creating ? 'Creating…' : 'Create system'}
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                void loadSystems();
-              }}
-              className="rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-accent/40 disabled:opacity-50"
-            >
-              {loading ? 'Loading…' : 'Refresh list'}
-            </button>
-          </div>
-        </form>
-      </section>
+          You can view existing systems, but creating systems and running analyses need a plan that
+          includes multi-repository analysis.
+        </Callout>
+      ) : null}
+      {githubConnected === false ? <GithubConnectionNotice /> : null}
+      <div className="rise-in-delay-1">{body}</div>
 
-      <section className="rise-in-delay-2 space-y-3">
-        <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Selected system</h2>
-        <div className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel">
-          <div className="space-y-4 border-b border-line/80 px-5 py-4">
-            {systemOptions.length > 0 ? (
-              <StudioSelect
-                id="systems-select"
-                label="System"
-                value={selectedId ?? systemOptions[0]!.value}
-                options={systemOptions}
-                onChange={(value) => setSelectedId(value)}
-              />
-            ) : (
-              <div className="rounded-2xl border border-dashed border-line px-4 py-5">
-                <p className="text-sm font-semibold text-ink">No project systems yet</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Create a system with a primary repository to analyze related services and impact.
-                </p>
-              </div>
-            )}
-
-            {selected ? (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    void onRefresh();
-                  }}
-                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground shadow-soft transition hover:brightness-110 disabled:opacity-50"
-                >
-                  Refresh System Context
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    void onDiscover();
-                  }}
-                  className="rounded-xl border border-line bg-mist px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-accent/40 disabled:opacity-50"
-                >
-                  Discover Relationships
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    void onDeleteSystem();
-                  }}
-                  className="rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-[#b42318] transition hover:bg-mist disabled:opacity-50"
-                >
-                  Delete system
-                </button>
-              </div>
-            ) : null}
-
-            {refreshMeta?.unavailable && refreshMeta.unavailable.length > 0 ? (
-              <div
-                className="rounded-xl border border-line bg-mist/70 px-3 py-2 text-sm text-ink"
-                role="status"
-              >
-                <p className="font-semibold">Partial scope</p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
-                  {refreshMeta.unavailable.map((repo) => (
-                    <li key={repoLabel(repo.owner, repo.repository)}>
-                      {partialScopeUnavailable(repoLabel(repo.owner, repo.repository))}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-
-          {selected ? (
-            <>
-              <div className="border-b border-line/80 px-5 py-4">
-                <h3 className="font-display text-base font-semibold tracking-tight">
-                  Repositories
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Enabled repositories participate in analysis. Project X never claims org-wide
-                  coverage.
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {selected.repositories.map((ref) => {
-                    const label = repoLabel(ref.repository.owner, ref.repository.repository);
-                    const isPrimary =
-                      ref.repository.owner === selected.primaryRepository.owner &&
-                      ref.repository.repository === selected.primaryRepository.repository;
-                    return (
-                      <li
-                        key={ref.id ?? label}
-                        className="flex flex-col gap-2 rounded-2xl border border-line bg-mist/40 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div>
-                          <p className="font-mono text-sm font-semibold text-ink">{label}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {isPrimary ? 'Primary · ' : ''}
-                            source {ref.source.replaceAll('_', ' ')}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <label className="flex items-center gap-2 text-xs font-medium text-ink">
-                            <input
-                              type="checkbox"
-                              checked={ref.enabled}
-                              disabled={busy || isPrimary}
-                              onChange={() => {
-                                void onToggleEnabled(
-                                  ref.repository.owner,
-                                  ref.repository.repository,
-                                  ref.role,
-                                  ref.enabled,
-                                );
-                              }}
-                            />
-                            Enabled
-                          </label>
-                          <div className="min-w-[140px]">
-                            <StudioSelect
-                              id={`role-${label}`}
-                              label="Role"
-                              value={ref.role}
-                              options={ROLE_OPTIONS}
-                              onChange={(value) => {
-                                void onChangeRole(
-                                  ref.repository.owner,
-                                  ref.repository.repository,
-                                  ref.enabled,
-                                  value,
-                                );
-                              }}
-                            />
-                          </div>
-                          {!isPrimary ? (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                void onRemoveRepository(
-                                  ref.repository.owner,
-                                  ref.repository.repository,
-                                );
-                              }}
-                              className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink transition hover:bg-panel disabled:opacity-50"
-                            >
-                              Remove
-                            </button>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <form
-                  onSubmit={onAddRepository}
-                  className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
-                >
-                  <div className="min-w-0">
-                    <label htmlFor="add-owner" className="text-sm font-semibold text-ink">
-                      Owner
-                    </label>
-                    <input
-                      id="add-owner"
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={addOwner}
-                      onChange={(event) => setAddOwner(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <label htmlFor="add-repo" className="text-sm font-semibold text-ink">
-                      Repository
-                    </label>
-                    <input
-                      id="add-repo"
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={addRepo}
-                      onChange={(event) => setAddRepo(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm outline-none ring-accent/30 focus:ring-2"
-                    />
-                  </div>
-                  <StudioSelect
-                    id="add-role"
-                    label="Role"
-                    value={addRole}
-                    options={ROLE_OPTIONS}
-                    onChange={setAddRole}
-                    className="min-w-0"
-                  />
-                  <div className="min-w-0">
-                    <span id="add-enabled-label" className="text-sm font-semibold text-ink">
-                      Enabled
-                    </span>
-                    <div className="mt-2 flex h-[42px] items-center gap-3">
-                      <input
-                        id="add-enabled"
-                        type="checkbox"
-                        aria-labelledby="add-enabled-label"
-                        checked={addEnabled}
-                        onChange={(event) => setAddEnabled(event.target.checked)}
-                        className="size-4 shrink-0 rounded border-line"
-                      />
-                      <button
-                        type="submit"
-                        disabled={busy}
-                        className="h-full rounded-xl bg-ink px-4 text-sm font-semibold text-inverse disabled:opacity-50"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <div className="border-b border-line/80 px-5 py-4">
-                <h3 className="font-display text-base font-semibold tracking-tight">
-                  Relationships
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">{knownInSelectedScope()}</p>
-                {relationships.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    No known relationships yet. Refresh or discover to populate.
-                  </p>
-                ) : (
-                  <ul className="mt-3 space-y-2">
-                    {relationships.map((rel) => (
-                      <li
-                        key={rel.id}
-                        className="rounded-2xl border border-line bg-mist/40 px-3 py-2.5 text-sm"
-                      >
-                        <p className="font-medium text-ink">
-                          {repoLabel(rel.from.owner, rel.from.repository)}
-                          <span className="mx-1.5 text-muted-foreground">→</span>
-                          {repoLabel(rel.to.owner, rel.to.repository)}
-                        </p>
-                        <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
-                          <span className="rounded-md border border-line bg-panel px-1.5 py-0.5 font-semibold">
-                            {rel.type}
-                          </span>
-                          {rel.resource ? (
-                            <span className="rounded-md border border-line bg-panel px-1.5 py-0.5">
-                              {rel.resource.kind}: {rel.resource.key}
-                            </span>
-                          ) : null}
-                          <span
-                            className={`rounded-md border px-1.5 py-0.5 font-semibold ${CONFIDENCE_STYLES[rel.confidence] ?? CONFIDENCE_STYLES.low}`}
-                          >
-                            Confidence: {rel.confidence}
-                          </span>
-                          <span className="rounded-md border border-line bg-panel px-1.5 py-0.5">
-                            Status: {STATUS_LABELS[rel.status] ?? rel.status}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="px-5 py-4">
-                <h3 className="font-display text-base font-semibold tracking-tight">Candidates</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Suggestions only — never auto-added. Ignore dismisses locally for this session.
-                </p>
-                {visibleCandidates.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted-foreground">No pending candidates.</p>
-                ) : (
-                  <ul className="mt-3 space-y-2">
-                    {visibleCandidates.map((candidate) => {
-                      const label = repoLabel(
-                        candidate.repository.owner,
-                        candidate.repository.repository,
-                      );
-                      return (
-                        <li
-                          key={candidateKey(candidate)}
-                          className="flex flex-col gap-2 rounded-2xl border border-line bg-mist/40 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div>
-                            <p className="font-mono text-sm font-semibold text-ink">{label}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {candidate.relationship.replaceAll('_', ' ')} · confidence{' '}
-                              {candidate.confidence} ·{' '}
-                              {candidate.recommendation.replaceAll('_', ' ')}
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              disabled={busy || candidate.recommendation === 'do_not_add'}
-                              onClick={() => {
-                                void onAddCandidate(candidate);
-                              }}
-                              className="rounded-lg bg-ink px-2.5 py-1.5 text-xs font-semibold text-inverse disabled:opacity-50"
-                            >
-                              Add
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onIgnoreCandidate(candidate)}
-                              className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink"
-                            >
-                              Ignore
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </>
-          ) : null}
-        </div>
-      </section>
+      <CreateSystemDialog
+        open={dialog === 'create'}
+        onClose={() => setDialog(null)}
+        onSubmit={onCreate}
+      />
+      <AddRepositoryDialog
+        open={dialog === 'add'}
+        system={selected}
+        onClose={() => setDialog(null)}
+        onSubmit={onAddRepository}
+      />
+      <SystemSettingsDialog
+        open={dialog === 'settings'}
+        system={selected}
+        onClose={() => setDialog(null)}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
+      <ConfirmRemoveDialog
+        repository={removing ? repoLabel(removing.repository) : null}
+        pending={operation === 'mutate'}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => void onConfirmRemove()}
+      />
     </div>
   );
 }

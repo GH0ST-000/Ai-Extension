@@ -227,6 +227,8 @@ export function buildPrReviewReport(input: BuildPrReviewReportInput): PRReviewRe
     },
     ...(parsed.coverage ? { coverage: parsed.coverage } : {}),
     ...(needsInvestigation.length ? { needsInvestigation } : {}),
+    // Shown in the panel only; never copied into GitHub review drafts (private repo names).
+    ...(parsed.downstreamImpact ? { downstreamImpact: parsed.downstreamImpact } : {}),
     ...(completeness ? { completeness } : {}),
   };
 }

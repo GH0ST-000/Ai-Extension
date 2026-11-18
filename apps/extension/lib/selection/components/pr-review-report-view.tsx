@@ -480,6 +480,20 @@ export function PrReviewReportView({
 
       <PrReviewMemory metadata={memory} />
 
+      {report.downstreamImpact ? (
+        <section
+          aria-label="Downstream impact"
+          className="rounded-xl border border-border bg-surface/80 p-2.5"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Downstream impact
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-4 text-primary">
+            {report.downstreamImpact.replace(/\*\*|`|_/g, '')}
+          </p>
+        </section>
+      ) : null}
+
       <div>
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Overview</p>
         <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-4 text-primary">

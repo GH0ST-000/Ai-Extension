@@ -3,7 +3,13 @@
  * REVIEW_ENTIRE_PR executions. Reading history never calls the AI, never charges usage and
  * never writes to GitHub.
  */
-import type { PRReviewCoverage, PRReviewDiffSource, PRReviewScope } from './index';
+import type {
+  DownstreamImpactFinding,
+  PRReviewCoverage,
+  PRReviewDiffSource,
+  PRReviewScope,
+  RepositoryIdentity,
+} from './index';
 
 /** Current snapshot layout. Readers must accept every version up to this one. */
 export const PR_REVIEW_REPORT_SCHEMA_VERSION = 1;
@@ -82,6 +88,77 @@ export interface PrReviewReportSnapshot {
   };
   /** Present for failed runs and for partial runs with failed batches. */
   failure?: { code: string; failedBatches: number };
+  /**
+   * Deterministic cross-repository contract impact (absent in reviews recorded before it
+   * existed). Consumer details are re-authorized for each viewer when the report is read.
+   */
+  downstreamImpact?: PrReviewDownstreamImpact;
+}
+
+/**
+ * State of the downstream impact analysis of one PR Review. Never inferred from an empty list:
+ * - `verified`: breaking contract change(s) with potentially affected consumers;
+ * - `no_known_consumers`: breaking change(s), but no consumer in the reviewer's Systems
+ *   (NOT a statement that nothing depends on it);
+ * - `compatible`: the contract changed without breaking changes;
+ * - `not_analyzed`: no OpenAPI contract changed in this PR;
+ * - `no_system`: breaking change(s), but the repository is in none of the reviewer's Systems;
+ * - `unavailable`: the contract change could not be verified (retrieval, parsing, timeout);
+ * - `partial`: some contracts or consumer checks could not be completed.
+ */
+export type PrReviewDownstreamImpactStatus =
+  | 'verified'
+  | 'no_known_consumers'
+  | 'compatible'
+  | 'not_analyzed'
+  | 'no_system'
+  | 'unavailable'
+  | 'partial';
+
+export type PrReviewImpactWarning =
+  | 'stale_graph'
+  | 'consumers_withheld'
+  | 'access_check_unavailable'
+  | 'no_personal_token'
+  | 'contract_unavailable'
+  | 'contract_unparseable'
+  | 'contract_deleted'
+  | 'contract_too_large'
+  | 'too_many_contracts'
+  | 'rate_limited'
+  | 'timeout'
+  | 'unverified_shas';
+
+export interface PrReviewImpactContract {
+  path: string;
+  previousPath?: string;
+  /** compared: both versions parsed; added/deleted: only one side exists. */
+  status: 'compared' | 'added' | 'deleted' | 'unavailable' | 'unparseable';
+  breaking: number;
+  nonBreaking: number;
+  uncertain: number;
+}
+
+export interface PrReviewDownstreamImpact {
+  status: PrReviewDownstreamImpactStatus;
+  provider: RepositoryIdentity;
+  /** Immutable commits the contracts were read at (from GitHub PR metadata). */
+  baseSha?: string;
+  headSha?: string;
+  contracts: PrReviewImpactContract[];
+  /** Breaking operations and their potentially affected (and authorized) consumers. */
+  findings: DownstreamImpactFinding[];
+  /** Consumers hidden because the viewer's access to them could not be verified. */
+  withheldConsumers: number;
+  graph?: {
+    relationshipsConsidered: number;
+    oldestValidatedAt?: string;
+    newestValidatedAt?: string;
+    stale: boolean;
+  };
+  warnings: PrReviewImpactWarning[];
+  /** When the analysis ran (review time). */
+  analyzedAt: string;
 }
 
 /** List row: metadata only (no findings, no markdown). */

@@ -346,17 +346,23 @@ describe('MultiRepoService', () => {
   });
 
   it('discover does not auto-add candidate repositories into the system', async () => {
-    githubContent.fetchRepositoryFileAtRef.mockImplementation(
-      async (_userId: string, _o: string, repo: string, path: string) => {
-        if (repo === 'api' && path === 'README.md') {
-          return '# See also https://github.com/acme/billing-service\n';
-        }
-        if (repo === 'api' && path === 'package.json') {
-          return JSON.stringify({ name: '@acme/api' });
-        }
-        return null;
-      },
-    );
+    service.scannerFactory = () =>
+      ({
+        scan: async (_owner: string, repo: string) => ({
+          status: 'complete',
+          files:
+            repo === 'api'
+              ? [
+                  {
+                    path: 'README.md',
+                    content: '# See also https://github.com/acme/billing-service\n',
+                  },
+                  { path: 'package.json', content: JSON.stringify({ name: '@acme/api' }) },
+                ]
+              : [],
+          issues: new Map(),
+        }),
+      }) as never;
 
     const result = await service.discoverRelationships('user-1', 'sys-1');
 
@@ -370,58 +376,152 @@ describe('MultiRepoService', () => {
     ).toBe(true);
   });
 
-  it('impact requiresChange yes only when relationship evidence matches identifiers', async () => {
-    prisma.repositoryRelationship.findMany.mockResolvedValue([
-      {
-        id: 'rel-1',
-        userId: 'user-1',
-        systemId: 'sys-1',
-        fromOwner: 'acme',
-        fromRepository: 'web',
-        toOwner: 'acme',
-        toRepository: 'api',
-        type: 'CONSUMES_API',
-        resourceKind: 'http_operation',
-        resourceKey: 'POST /payments/retry',
-        confidence: 'high',
-        status: 'active',
-        freshnessJson: null,
-        provenanceJson: [
-          {
-            type: 'http_call',
-            summary: 'HTTP client POST /payments/retry',
-            filePath: 'src/api.ts',
-            observedAt: new Date().toISOString(),
-          },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastValidatedAt: new Date(),
-      },
-    ]);
+  function relRow(over: Record<string, unknown> = {}) {
+    return {
+      id: `rel-${Math.random()}`,
+      userId: 'user-1',
+      systemId: 'sys-1',
+      fromOwner: 'acme',
+      fromRepository: 'web',
+      toOwner: 'acme',
+      toRepository: 'api',
+      type: 'HTTP_CALLS',
+      resourceKind: 'http_operation',
+      resourceKey: 'POST /payments/retry',
+      confidence: 'high',
+      status: 'active',
+      freshnessJson: null,
+      provenanceJson: [
+        {
+          type: 'http_call',
+          summary: 'POST /payments/retry via API_URL (line 12)',
+          filePath: 'src/api.ts',
+          observedAt: new Date().toISOString(),
+        },
+        {
+          type: 'openapi_reference',
+          summary: 'OpenAPI POST /payments/retry',
+          filePath: 'openapi.yaml',
+          observedAt: new Date().toISOString(),
+        },
+      ],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastValidatedAt: new Date(),
+      ...over,
+    };
+  }
 
-    const withEvidence = await service.analyzeChangeImpact('user-1', {
+  it('impact: an HTTP operation named without a verified contract diff is an unverified risk, never "requires change: yes"', async () => {
+    prisma.repositoryRelationship.findMany.mockResolvedValue([relRow()]);
+    const named = await service.analyzeChangeImpact('user-1', {
       systemId: 'sys-1',
       owner: 'acme',
       repository: 'api',
       summary: 'Changed POST /payments/retry',
     });
-    expect(withEvidence.impactedRepositories.some((i) => i.requiresChange === 'yes')).toBe(true);
+    expect(named.impactedRepositories).toEqual([]);
+    expect(named.risks.map((r) => r.code)).toEqual(['HTTP_CONTRACT_IMPACT_UNVERIFIED']);
+    expect(named.risks[0]!.summary).toContain('acme/web calls POST /payments/retry');
+    expect(named.risks[0]!.evidence[0]).toMatchObject({
+      path: 'src/api.ts',
+      trust: 'deterministic_source',
+    });
     expect(
-      withEvidence.impactedRepositories.every(
-        (i) => i.requiresChange !== 'yes' || i.evidence.length > 0,
-      ),
-    ).toBe(true);
+      named.unaffectedOrNotEvident?.find((u) => u.repository.repository === 'web')?.reason,
+    ).toContain('not verified');
 
-    const withoutEvidence = await service.analyzeChangeImpact('user-1', {
+    const unrelated = await service.analyzeChangeImpact('user-1', {
       systemId: 'sys-1',
       owner: 'acme',
       repository: 'api',
       summary: 'Refactored internal helpers only',
     });
-    expect(withoutEvidence.impactedRepositories.every((i) => i.requiresChange !== 'yes')).toBe(
-      true,
-    );
+    expect(unrelated.impactedRepositories).toEqual([]);
+    expect(unrelated.risks).toEqual([]);
+  });
+
+  it('impact: no substring matches, and /health is not flagged when another endpoint changes', async () => {
+    prisma.repositoryRelationship.findMany.mockResolvedValue([
+      relRow({ resourceKey: 'GET /health' }),
+      relRow({ resourceKey: 'GET /api/users/{param}' }),
+    ]);
+    const analysis = await service.analyzeChangeImpact('user-1', {
+      systemId: 'sys-1',
+      owner: 'acme',
+      repository: 'api',
+      summary: 'Changed /api/users and /api',
+    });
+    expect(analysis.risks).toEqual([]); // /api/users ≠ /api/users/{param}; /api matches nothing
+    const byId = await service.analyzeChangeImpact('user-1', {
+      systemId: 'sys-1',
+      owner: 'acme',
+      repository: 'api',
+      summary: 'Changed GET /api/users/{userId}',
+    });
+    expect(byId.risks[0]!.summary).toContain('GET /api/users/{param}');
+    expect(byId.risks[0]!.summary).not.toContain('/health');
+  });
+
+  it('impact: a changed openapi.yaml file name alone flags nobody', async () => {
+    prisma.repositoryRelationship.findMany.mockResolvedValue([
+      relRow(),
+      relRow({ resourceKey: 'GET /health' }),
+    ]);
+    global.fetch = vi.fn(async (input: string | URL | Request) =>
+      String(input).includes('/pulls/7/files')
+        ? Response.json([
+            { filename: 'openapi.yaml', patch: '-  description: old\n+  description: new' },
+          ])
+        : Response.json({ id: 1, full_name: 'acme/api' }, { status: 200 }),
+    ) as typeof fetch;
+    const analysis = await service.analyzeChangeImpact('user-1', {
+      systemId: 'sys-1',
+      owner: 'acme',
+      repository: 'api',
+      pullRequestNumber: 7,
+    });
+    expect(analysis.impactedRepositories).toEqual([]);
+    expect(analysis.risks).toEqual([]);
+  });
+
+  it('impact is directional: a change to the consumer never flags its provider', async () => {
+    prisma.repositoryRelationship.findMany.mockResolvedValue([relRow()]);
+    const analysis = await service.analyzeChangeImpact('user-1', {
+      systemId: 'sys-1',
+      owner: 'acme',
+      repository: 'web',
+      summary: 'Changed POST /payments/retry',
+    });
+    expect(analysis.risks).toEqual([]);
+    expect(analysis.impactedRepositories).toEqual([]);
+  });
+
+  it('impact: non-HTTP (Kafka) behavior is preserved — an exact topic match is evidence', async () => {
+    prisma.repositoryRelationship.findMany.mockResolvedValue([
+      relRow({
+        type: 'CONSUMES_EVENT',
+        resourceKind: 'kafka_topic',
+        resourceKey: 'orders.created',
+        provenanceJson: [
+          {
+            type: 'kafka_consumer',
+            summary: 'consumes orders.created',
+            filePath: 'src/worker.ts',
+            observedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    ]);
+    const analysis = await service.analyzeChangeImpact('user-1', {
+      systemId: 'sys-1',
+      owner: 'acme',
+      repository: 'api',
+      summary: 'Changed payload of orders.created',
+    });
+    expect(
+      analysis.impactedRepositories.map((i) => [i.repository.repository, i.requiresChange]),
+    ).toEqual([['web', 'yes']]);
   });
 
   it('rejects hallucinated repositories via assertNoInventedRepositories', () => {

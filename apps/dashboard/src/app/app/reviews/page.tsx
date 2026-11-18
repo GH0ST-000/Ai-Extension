@@ -26,6 +26,7 @@ import {
   parsePullRequestFilter,
   parseRepositoryFilter,
 } from './reviews-data';
+import { DownstreamImpact } from '../../../components/reviews/downstream-impact';
 
 const PAGE_SIZE = 20;
 
@@ -564,6 +565,10 @@ function ReportDetail({
                 ? 'not applied'
                 : memory.status}
         </p>
+      ) : null}
+
+      {report.snapshot.downstreamImpact ? (
+        <DownstreamImpact impact={report.snapshot.downstreamImpact} />
       ) : null}
 
       {report.status !== 'failed' ? (

@@ -14,7 +14,21 @@ import {
   computeSystemContextVersion,
   detectHttpConsumerPaths,
   detectHttpProviderPaths,
+  computeDownstreamImpact,
+  detectHttpCalls,
+  httpPathsMatch,
+  parseEndpointSpec,
   detectKafkaTopicUsages,
+  detectRouteDefinitions,
+  extractOpenApiOperations,
+  looksLikeOpenApiPath,
+  matchHttpDependencies,
+  parseServiceDependencyManifest,
+  SERVICE_MANIFEST_PATH,
+  type CallSite,
+  type DeclaredDependency,
+  type ProviderOperation,
+  type RepoHttpFacts,
   knownInSelectedScope,
   MULTI_REPO_MAX_FILES_PER_REPO,
   MULTI_REPO_MAX_HTTP_OPS,
@@ -22,7 +36,6 @@ import {
   MULTI_REPO_MAX_RELATIONSHIPS,
   MULTI_REPO_MAX_REPOS_PER_ANALYSIS,
   MULTI_REPO_MAX_REPOS_PER_SYSTEM,
-  MULTI_REPO_MAX_TOTAL_FILES,
   normalizeOwnerRepo,
   notEvidentInScope,
   parseOwnerRepo,
@@ -40,6 +53,8 @@ import {
 } from '@project-x/shared';
 import type {
   AddSystemRepositoryRequest,
+  ApiContractChange,
+  DownstreamImpactResult,
   AnalyzeChangeImpactRequest,
   CreateProjectSystemRequest,
   DiscoverRelationshipsResponse,
@@ -55,11 +70,13 @@ import type {
   MultiRepoRepositorySource,
   MultiRepoRequirementCoverage,
   MultiRepoRequiresChange,
+  MultiRepoRepositoryScan,
+  MultiRepoScanIssueCode,
+  MultiRepoScanReport,
   ProjectSystem,
   RelatedRepositoryCandidate,
   RelationshipConfidence,
   RelationshipProvenance,
-  RelationshipProvenanceType,
   RelationshipResourceKind,
   RepositoryIdentity,
   RepositoryRelationship,
@@ -69,6 +86,8 @@ import type {
   TraceSystemFlowRequest,
   UpdateProjectSystemRequest,
 } from '@project-x/types';
+
+import { MULTI_REPO_MAX_CANDIDATE_LOOKUPS, MULTI_REPO_MAX_GITHUB_REQUESTS } from '@project-x/types';
 
 import { GithubContentService } from '../github/github-content.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -80,6 +99,8 @@ import { ProjectMemoryService } from '../project-memory/project-memory.service';
 import { GithubAccessService } from '../github-app/github-access.service';
 import { multiRepoException } from './multi-repo.errors';
 import { toProjectSystem, toRepositoryRelationship } from './multi-repo.mapper';
+import { RepositoryScanner, ScanBudget, type ScannedFile } from './repository-scanner';
+import { loadScopedHttpConsumers } from '../contract-impact/contract-impact.service';
 
 type SystemWithRepos = ProjectSystemRow & {
   repositories: ProjectSystemRepositoryRow[];
@@ -88,41 +109,6 @@ type SystemWithRepos = ProjectSystemRow & {
 type FetchedFile = {
   path: string;
   content: string;
-};
-
-type RepoScan = {
-  identity: RepositoryIdentity;
-  available: boolean;
-  files: FetchedFile[];
-  packageName?: string;
-  httpProviders: Array<{
-    method?: string;
-    path: string;
-    filePath: string;
-    summary: string;
-    confidence: RelationshipConfidence;
-  }>;
-  httpConsumers: Array<{
-    method?: string;
-    path: string;
-    filePath: string;
-    summary: string;
-    confidence: RelationshipConfidence;
-  }>;
-  kafkaProducers: Array<{
-    topic: string;
-    filePath: string;
-    summary: string;
-    confidence: RelationshipConfidence;
-  }>;
-  kafkaConsumers: Array<{
-    topic: string;
-    filePath: string;
-    summary: string;
-    confidence: RelationshipConfidence;
-  }>;
-  packageDeps: Array<{ name: string; filePath: string }>;
-  candidateHints: RelatedRepositoryCandidate[];
 };
 
 const KNOWN_SIGNAL_PATHS = [
@@ -142,6 +128,74 @@ const KNOWN_SIGNAL_PATHS = [
   'api/openapi.json',
 ] as const;
 
+const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i;
+
+type ProposedProvenance = Omit<RelationshipProvenance, 'observedAt'>;
+
+type ProposedRelationship = {
+  from: RepositoryIdentity;
+  to: RepositoryIdentity;
+  type: RepositoryRelationshipType;
+  resourceKind?: RelationshipResourceKind;
+  resourceKey?: string;
+  confidence: RelationshipConfidence;
+  provenance: ProposedProvenance[];
+};
+
+type DiscoveryResult = {
+  analyzed: number;
+  relationships: RepositoryRelationship[];
+  candidates: RelatedRepositoryCandidate[];
+  unavailable: RepositoryIdentity[];
+  truncated: boolean;
+  scan: MultiRepoScanReport;
+};
+
+/** HTTP dependency rows (endpoint-level or declared service-level). */
+function isHttpRelationship(rel: RepositoryRelationship): boolean {
+  return (
+    rel.type === 'HTTP_CALLS' ||
+    rel.type === 'CONSUMES_API' ||
+    rel.resource?.kind === 'http_operation' ||
+    rel.resource?.kind === 'service'
+  );
+}
+
+/**
+ * Does any changed-operation identifier ("GET /api/users", "/api/users/{id}") denote the
+ * relationship's operation? Canonical path equality (parameter names ignored) and equal
+ * methods when the identifier has one — no substring matching.
+ */
+function httpOperationTouched(relationshipKey: string, identifiers: string[]): boolean {
+  const op = parseEndpointSpec(relationshipKey);
+  if (!op) return false;
+  return identifiers.some((raw) => {
+    const id = parseEndpointSpec(raw);
+    if (!id) return false;
+    if (id.method && op.method && id.method !== op.method) return false;
+    return id.path === op.path || httpPathsMatch(id.path, op.path);
+  });
+}
+
+/** Identity of one relationship row within a user's system (matches the upsert lookup). */
+function relationshipRowKey(rel: {
+  from: { owner: string; repository: string };
+  to: { owner: string; repository: string };
+  type: string;
+  resourceKind?: string;
+  resourceKey?: string;
+}): string {
+  return [
+    rel.from.owner,
+    rel.from.repository,
+    rel.to.owner,
+    rel.to.repository,
+    rel.type,
+    rel.resourceKind ?? '',
+    rel.resourceKey ?? '',
+  ].join('|');
+}
+
 const CONFIDENCE_RANK: Record<RelationshipConfidence, number> = {
   high: 3,
   medium: 2,
@@ -160,6 +214,9 @@ const ROLE_HINTS: Array<{ role: MultiRepoRepositoryRole; tokens: string[] }> = [
 @Injectable()
 export class MultiRepoService {
   private readonly logger = new Logger(MultiRepoService.name);
+  /** Creates the per-analysis GitHub scanner (replaceable in tests; no network in tests). */
+  scannerFactory: (token: string, budget: ScanBudget) => RepositoryScanner = (token, budget) =>
+    new RepositoryScanner(token, budget);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -465,6 +522,10 @@ export class MultiRepoService {
     return rows.map(toRepositoryRelationship);
   }
 
+  /**
+   * Fresh scan + summary. Same plan check and usage charge as Discover: both run the same
+   * scanner (reading saved relationships is `listRelationships`, which is free).
+   */
   async refreshSystemContext(
     userId: string,
     systemId: string,
@@ -474,38 +535,51 @@ export class MultiRepoService {
     candidates: RelatedRepositoryCandidate[];
     unavailable: RepositoryIdentity[];
     truncated: boolean;
+    scan: MultiRepoScanReport;
   }> {
     const started = Date.now();
-    const discovery = await this.runDiscovery(userId, systemId);
+    const discovery = await this.chargedDiscovery(userId, systemId);
+    const active = discovery.relationships.filter((r) => r.status === 'active').length;
     this.logger.log({
       msg: 'multi_repo_refresh',
       systemId,
       analyzed: discovery.analyzed,
-      relationshipsChecked: discovery.relationships.length,
+      relationshipsActive: active,
       candidates: discovery.candidates.length,
       unavailable: discovery.unavailable.length,
       truncated: discovery.truncated,
+      partial: discovery.scan.partial,
+      githubRequests: discovery.scan.githubRequests,
       durationMs: Date.now() - started,
     });
     return {
       analyzed: discovery.analyzed,
-      relationshipsChecked: discovery.relationships.length,
+      // Relationships currently known for the system after this scan (superseded excluded).
+      relationshipsChecked: active,
       candidates: discovery.candidates,
       unavailable: discovery.unavailable,
       truncated: discovery.truncated,
+      scan: discovery.scan,
     };
   }
 
   /**
    * One analysis = one unit, charged only when it completes: reserved up front (quota is
    * enforced atomically), committed on success, refunded when the analysis fails.
+   * `inFlightKey` rejects a second identical operation while one is running (409).
    */
-  private async charged<T>(workspaceId: string, userId: string, run: () => Promise<T>): Promise<T> {
+  private async charged<T>(
+    workspaceId: string,
+    userId: string,
+    run: () => Promise<T>,
+    inFlightKey?: string,
+  ): Promise<T> {
     const reservation = await this.usage.reserve({
       workspaceId,
       userId,
       metric: 'multi_repo_analysis',
       operationId: randomUUID(),
+      ...(inFlightKey ? { inFlightKey } : {}),
     });
     // Analyses can outlast a lease: keep it alive so recovery never settles a running one.
     const stopHeartbeat = this.usage.startHeartbeat(reservation);
@@ -523,21 +597,34 @@ export class MultiRepoService {
     return result;
   }
 
+  /**
+   * The single entry point for a fresh scan: workspace + system authorization, plan check,
+   * usage charge, and one scan at a time per user and system (Refresh and Discover share it).
+   */
+  private async chargedDiscovery(userId: string, systemId: string): Promise<DiscoveryResult> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.requireSystem(userId, systemId); // 404 before anything is reserved
+    await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
+    return this.charged(
+      workspaceId,
+      userId,
+      () => this.runDiscovery(userId, systemId),
+      `multi_repo_scan:${userId}:${systemId}`,
+    );
+  }
+
   async discoverRelationships(
     userId: string,
     systemId: string,
   ): Promise<DiscoverRelationshipsResponse> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
-    await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
-    return this.charged(workspaceId, userId, async () => {
-      const discovery = await this.runDiscovery(userId, systemId);
-      return {
-        systemId,
-        relationships: discovery.relationships,
-        candidates: discovery.candidates,
-        truncated: discovery.truncated,
-      };
-    });
+    const discovery = await this.chargedDiscovery(userId, systemId);
+    return {
+      systemId,
+      relationships: discovery.relationships,
+      candidates: discovery.candidates,
+      truncated: discovery.truncated,
+      scan: discovery.scan,
+    };
   }
 
   async buildArchitectureContext(
@@ -692,9 +779,12 @@ export class MultiRepoService {
       const analyzed = context.repositories.filter((r) => r.available).map((r) => r.repository);
 
       const identifiers = await this.extractChangeIdentifiers(userId, input, primary);
+      // Downstream only: repositories that depend ON the changed repository (from → primary).
+      // Calls the primary makes to others, and provider-operation self rows, are not impact
+      // of a change to the primary.
       const relationships = context.relationships.filter(
         (rel) =>
-          sameRepository(rel.from, primaryIdentity) || sameRepository(rel.to, primaryIdentity),
+          sameRepository(rel.to, primaryIdentity) && !sameRepository(rel.from, primaryIdentity),
       );
 
       const analysis = buildChangeImpactSkeleton({
@@ -712,9 +802,15 @@ export class MultiRepoService {
       const impacted: MultiRepoImpactItem[] = [];
       const seen = new Set<string>();
 
+      // HTTP consumers whose operation this change appears to touch. Without a verified
+      // contract diff this is NOT evidence of breaking impact (see computeContractDownstreamImpact).
+      const unverifiedHttp = new Map<
+        string,
+        { repository: RepositoryIdentity; operations: Set<string>; evidence: MultiRepoEvidence[] }
+      >();
+
       for (const rel of relationships) {
-        const other = sameRepository(rel.from, primaryIdentity) ? rel.to : rel.from;
-        if (sameRepository(other, primaryIdentity)) continue;
+        const other = rel.from;
         if (
           !analyzed.some((r) => sameRepository(r, other)) &&
           !unavailable.some((r) => sameRepository(r, other))
@@ -722,6 +818,32 @@ export class MultiRepoService {
           continue;
         }
         if (unavailable.some((r) => sameRepository(r, other))) continue;
+
+        if (isHttpRelationship(rel)) {
+          // Canonical method + path only — never file names, substrings or shared endpoints.
+          const key = rel.resource?.kind === 'http_operation' ? rel.resource.key : undefined;
+          if (key && httpOperationTouched(key, identifiers.httpKeys)) {
+            const entry = unverifiedHttp.get(repositoryKey(other)) ?? {
+              repository: other,
+              operations: new Set<string>(),
+              evidence: [],
+            };
+            entry.operations.add(key);
+            const call = rel.provenance.find((p) => p.type === 'http_call');
+            if (call && entry.evidence.length < 5) {
+              entry.evidence.push({
+                repository: other,
+                type: 'api_operation',
+                ref: key,
+                ...(call.filePath ? { path: call.filePath } : {}),
+                summary: call.summary,
+                trust: 'deterministic_source',
+              });
+            }
+            unverifiedHttp.set(repositoryKey(other), entry);
+          }
+          continue;
+        }
 
         const matched = this.relationshipMatchesIdentifiers(rel, identifiers);
         const key = repositoryKey(other);
@@ -795,18 +917,33 @@ export class MultiRepoService {
       }
 
       analysis.impactedRepositories = impacted.filter((i) => i.requiresChange === 'yes');
+      for (const entry of unverifiedHttp.values()) {
+        const ops = [...entry.operations].sort().join(', ');
+        analysis.risks.push({
+          code: 'HTTP_CONTRACT_IMPACT_UNVERIFIED',
+          severity: 'medium',
+          summary: `${entry.repository.owner}/${entry.repository.repository} calls ${ops}, which this change appears to touch. No contract diff was available, so breaking impact is not verified.`,
+          repositories: [entry.repository],
+          evidence: entry.evidence,
+        });
+      }
       analysis.unaffectedOrNotEvident = enabledIdentities
         .filter(
           (repo) =>
             !sameRepository(repo, primaryIdentity) &&
             !analysis.impactedRepositories.some((i) => sameRepository(i.repository, repo)),
         )
-        .map((repository) => ({
-          repository,
-          reason: unavailable.some((u) => sameRepository(u, repository))
-            ? partialScopeUnavailable(`${repository.owner}/${repository.repository}`)
-            : notEvidentInScope('Impact'),
-        }));
+        .map((repository) => {
+          const unverified = unverifiedHttp.get(repositoryKey(repository));
+          return {
+            repository,
+            reason: unavailable.some((u) => sameRepository(u, repository))
+              ? partialScopeUnavailable(`${repository.owner}/${repository.repository}`)
+              : unverified
+                ? `Calls ${[...unverified.operations].sort().join(', ')}; contract impact not verified (no contract diff available).`
+                : notEvidentInScope('Impact'),
+          };
+        });
 
       analysis.requiredCoordination = analysis.impactedRepositories.map((item) => ({
         repository: item.repository,
@@ -815,6 +952,41 @@ export class MultiRepoService {
       }));
 
       return analysis;
+    });
+  }
+
+  /**
+   * Downstream consumers of a VERIFIED contract diff of `owner/repository` (Phase 1: internal,
+   * for callers that already hold a deterministic diff, e.g. PR Review in Phase 2).
+   *
+   * Authorization and scoping happen here, before the pure calculation sees any data:
+   * systems of the caller's workspace that contain the provider as an ENABLED repository
+   * (optionally one system), the caller's own ACTIVE `HTTP_CALLS` rows into the provider, and
+   * only from repositories enabled in that system. No GitHub calls, no usage charge.
+   */
+  async computeContractDownstreamImpact(
+    userId: string,
+    input: {
+      owner: string;
+      repository: string;
+      changes: ApiContractChange[];
+      systemId?: string;
+      now?: Date;
+    },
+  ): Promise<DownstreamImpactResult> {
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const provider = toRepositoryIdentity(input.owner, input.repository);
+    const { relationships: scoped } = await loadScopedHttpConsumers(this.prisma, {
+      userId,
+      workspaceId,
+      provider,
+      ...(input.systemId ? { systemId: input.systemId } : {}),
+    });
+    return computeDownstreamImpact({
+      provider,
+      changes: input.changes,
+      relationships: scoped,
+      ...(input.now ? { now: input.now } : {}),
     });
   }
 
@@ -1194,107 +1366,574 @@ export class MultiRepoService {
     return row;
   }
 
-  private async runDiscovery(
-    userId: string,
-    systemId: string,
-  ): Promise<{
-    analyzed: number;
-    relationships: RepositoryRelationship[];
-    candidates: RelatedRepositoryCandidate[];
-    unavailable: RepositoryIdentity[];
-    truncated: boolean;
-  }> {
+  /**
+   * One fresh, bounded scan of the system's enabled repositories (see repository-scanner.ts),
+   * deterministic matching (shared http-match), then persistence of this user's findings.
+   * Never adds repositories; suggestions are access-checked and capped.
+   */
+  private async runDiscovery(userId: string, systemId: string): Promise<DiscoveryResult> {
     const system = await this.requireSystem(userId, systemId);
     const enabled = system.repositories.filter((r) => r.enabled);
+    const token = await this.githubAccess.getDecryptedToken(userId);
+    if (!token) {
+      throw multiRepoException(
+        'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
+        'Connect a GitHub token in dashboard Settings before using multi-repo systems.',
+      );
+    }
+    const budget = new ScanBudget(MULTI_REPO_MAX_GITHUB_REQUESTS);
+    const scanner = this.scannerFactory(token, budget);
+
+    type Scanned = {
+      identity: RepositoryIdentity;
+      key: string;
+      files: ScannedFile[];
+      report: MultiRepoRepositoryScan;
+    };
+    const scanned: Scanned[] = [];
     const unavailable: RepositoryIdentity[] = [];
-    const scans: RepoScan[] = [];
-    let totalFiles = 0;
+    let filesUsed = 0;
     let truncated = false;
+    const TRUNCATION: MultiRepoScanIssueCode[] = [
+      'tree_truncated',
+      'file_budget_reached',
+      'byte_budget_reached',
+      'request_budget_reached',
+    ];
 
     for (const repo of enabled) {
       const identity = toRepositoryIdentity(repo.owner, repo.repository);
-      const ok = await this.tryAuthorize(userId, repo.owner, repo.repository);
-      if (!ok) {
-        unavailable.push(identity);
-        scans.push({
-          identity,
-          available: false,
-          files: [],
-          httpProviders: [],
-          httpConsumers: [],
-          kafkaProducers: [],
-          kafkaConsumers: [],
-          packageDeps: [],
-          candidateHints: [],
+      const remaining = remainingTotalFileBudget(filesUsed);
+      const result =
+        remaining > 0
+          ? await scanner.scan(
+              identity.owner,
+              identity.repository,
+              Math.min(MULTI_REPO_MAX_FILES_PER_REPO, remaining),
+            )
+          : {
+              status: 'partial' as const,
+              files: [],
+              issues: new Map<MultiRepoScanIssueCode, number>([['file_budget_reached', 1]]),
+            };
+      filesUsed += result.files.length;
+      if (result.status === 'unavailable') unavailable.push(identity);
+      if (TRUNCATION.some((code) => result.issues.has(code))) truncated = true;
+      scanned.push({
+        identity,
+        key: repositoryKey(identity),
+        files: result.files,
+        report: {
+          repository: identity,
+          status: result.status,
+          ...('branch' in result && result.branch ? { branch: result.branch } : {}),
+          filesScanned: result.files.length,
+          issues: [...result.issues].map(([code, count]) => ({ code, count })),
+          unresolvedHttpCalls: 0,
+        },
+      });
+    }
+
+    const available = scanned.filter((s) => s.report.status !== 'unavailable');
+    const byKey = new Map(available.map((s) => [s.key, s]));
+    const systemKeys = new Set(
+      system.repositories.map((r) => repositoryKey(toRepositoryIdentity(r.owner, r.repository))),
+    );
+    const now = new Date().toISOString();
+    const hints: RelatedRepositoryCandidate[] = [];
+    const facts: RepoHttpFacts[] = [];
+    const proposed: ProposedRelationship[] = [];
+    const packageNames = new Map<string, string>();
+    const packageDeps: Array<{ key: string; name: string; filePath: string }> = [];
+    const kafka: Array<{
+      key: string;
+      role: 'producer' | 'consumer';
+      topic: string;
+      filePath: string;
+      summary: string;
+      confidence: RelationshipConfidence;
+    }> = [];
+    const addIssue = (s: Scanned, code: MultiRepoScanIssueCode) => {
+      const existing = s.report.issues.find((i) => i.code === code);
+      if (existing) existing.count += 1;
+      else s.report.issues.push({ code, count: 1 });
+      if (s.report.status === 'complete') s.report.status = 'partial';
+    };
+
+    for (const repo of available) {
+      const operations: ProviderOperation[] = [];
+      const calls: CallSite[] = [];
+      const declared: DeclaredDependency[] = [];
+      for (const file of repo.files) {
+        if (looksLikeOpenApiPath(file.path)) {
+          for (const op of extractOpenApiOperations(file.content).operations) {
+            operations.push({
+              ...op,
+              filePath: file.path,
+              source: 'openapi',
+              confidence: 'high',
+              summary: `OpenAPI ${op.method ?? 'ANY'} ${op.path}`,
+            });
+          }
+        }
+        if (SOURCE_FILE.test(file.path)) {
+          for (const call of detectHttpCalls(file.content, file.path)) {
+            calls.push({ ...call, filePath: file.path });
+          }
+        }
+        if (file.path === 'package.json') {
+          const manifest = parsePackageJsonManifest(file.content);
+          if (manifest?.name) packageNames.set(repo.key, manifest.name);
+          for (const dep of manifest?.dependencies ?? []) {
+            packageDeps.push({ key: repo.key, name: dep.name, filePath: file.path });
+          }
+          const ref = manifest?.repository;
+          if (ref?.owner && ref.repository) {
+            const other = toRepositoryIdentity(ref.owner, ref.repository);
+            if (!sameRepository(other, repo.identity)) {
+              hints.push(
+                this.hint(
+                  other,
+                  'documentation_reference',
+                  'medium',
+                  file.path,
+                  'package.json repository field',
+                  now,
+                ),
+              );
+            }
+          }
+        }
+        if (/^readme\.md$/i.test(file.path)) {
+          const linkRe =
+            /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)/gi;
+          for (const match of file.content.matchAll(linkRe)) {
+            const other = toRepositoryIdentity(match[1]!, match[2]!.replace(/\.git$/i, ''));
+            if (sameRepository(other, repo.identity)) continue;
+            hints.push(
+              this.hint(other, 'documentation_reference', 'low', file.path, 'README link', now),
+            );
+          }
+        }
+        for (const hit of detectKafkaTopicUsages(file.content, file.path)) {
+          kafka.push({
+            key: repo.key,
+            role: hit.role,
+            topic: hit.topic,
+            filePath: file.path,
+            summary: hit.summary,
+            confidence: hit.confidence,
+          });
+        }
+      }
+      for (const route of detectRouteDefinitions(
+        repo.files.filter((f) => SOURCE_FILE.test(f.path)),
+      )) {
+        operations.push({
+          ...(route.method ? { method: route.method } : {}),
+          path: route.path,
+          filePath: route.filePath,
+          line: route.line,
+          source: 'route',
+          confidence: route.confidence,
+          summary: route.summary,
+        });
+      }
+
+      // service-dependencies.json: repository-authored claims, resolved inside the system only.
+      const manifestFile = repo.files.find((f) => f.path === SERVICE_MANIFEST_PATH);
+      if (manifestFile) {
+        const parsed = parseServiceDependencyManifest(manifestFile.content);
+        if (!parsed.ok) addIssue(repo, 'manifest_invalid');
+        else {
+          for (const dep of parsed.dependencies) {
+            if (dep.type !== 'http' && dep.type !== 'unknown') continue;
+            const target = dep.repository
+              ? toRepositoryIdentity(dep.repository.owner, dep.repository.repository)
+              : this.systemRepositoryByName(system, dep.service);
+            if (!target) continue;
+            const targetKey = repositoryKey(target);
+            if (targetKey === repo.key) continue;
+            if (!systemKeys.has(targetKey)) {
+              // Outside the system: at most a suggestion (access-checked below), never a link.
+              hints.push(
+                this.hint(
+                  target,
+                  'api_provider',
+                  'medium',
+                  manifestFile.path,
+                  SERVICE_MANIFEST_PATH,
+                  now,
+                ),
+              );
+              continue;
+            }
+            // Disabled or inaccessible repositories never get relationships.
+            if (!byKey.has(targetKey)) continue;
+            declared.push({
+              targetKey,
+              filePath: manifestFile.path,
+              ...(dep.baseUrlEnv ? { baseUrlEnv: dep.baseUrlEnv } : {}),
+              endpoints: dep.endpoints,
+            });
+          }
+        }
+      }
+      facts.push({ key: repo.key, operations, calls, declared });
+    }
+
+    // HTTP: consumer → provider.
+    const match = matchHttpDependencies(facts);
+    for (const [key, count] of match.unresolved) {
+      const s = byKey.get(key);
+      if (s) s.report.unresolvedHttpCalls = count;
+    }
+    for (const link of match.links) {
+      const from = byKey.get(link.consumerKey)!.identity;
+      const to = byKey.get(link.providerKey)!.identity;
+      const declaredEvidence: ProposedProvenance[] = link.declared
+        ? [
+            {
+              type: 'service_manifest',
+              owner: from.owner,
+              repository: from.repository,
+              filePath: link.declared.filePath,
+              summary: `Declared in ${SERVICE_MANIFEST_PATH}${link.declared.baseUrlEnv ? ` (${link.declared.baseUrlEnv})` : ''}${
+                link.corroborated ? '' : ' — not confirmed by provider routes or OpenAPI'
+              }`,
+            },
+          ]
+        : [];
+      if (link.endpoints.length === 0) {
+        proposed.push({
+          from,
+          to,
+          type: 'HTTP_CALLS',
+          resourceKind: 'service',
+          resourceKey: `${to.owner}/${to.repository}`,
+          confidence: link.confidence,
+          provenance: declaredEvidence,
         });
         continue;
       }
-
-      const files = await this.fetchHighSignalFiles(
-        userId,
-        repo.owner,
-        repo.repository,
-        totalFiles,
-      );
-      totalFiles += files.length;
-      if (
-        files.length >= MULTI_REPO_MAX_FILES_PER_REPO ||
-        totalFiles >= MULTI_REPO_MAX_TOTAL_FILES
-      ) {
-        truncated = true;
+      for (const endpoint of link.endpoints) {
+        const resourceKey = endpoint.method ? `${endpoint.method} ${endpoint.path}` : endpoint.path;
+        const callEvidence: ProposedProvenance[] = endpoint.calls.slice(0, 3).map((call) => ({
+          type: 'http_call',
+          owner: from.owner,
+          repository: from.repository,
+          filePath: call.filePath,
+          summary: `${call.method ?? 'HTTP'} ${call.path}${call.baseRef ? ` via ${call.baseRef}` : ''} (line ${call.line})`,
+        }));
+        const op = endpoint.operation;
+        // Every provider record of this endpoint (OpenAPI contract and/or server route).
+        const providerEvidence: ProposedProvenance[] = endpoint.operations.map((o) => ({
+          type: o.source === 'openapi' ? 'openapi_reference' : 'http_call',
+          owner: to.owner,
+          repository: to.repository,
+          filePath: o.filePath,
+          summary: `${o.source === 'openapi' ? 'OpenAPI' : 'Route'} ${o.method ?? 'ANY'} ${o.path}${o.line ? ` (line ${o.line})` : ''}`,
+        }));
+        proposed.push({
+          from,
+          to,
+          type: 'HTTP_CALLS',
+          resourceKind: 'http_operation',
+          resourceKey,
+          confidence: link.confidence,
+          provenance: [...callEvidence, ...providerEvidence, ...declaredEvidence],
+        });
+        if (op) {
+          proposed.push({
+            from: to,
+            to,
+            type: 'PROVIDES_API',
+            resourceKind: 'http_operation',
+            resourceKey,
+            confidence: op.confidence,
+            provenance: providerEvidence,
+          });
+        }
       }
-
-      const scan = this.scanRepoFiles(identity, files);
-      scans.push(scan);
     }
 
-    const inSystemKeys = new Set(system.repositories.map((r) => `${r.owner}/${r.repository}`));
-
-    const candidates: RelatedRepositoryCandidate[] = [];
-    for (const scan of scans) {
-      for (const hint of scan.candidateHints) {
-        const key = `${hint.repository.owner}/${hint.repository.repository}`;
-        if (inSystemKeys.has(key)) continue;
-        const accessible = await this.tryAuthorize(
-          userId,
-          hint.repository.owner,
-          hint.repository.repository,
-        );
-        if (!accessible) continue;
-        candidates.push({
-          ...hint,
-          recommendation: 'suggest_add',
+    // Kafka: consumer → producer on the same topic (unchanged semantics, wider file scope).
+    for (const producer of kafka.filter((k) => k.role === 'producer')) {
+      for (const consumer of kafka.filter(
+        (k) => k.role === 'consumer' && k.topic === producer.topic && k.key !== producer.key,
+      )) {
+        const from = byKey.get(consumer.key)!.identity;
+        const to = byKey.get(producer.key)!.identity;
+        proposed.push({
+          from,
+          to,
+          type: 'CONSUMES_EVENT',
+          resourceKind: 'kafka_topic',
+          resourceKey: producer.topic,
+          confidence: consumer.confidence,
+          provenance: [
+            {
+              type: 'kafka_consumer',
+              owner: from.owner,
+              repository: from.repository,
+              filePath: consumer.filePath,
+              summary: consumer.summary,
+            },
+            {
+              type: 'kafka_producer',
+              owner: to.owner,
+              repository: to.repository,
+              filePath: producer.filePath,
+              summary: producer.summary,
+            },
+          ],
         });
       }
     }
 
-    const proposed = this.buildDetectedRelationships(scans);
+    // npm packages: dependent → repository publishing that package name.
+    for (const dep of packageDeps) {
+      const providerKey = [...packageNames].find(
+        ([key, name]) => key !== dep.key && name.toLowerCase() === dep.name.toLowerCase(),
+      )?.[0];
+      if (!providerKey) continue;
+      const from = byKey.get(dep.key)!.identity;
+      const to = byKey.get(providerKey)!.identity;
+      proposed.push({
+        from,
+        to,
+        type: 'DEPENDS_ON_PACKAGE',
+        resourceKind: 'package',
+        resourceKey: dep.name,
+        confidence: 'high',
+        provenance: [
+          {
+            type: 'package_reference',
+            owner: from.owner,
+            repository: from.repository,
+            filePath: dep.filePath,
+            summary: `Depends on package ${dep.name}`,
+          },
+        ],
+      });
+    }
+
+    // Suggestions: de-duplicated BEFORE any access check, outside the system only, capped.
+    const candidates: RelatedRepositoryCandidate[] = [];
+    const outside = this.dedupeCandidates(hints).filter(
+      (h) => !systemKeys.has(repositoryKey(h.repository)),
+    );
+    for (const hint of outside.slice(0, MULTI_REPO_MAX_CANDIDATE_LOOKUPS)) {
+      if (!budget.take()) break;
+      if (await this.tryAuthorize(userId, hint.repository.owner, hint.repository.repository)) {
+        candidates.push({ ...hint, recommendation: 'suggest_add' });
+      }
+    }
+
+    // Persist (this user's rows only), then retire findings a complete re-scan no longer sees.
+    const unique = new Map<string, ProposedRelationship>();
+    for (const rel of proposed) {
+      const key = relationshipRowKey(rel);
+      const existing = unique.get(key);
+      if (!existing || CONFIDENCE_RANK[rel.confidence] > CONFIDENCE_RANK[existing.confidence]) {
+        unique.set(key, rel);
+      }
+    }
     const { items: limited, truncated: relTruncated } = truncateToBudget(
-      proposed,
+      [...unique.values()],
       MULTI_REPO_MAX_RELATIONSHIPS,
     );
     truncated = truncated || relTruncated;
-
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const kept = new Set<string>();
     for (const rel of limited) {
-      await this.upsertRelationship(userId, systemId, rel);
+      await this.upsertRelationship(userId, workspaceId, systemId, rel);
+      kept.add(relationshipRowKey(rel));
+    }
+    if (!relTruncated) {
+      const complete = new Set(
+        available.filter((s) => s.report.status === 'complete').map((s) => s.key),
+      );
+      await this.supersedeStaleRelationships(userId, systemId, complete, kept);
     }
 
     const relationships = (
       await this.prisma.repositoryRelationship.findMany({
         where: { userId, systemId },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
         take: MULTI_REPO_MAX_RELATIONSHIPS,
       })
     ).map(toRepositoryRelationship);
 
-    // Never auto-add candidates into the system.
+    const reports = scanned.map((s) => s.report);
     return {
-      analyzed: scans.filter((s) => s.available).length,
+      analyzed: available.length,
       relationships,
-      candidates: this.dedupeCandidates(candidates),
+      candidates,
       unavailable,
       truncated,
+      scan: {
+        partial: reports.some((r) => r.status !== 'complete'),
+        repositories: reports,
+        githubRequests: budget.requests,
+      },
     };
+  }
+
+  private hint(
+    repository: RepositoryIdentity,
+    relationship: RelatedRepositoryCandidate['relationship'],
+    confidence: RelationshipConfidence,
+    filePath: string,
+    source: string,
+    observedAt: string,
+  ): RelatedRepositoryCandidate {
+    return {
+      repository,
+      relationship,
+      confidence,
+      evidence: [
+        {
+          filePath,
+          summary: `${source} points to ${repository.owner}/${repository.repository}`,
+          observedAt,
+        },
+      ],
+      recommendation: 'suggest_add',
+    };
+  }
+
+  /** A manifest `service` name → the one system repository with that name (else none). */
+  private systemRepositoryByName(
+    system: SystemWithRepos,
+    service: string | undefined,
+  ): RepositoryIdentity | null {
+    if (!service) return null;
+    const matches = system.repositories.filter(
+      (r) => r.repository.toLowerCase() === service.toLowerCase(),
+    );
+    return matches.length === 1
+      ? toRepositoryIdentity(matches[0]!.owner, matches[0]!.repository)
+      : null;
+  }
+
+  /**
+   * Mark this user's scanner findings that a COMPLETE scan of both repositories no longer
+   * produced as superseded (kept as history, excluded from analysis context). Never touches
+   * other users' rows, user-confirmed rows, or rows involving partially read, unavailable or
+   * disabled repositories.
+   */
+  private async supersedeStaleRelationships(
+    userId: string,
+    systemId: string,
+    completeKeys: Set<string>,
+    kept: Set<string>,
+  ): Promise<void> {
+    if (completeKeys.size === 0) return;
+    const rows = await this.prisma.repositoryRelationship.findMany({
+      where: { userId, systemId, status: 'active' },
+      take: 1000,
+    });
+    const stale = rows.filter((row) => {
+      const provenance = (row.provenanceJson as unknown as RelationshipProvenance[]) ?? [];
+      if (provenance.some((p) => p.type === 'user_explicit')) return false;
+      const fromKey = repositoryKey({ owner: row.fromOwner, repository: row.fromRepository });
+      const toKey = repositoryKey({ owner: row.toOwner, repository: row.toRepository });
+      if (!completeKeys.has(fromKey) || !completeKeys.has(toKey)) return false;
+      return !kept.has(
+        relationshipRowKey({
+          from: { owner: row.fromOwner, repository: row.fromRepository },
+          to: { owner: row.toOwner, repository: row.toRepository },
+          type: row.type,
+          resourceKind: row.resourceKind ?? undefined,
+          resourceKey: row.resourceKey ?? undefined,
+        }),
+      );
+    });
+    if (stale.length === 0) return;
+    await this.prisma.repositoryRelationship.updateMany({
+      where: { id: { in: stale.map((r) => r.id) }, userId, systemId },
+      data: { status: 'superseded' },
+    });
+  }
+
+  /**
+   * Insert or refresh one of THIS user's relationship rows (rows are per user: another
+   * member's scan never modifies them). Re-found rows reflect the latest scan's evidence.
+   */
+  private async upsertRelationship(
+    userId: string,
+    workspaceId: string,
+    systemId: string,
+    rel: ProposedRelationship,
+  ): Promise<void> {
+    const existing = await this.prisma.repositoryRelationship.findFirst({
+      where: {
+        userId,
+        systemId,
+        fromOwner: rel.from.owner,
+        fromRepository: rel.from.repository,
+        toOwner: rel.to.owner,
+        toRepository: rel.to.repository,
+        type: rel.type,
+        resourceKind: rel.resourceKind ?? null,
+        resourceKey: rel.resourceKey ?? null,
+      },
+    });
+    const now = new Date();
+    const provenance: RelationshipProvenance[] = rel.provenance.map((p) => ({
+      ...p,
+      observedAt: now.toISOString(),
+    }));
+    const freshness = { lastValidatedAt: now.toISOString() };
+
+    if (!existing) {
+      await this.prisma.repositoryRelationship.create({
+        data: {
+          userId,
+          workspaceId,
+          systemId,
+          fromOwner: rel.from.owner,
+          fromRepository: rel.from.repository,
+          toOwner: rel.to.owner,
+          toRepository: rel.to.repository,
+          type: rel.type,
+          resourceKind: rel.resourceKind ?? null,
+          resourceKey: rel.resourceKey ?? null,
+          confidence: rel.confidence,
+          status: 'active',
+          provenanceJson: provenance as unknown as Prisma.InputJsonValue,
+          freshnessJson: freshness as unknown as Prisma.InputJsonValue,
+          lastValidatedAt: now,
+        },
+      });
+      return;
+    }
+
+    const existingProvenance =
+      (existing.provenanceJson as unknown as RelationshipProvenance[]) ?? [];
+    if (existingProvenance.some((p) => p.type === 'user_explicit')) {
+      // A user-confirmed relationship keeps its provenance; the scan only re-validates it.
+      await this.prisma.repositoryRelationship.update({
+        where: { id: existing.id },
+        data: {
+          lastValidatedAt: now,
+          freshnessJson: freshness as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return;
+    }
+
+    await this.prisma.repositoryRelationship.update({
+      where: { id: existing.id },
+      data: {
+        confidence: rel.confidence,
+        status: 'active',
+        provenanceJson: provenance as unknown as Prisma.InputJsonValue,
+        freshnessJson: freshness as unknown as Prisma.InputJsonValue,
+        lastValidatedAt: now,
+      },
+    });
   }
 
   private async fetchHighSignalFiles(
@@ -1328,362 +1967,6 @@ export class MultiRepoService {
     }
 
     return files;
-  }
-
-  private scanRepoFiles(identity: RepositoryIdentity, files: FetchedFile[]): RepoScan {
-    const scan: RepoScan = {
-      identity,
-      available: true,
-      files,
-      httpProviders: [],
-      httpConsumers: [],
-      kafkaProducers: [],
-      kafkaConsumers: [],
-      packageDeps: [],
-      candidateHints: [],
-    };
-
-    const now = new Date().toISOString();
-
-    for (const file of files) {
-      if (file.path.endsWith('package.json') || file.path === 'package.json') {
-        const manifest = parsePackageJsonManifest(file.content);
-        if (manifest?.name) scan.packageName = manifest.name;
-        if (manifest) {
-          for (const dep of manifest.dependencies) {
-            scan.packageDeps.push({ name: dep.name, filePath: file.path });
-          }
-          if (manifest.repository?.owner && manifest.repository.repository) {
-            const other = toRepositoryIdentity(
-              manifest.repository.owner,
-              manifest.repository.repository,
-            );
-            if (!sameRepository(other, identity)) {
-              scan.candidateHints.push({
-                repository: other,
-                relationship: 'documentation_reference',
-                confidence: 'medium',
-                evidence: [
-                  {
-                    filePath: file.path,
-                    summary: `package.json repository field points to ${other.owner}/${other.repository}`,
-                    observedAt: now,
-                  },
-                ],
-                recommendation: 'suggest_add',
-              });
-            }
-          }
-        }
-      }
-
-      if (/readme\.md$/i.test(file.path)) {
-        const linkRe =
-          /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi;
-        let match: RegExpExecArray | null;
-        while ((match = linkRe.exec(file.content)) !== null) {
-          const other = toRepositoryIdentity(match[1]!, match[2]!);
-          if (sameRepository(other, identity)) continue;
-          scan.candidateHints.push({
-            repository: other,
-            relationship: 'documentation_reference',
-            confidence: 'low',
-            evidence: [
-              {
-                filePath: file.path,
-                summary: `README references github.com/${other.owner}/${other.repository}`,
-                observedAt: now,
-              },
-            ],
-            recommendation: 'suggest_add',
-          });
-        }
-      }
-
-      for (const hit of detectHttpProviderPaths(file.content, file.path)) {
-        scan.httpProviders.push({
-          method: hit.method,
-          path: hit.path,
-          filePath: file.path,
-          summary: hit.summary,
-          confidence: hit.confidence,
-        });
-      }
-      for (const hit of detectHttpConsumerPaths(file.content, file.path)) {
-        scan.httpConsumers.push({
-          method: hit.method,
-          path: hit.path,
-          filePath: file.path,
-          summary: hit.summary,
-          confidence: hit.confidence,
-        });
-      }
-      for (const hit of detectKafkaTopicUsages(file.content, file.path)) {
-        const entry = {
-          topic: hit.topic,
-          filePath: file.path,
-          summary: hit.summary,
-          confidence: hit.confidence,
-        };
-        if (hit.role === 'producer') scan.kafkaProducers.push(entry);
-        else scan.kafkaConsumers.push(entry);
-      }
-    }
-
-    return scan;
-  }
-
-  private buildDetectedRelationships(scans: RepoScan[]): Array<{
-    from: RepositoryIdentity;
-    to: RepositoryIdentity;
-    type: RepositoryRelationshipType;
-    resourceKind?: RelationshipResourceKind;
-    resourceKey?: string;
-    confidence: RelationshipConfidence;
-    provenanceType: RelationshipProvenanceType;
-    summary: string;
-    filePath?: string;
-  }> {
-    const out: Array<{
-      from: RepositoryIdentity;
-      to: RepositoryIdentity;
-      type: RepositoryRelationshipType;
-      resourceKind?: RelationshipResourceKind;
-      resourceKey?: string;
-      confidence: RelationshipConfidence;
-      provenanceType: RelationshipProvenanceType;
-      summary: string;
-      filePath?: string;
-    }> = [];
-
-    const available = scans.filter((s) => s.available);
-
-    for (const provider of available) {
-      for (const api of provider.httpProviders) {
-        const resourceKey = api.method ? `${api.method} ${api.path}` : api.path;
-        out.push({
-          from: provider.identity,
-          to: provider.identity,
-          type: 'PROVIDES_API',
-          resourceKind: 'http_operation',
-          resourceKey,
-          confidence: api.confidence,
-          provenanceType: 'openapi_reference',
-          summary: api.summary,
-          filePath: api.filePath,
-        });
-
-        for (const consumer of available) {
-          if (sameRepository(consumer.identity, provider.identity)) continue;
-          const match = consumer.httpConsumers.find(
-            (c) =>
-              c.path === api.path || (api.method && c.method === api.method && c.path === api.path),
-          );
-          if (!match) continue;
-          out.push({
-            from: consumer.identity,
-            to: provider.identity,
-            type: 'CONSUMES_API',
-            resourceKind: 'http_operation',
-            resourceKey,
-            confidence:
-              CONFIDENCE_RANK[match.confidence] < CONFIDENCE_RANK[api.confidence]
-                ? match.confidence
-                : api.confidence,
-            provenanceType: 'http_call',
-            summary: `${match.summary} → ${api.summary}`,
-            filePath: match.filePath,
-          });
-          out.push({
-            from: consumer.identity,
-            to: provider.identity,
-            type: 'HTTP_CALLS',
-            resourceKind: 'http_operation',
-            resourceKey,
-            confidence: match.confidence,
-            provenanceType: 'http_call',
-            summary: match.summary,
-            filePath: match.filePath,
-          });
-        }
-      }
-    }
-
-    for (const producer of available) {
-      for (const event of producer.kafkaProducers) {
-        out.push({
-          from: producer.identity,
-          to: producer.identity,
-          type: 'PRODUCES_EVENT',
-          resourceKind: 'kafka_topic',
-          resourceKey: event.topic,
-          confidence: event.confidence,
-          provenanceType: 'kafka_producer',
-          summary: event.summary,
-          filePath: event.filePath,
-        });
-
-        for (const consumer of available) {
-          if (sameRepository(consumer.identity, producer.identity)) continue;
-          const match = consumer.kafkaConsumers.find((c) => c.topic === event.topic);
-          if (!match) continue;
-          out.push({
-            from: consumer.identity,
-            to: producer.identity,
-            type: 'CONSUMES_EVENT',
-            resourceKind: 'kafka_topic',
-            resourceKey: event.topic,
-            confidence: match.confidence,
-            provenanceType: 'kafka_consumer',
-            summary: `${match.summary} (topic ${event.topic})`,
-            filePath: match.filePath,
-          });
-        }
-      }
-    }
-
-    for (const dependent of available) {
-      for (const dep of dependent.packageDeps) {
-        const provider = available.find(
-          (s) =>
-            s.packageName &&
-            s.packageName.toLowerCase() === dep.name.toLowerCase() &&
-            !sameRepository(s.identity, dependent.identity),
-        );
-        if (!provider) continue;
-        out.push({
-          from: dependent.identity,
-          to: provider.identity,
-          type: 'DEPENDS_ON_PACKAGE',
-          resourceKind: 'package',
-          resourceKey: dep.name,
-          confidence: 'high',
-          provenanceType: 'package_reference',
-          summary: `Depends on package ${dep.name}`,
-          filePath: dep.filePath,
-        });
-        out.push({
-          from: provider.identity,
-          to: provider.identity,
-          type: 'PROVIDES_PACKAGE',
-          resourceKind: 'package',
-          resourceKey: dep.name,
-          confidence: 'high',
-          provenanceType: 'package_reference',
-          summary: `Provides package ${dep.name}`,
-          filePath: 'package.json',
-        });
-      }
-    }
-
-    return out;
-  }
-
-  private async upsertRelationship(
-    userId: string,
-    systemId: string,
-    rel: {
-      from: RepositoryIdentity;
-      to: RepositoryIdentity;
-      type: RepositoryRelationshipType;
-      resourceKind?: RelationshipResourceKind;
-      resourceKey?: string;
-      confidence: RelationshipConfidence;
-      provenanceType: RelationshipProvenanceType;
-      summary: string;
-      filePath?: string;
-    },
-  ): Promise<void> {
-    const existing = await this.prisma.repositoryRelationship.findFirst({
-      where: {
-        systemId,
-        fromOwner: rel.from.owner,
-        fromRepository: rel.from.repository,
-        toOwner: rel.to.owner,
-        toRepository: rel.to.repository,
-        type: rel.type,
-        resourceKind: rel.resourceKind ?? null,
-        resourceKey: rel.resourceKey ?? null,
-      },
-    });
-
-    const now = new Date();
-    const provenance: RelationshipProvenance[] = [
-      {
-        type: rel.provenanceType,
-        owner: rel.from.owner,
-        repository: rel.from.repository,
-        filePath: rel.filePath,
-        summary: rel.summary,
-        observedAt: now.toISOString(),
-      },
-    ];
-    const freshness = {
-      lastValidatedAt: now.toISOString(),
-    };
-
-    if (!existing) {
-      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
-      await this.prisma.repositoryRelationship.create({
-        data: {
-          userId,
-          workspaceId,
-          systemId,
-          fromOwner: rel.from.owner,
-          fromRepository: rel.from.repository,
-          toOwner: rel.to.owner,
-          toRepository: rel.to.repository,
-          type: rel.type,
-          resourceKind: rel.resourceKind ?? null,
-          resourceKey: rel.resourceKey ?? null,
-          confidence: rel.confidence,
-          status: 'active',
-          provenanceJson: provenance as unknown as Prisma.InputJsonValue,
-          freshnessJson: freshness as unknown as Prisma.InputJsonValue,
-          lastValidatedAt: now,
-        },
-      });
-      return;
-    }
-
-    const existingProvenance =
-      (existing.provenanceJson as unknown as RelationshipProvenance[]) ?? [];
-    if (
-      existingProvenance.some((p) => p.type === 'user_explicit') &&
-      rel.provenanceType !== 'user_explicit'
-    ) {
-      await this.prisma.repositoryRelationship.update({
-        where: { id: existing.id },
-        data: {
-          lastValidatedAt: now,
-          freshnessJson: freshness as unknown as Prisma.InputJsonValue,
-        },
-      });
-      return;
-    }
-
-    const existingConfidence = existing.confidence as RelationshipConfidence;
-    if (CONFIDENCE_RANK[rel.confidence] < CONFIDENCE_RANK[existingConfidence]) {
-      await this.prisma.repositoryRelationship.update({
-        where: { id: existing.id },
-        data: {
-          lastValidatedAt: now,
-          freshnessJson: freshness as unknown as Prisma.InputJsonValue,
-        },
-      });
-      return;
-    }
-
-    await this.prisma.repositoryRelationship.update({
-      where: { id: existing.id },
-      data: {
-        confidence: rel.confidence,
-        status: 'active',
-        provenanceJson: provenance as unknown as Prisma.InputJsonValue,
-        freshnessJson: freshness as unknown as Prisma.InputJsonValue,
-        lastValidatedAt: now,
-      },
-    });
   }
 
   private dedupeCandidates(candidates: RelatedRepositoryCandidate[]): RelatedRepositoryCandidate[] {
@@ -1819,12 +2102,10 @@ export class MultiRepoService {
     },
   ): boolean {
     const key = rel.resource?.key ?? '';
-    if (rel.resource?.kind === 'http_operation') {
+    if (rel.resource?.kind === 'http_operation' || rel.resource?.kind === 'service') {
+      // Canonical operation match only; a changed file name is never evidence for HTTP.
       return (
-        identifiers.httpKeys.includes(key) ||
-        identifiers.httpKeys.some((k) => key.includes(k) || k.includes(key)) ||
-        identifiers.paths.some((p) => key.includes(p)) ||
-        identifiers.paths.some((p) => rel.provenance.some((pr) => pr.filePath?.includes(p)))
+        rel.resource.kind === 'http_operation' && httpOperationTouched(key, identifiers.httpKeys)
       );
     }
     if (rel.resource?.kind === 'kafka_topic') {

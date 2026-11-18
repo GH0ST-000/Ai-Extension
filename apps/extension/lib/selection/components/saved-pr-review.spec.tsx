@@ -3,7 +3,7 @@
  * fetched from the history API only (no AI call, no review request, no GitHub write).
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { PrReviewReportDetail } from '@project-x/types';
+import type { PrReviewDownstreamImpact, PrReviewReportDetail } from '@project-x/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiFetch = vi.fn();
@@ -276,5 +276,69 @@ describe('ReviewHistoryStatus', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('SavedPrReviewPanel — downstream impact', () => {
+  const impact: PrReviewDownstreamImpact = {
+    status: 'verified',
+    provider: { provider: 'github' as const, owner: 'gh0st-000', repository: 'project-x-test-api' },
+    contracts: [
+      {
+        path: 'openapi.yaml',
+        status: 'compared' as const,
+        breaking: 1,
+        nonBreaking: 1,
+        uncertain: 0,
+      },
+    ],
+    findings: [
+      {
+        changeId: 'c1',
+        kind: 'removed-response-field' as const,
+        title: 'Removed response field users[].name (200) on GET /api/users',
+        method: 'GET',
+        path: '/api/users',
+        operation: 'GET /api/users',
+        fieldPath: 'users[].name',
+        status: 'potentially_affected' as const,
+        consumers: [
+          {
+            repository: {
+              provider: 'github' as const,
+              owner: 'gh0st-000',
+              repository: 'project-x-test-client',
+            },
+            confidence: 'high' as const,
+            systems: [{ id: 's1', name: 'Test Microservices' }],
+            evidence: [],
+            lastValidatedAt: '2026-11-18T00:00:00.000Z',
+            stale: false,
+          },
+        ],
+      },
+    ],
+    withheldConsumers: 0,
+    warnings: [],
+    analyzedAt: '2026-11-18T10:58:00.000Z',
+  };
+
+  it('renders the saved (viewer-authorized) impact even though the stored Markdown omits it', () => {
+    const base = report();
+    render(
+      <SavedPrReviewPanel
+        report={{ ...base, snapshot: { ...base.snapshot, downstreamImpact: impact } }}
+        backLabel="Back"
+        onBack={vi.fn()}
+      />,
+    );
+    const section = screen.getByRole('region', { name: 'Downstream impact' });
+    expect(section.textContent).toContain('Potentially affected: gh0st-000/project-x-test-client');
+    expect(section.textContent).not.toContain('## Downstream Impact');
+  });
+
+  it('old saved reviews without impact render unchanged', () => {
+    render(<SavedPrReviewPanel report={report()} backLabel="Back" onBack={vi.fn()} />);
+    expect(screen.queryByRole('region', { name: 'Downstream impact' })).toBeNull();
   });
 });

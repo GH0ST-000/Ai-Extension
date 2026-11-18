@@ -47,7 +47,17 @@ export type PullRequestDiffResult = {
   baseBranch?: string;
   headBranch?: string;
   headSha?: string;
+  /** Base commit of the PR (immutable; GitHub API only). */
+  baseSha?: string;
 };
+
+/** Categorized result of reading one file at an immutable commit. */
+export type FileAtRefResult =
+  | { ok: true; text: string }
+  | {
+      ok: false;
+      reason: 'not_found' | 'no_access' | 'rate_limited' | 'too_large' | 'unavailable' | 'invalid';
+    };
 
 type FetchFailureReason = 'not_connected' | 'no_access' | 'token_rejected' | 'unavailable';
 
@@ -158,7 +168,7 @@ export class PullRequestDiffService {
     const meta = (await this.getJson(base, resolved.token)) as {
       title?: string;
       changed_files?: number;
-      base?: { ref?: string };
+      base?: { ref?: string; sha?: string };
       head?: { ref?: string; sha?: string };
     };
     const totalFiles = typeof meta.changed_files === 'number' ? meta.changed_files : null;
@@ -176,6 +186,7 @@ export class PullRequestDiffService {
     }
 
     const headSha = meta.head?.sha;
+    const baseSha = meta.base?.sha;
     return {
       source: 'github_api',
       files: normalizeGitHubFiles(raw),
@@ -184,7 +195,90 @@ export class PullRequestDiffService {
       ...(meta.base?.ref ? { baseBranch: meta.base.ref.slice(0, 200) } : {}),
       ...(meta.head?.ref ? { headBranch: meta.head.ref.slice(0, 200) } : {}),
       ...(headSha && /^[0-9a-f]{7,64}$/i.test(headSha) ? { headSha } : {}),
+      ...(baseSha && /^[0-9a-f]{7,64}$/i.test(baseSha) ? { baseSha } : {}),
     };
+  }
+
+  /**
+   * Read one file at an immutable commit SHA with the same workspace-scoped credentials as
+   * the diff. Unlike the context file provider, failures are categorized so callers can tell
+   * "file does not exist at this commit" from "access denied" or "rate limited". Never follows
+   * URLs from repository content: owner, repository, path and SHA are validated first.
+   */
+  async fetchFileAtRef(input: {
+    userId: string;
+    workspaceId: string;
+    owner: string;
+    repository: string;
+    sha: string;
+    path: string;
+    maxBytes: number;
+    signal?: AbortSignal;
+  }): Promise<FileAtRefResult> {
+    const path = input.path.trim();
+    if (
+      !GITHUB_NAME_RE.test(input.owner) ||
+      !GITHUB_NAME_RE.test(input.repository) ||
+      !/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(input.sha) ||
+      !path ||
+      path.length > 1_000 ||
+      path.startsWith('/') ||
+      path.split('/').some((seg) => seg === '..' || seg === '.' || seg === '')
+    ) {
+      return { ok: false, reason: 'invalid' };
+    }
+    let token: string | null;
+    try {
+      token =
+        (await this.githubAccess.resolveApiToken(input.userId, input.workspaceId))?.token ?? null;
+    } catch {
+      return { ok: false, reason: 'unavailable' };
+    }
+    if (!token) return { ok: false, reason: 'no_access' };
+    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/contents/${path
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}?ref=${input.sha}`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/vnd.github.raw+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Project-X',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        signal: input.signal
+          ? AbortSignal.any([AbortSignal.timeout(GITHUB_TIMEOUT_MS), input.signal])
+          : AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+      });
+    } catch {
+      return { ok: false, reason: 'unavailable' };
+    }
+    if (response.status === 404) return { ok: false, reason: 'not_found' };
+    if (
+      response.status === 429 ||
+      (response.status === 403 &&
+        (response.headers.get('x-ratelimit-remaining') === '0' ||
+          response.headers.has('retry-after')))
+    ) {
+      return { ok: false, reason: 'rate_limited' };
+    }
+    if (response.status === 401 || response.status === 403)
+      return { ok: false, reason: 'no_access' };
+    if (!response.ok) return { ok: false, reason: 'unavailable' };
+    const length = Number(response.headers.get('content-length') ?? '0');
+    if (length > input.maxBytes) return { ok: false, reason: 'too_large' };
+    let text: string;
+    try {
+      text = await response.text();
+    } catch {
+      return { ok: false, reason: 'unavailable' };
+    }
+    if (Buffer.byteLength(text, 'utf8') > input.maxBytes) return { ok: false, reason: 'too_large' };
+    if (text.includes('\u0000')) return { ok: false, reason: 'invalid' };
+    return { ok: true, text };
   }
 
   /**

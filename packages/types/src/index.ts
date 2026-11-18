@@ -927,6 +927,8 @@ export interface PRReviewReportStats {
 }
 
 export interface PRReviewReport {
+  /** "## Downstream Impact" text of the server report (cross-repository contract impact). */
+  downstreamImpact?: string;
   repository: {
     owner: string;
     name: string;
@@ -1613,6 +1615,7 @@ export type ApiContractChangeKind =
   | 'added-response'
   | 'new-required-request-field'
   | 'removed-response-field'
+  | 'added-response-field'
   | 'type-change'
   | 'enum-narrowing'
   | 'enum-widening'
@@ -1628,7 +1631,58 @@ export interface ApiContractChange {
   title: string;
   description: string;
   method?: HttpMethod;
+  /** Path as written in the head (or base, for removals) document — for display. */
   path?: string;
+  /** Nested field location, e.g. `users[].name` (`[]` = array items). Response/request fields. */
+  fieldPath?: string;
+  /** Response status the field change belongs to. */
+  statusCode?: string;
+}
+
+/** One consumer repository that calls an operation whose contract changed incompatibly. */
+export interface DownstreamImpactConsumer {
+  repository: RepositoryIdentity;
+  /** Confidence of the potential impact = confidence of the consumer → provider relationship. */
+  confidence: RelationshipConfidence;
+  /** Systems (visible to the caller) in which this dependency is recorded. */
+  systems: Array<{ id: string; name?: string }>;
+  /** Relationship evidence (consumer call site, provider contract/route, declaration). */
+  evidence: RelationshipProvenance[];
+  lastValidatedAt?: string;
+  /** Last validation is older than the freshness window (callers may suggest a re-scan). */
+  stale: boolean;
+}
+
+export interface DownstreamImpactFinding {
+  changeId: string;
+  kind: ApiContractChangeKind;
+  title: string;
+  method: HttpMethod;
+  /** Provider path as written in the contract. */
+  path: string;
+  /** Canonical operation used for matching, e.g. `GET /api/users/{param}`. */
+  operation: string;
+  fieldPath?: string;
+  statusCode?: string;
+  /**
+   * `potentially_affected`: known consumers call this operation (actual field usage unknown).
+   * `no_known_consumers`: none in the caller's dependency graph — NOT a statement of safety.
+   */
+  status: 'potentially_affected' | 'no_known_consumers';
+  consumers: DownstreamImpactConsumer[];
+}
+
+export interface DownstreamImpactResult {
+  provider: RepositoryIdentity;
+  findings: DownstreamImpactFinding[];
+  graph: {
+    /** Active consumer → provider HTTP relationships considered. */
+    relationshipsConsidered: number;
+    oldestValidatedAt?: string;
+    newestValidatedAt?: string;
+    /** Any relationship used is older than the freshness window. */
+    stale: boolean;
+  };
 }
 
 export interface ApiContractDiff {
@@ -2748,6 +2802,18 @@ export const MULTI_REPO_MAX_TOTAL_FILES = 80;
 export const MULTI_REPO_MAX_RELATIONSHIPS = 200;
 export const MULTI_REPO_MAX_HTTP_OPS = 80;
 export const MULTI_REPO_MAX_KAFKA_TOPICS = 80;
+/** Largest single file read during relationship discovery (same cap as other GitHub reads). */
+export const MULTI_REPO_MAX_FILE_BYTES = 512_000;
+/** Total bytes read from GitHub in one discovery run. */
+export const MULTI_REPO_MAX_SCAN_BYTES = 4_000_000;
+/** GitHub API requests allowed in one discovery run (access, tree, files, suggestions). */
+export const MULTI_REPO_MAX_GITHUB_REQUESTS = 150;
+/** Repositories outside the system checked for access when building suggestions. */
+export const MULTI_REPO_MAX_CANDIDATE_LOOKUPS = 10;
+/** Tree entries considered per repository (the rest counts as a truncated tree). */
+export const MULTI_REPO_MAX_TREE_ENTRIES = 20_000;
+/** Largest service-dependencies.json accepted. */
+export const MULTI_REPO_MAX_MANIFEST_BYTES = 64_000;
 
 export interface RepositoryIdentity {
   provider: 'github';
@@ -2811,7 +2877,9 @@ export type RelationshipProvenanceType =
   | 'kafka_producer'
   | 'kafka_consumer'
   | 'documentation'
-  | 'workflow_observation';
+  | 'workflow_observation'
+  /** Declared by the repository in service-dependencies.json (a claim, not proof). */
+  | 'service_manifest';
 
 export interface RelationshipProvenance {
   type: RelationshipProvenanceType;
@@ -3189,6 +3257,44 @@ export interface DiscoverRelationshipsResponse {
   relationships: RepositoryRelationship[];
   candidates: RelatedRepositoryCandidate[];
   truncated: boolean;
+  /** What was actually read per repository (additive; older clients may ignore it). */
+  scan?: MultiRepoScanReport;
+}
+
+export type MultiRepoScanIssueCode =
+  | 'repository_inaccessible'
+  | 'token_invalid'
+  | 'rate_limited'
+  | 'github_error'
+  | 'tree_truncated'
+  | 'file_budget_reached'
+  | 'byte_budget_reached'
+  | 'request_budget_reached'
+  | 'file_too_large'
+  | 'file_unreadable'
+  | 'manifest_invalid';
+
+export interface MultiRepoScanIssue {
+  code: MultiRepoScanIssueCode;
+  count: number;
+}
+
+export interface MultiRepoRepositoryScan {
+  repository: RepositoryIdentity;
+  /** complete: everything selected was read; partial: some reads failed or were cut. */
+  status: 'complete' | 'partial' | 'unavailable';
+  branch?: string;
+  filesScanned: number;
+  issues: MultiRepoScanIssue[];
+  /** HTTP calls whose provider could not be identified (or was ambiguous). */
+  unresolvedHttpCalls: number;
+}
+
+export interface MultiRepoScanReport {
+  /** True when any repository was not read completely. Stale findings are kept then. */
+  partial: boolean;
+  repositories: MultiRepoRepositoryScan[];
+  githubRequests: number;
 }
 
 export interface AnalyzeChangeImpactRequest {

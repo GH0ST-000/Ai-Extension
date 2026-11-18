@@ -7,6 +7,7 @@ import type {
   PrReviewReportSnapshot,
   PrReviewReportStatus,
   ProjectMemoryPromptMetadata,
+  PrReviewDownstreamImpact,
 } from '@project-x/types';
 import { PR_REVIEW_REPORT_SCHEMA_VERSION } from '@project-x/types';
 
@@ -35,6 +36,30 @@ export interface PrReviewSnapshotInput {
   memory?: ProjectMemoryPromptMetadata;
   durationMs: number;
   batchCount: number;
+  /** Deterministic downstream impact as computed for the reviewer (stored bounded). */
+  downstreamImpact?: PrReviewDownstreamImpact;
+}
+
+const MAX_IMPACT_FINDINGS = 50;
+const MAX_IMPACT_CONSUMERS = 10;
+const MAX_IMPACT_EVIDENCE = 6;
+
+/** Bounded copy for storage (the analysis is already bounded; this guards the row size). */
+export function toStoredImpact(impact: PrReviewDownstreamImpact): PrReviewDownstreamImpact {
+  return {
+    ...impact,
+    contracts: impact.contracts.slice(0, 10),
+    findings: impact.findings.slice(0, MAX_IMPACT_FINDINGS).map((f) => ({
+      ...f,
+      title: cap(f.title, 300),
+      consumers: f.consumers.slice(0, MAX_IMPACT_CONSUMERS).map((c) => ({
+        ...c,
+        evidence: c.evidence
+          .slice(0, MAX_IMPACT_EVIDENCE)
+          .map((e) => ({ ...e, summary: cap(e.summary, 300) })),
+      })),
+    })),
+  };
 }
 
 function cap(value: string | null | undefined, max: number): string {
@@ -130,6 +155,7 @@ export function buildPrReviewSnapshot(input: PrReviewSnapshotInput): PrReviewRep
       batchesSucceeded: input.outcomes.filter((o) => o.status === 'succeeded').length,
       batchesFailed: failedBatches,
     },
+    ...(input.downstreamImpact ? { downstreamImpact: toStoredImpact(input.downstreamImpact) } : {}),
     ...(input.failureCode
       ? { failure: { code: input.failureCode, failedBatches } }
       : failedBatches > 0

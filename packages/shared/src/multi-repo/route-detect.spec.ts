@@ -117,6 +117,7 @@ describe('detectRouteDefinitions — regex shapes (CodeQL polynomial-regex fixes
       `const x${sp}`,
       `@Controller(${sp}`,
       `@Controller({${'('.repeat(100_000)}`,
+      '@Controller({'.repeat(40_000), // CodeQL: rescanning from every `@Controller(`
     ]) {
       expect(detectRouteDefinitions([{ path: 'src/a.ts', content }])).toEqual([]);
     }

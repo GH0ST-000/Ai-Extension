@@ -256,16 +256,11 @@ function detectNestRoutes(files: SourceFile[]): RouteDefinition[] {
   for (const f of files) {
     if (!SOURCE_EXT.test(f.path) || !f.content.includes('@Controller')) continue;
     const src = f.content;
-    const controllers = [
-      ...src.matchAll(/@Controller\(\s*(?:(['"`])([^'"`]*)\1\s*|(\{[^}]*\})\s*)?\)/g),
-    ];
+    const controllers = findControllers(src);
     controllers.forEach((ctrl, index) => {
-      const start = ctrl.index!;
+      const start = ctrl.index;
       const end = controllers[index + 1]?.index ?? src.length;
-      const prefix =
-        ctrl[2] ??
-        (ctrl[3] ? /\bpath\s*:\s*(['"`])([^'"`]*)\1/.exec(ctrl[3])?.[2] : undefined) ??
-        '';
+      const prefix = ctrl.prefix;
       const body = src.slice(start, end);
       for (const d of body.matchAll(
         /@(Get|Post|Put|Patch|Delete|Head|Options|All)\(\s*(?:(['"`])([^'"`]*)\2\s*)?\)/g,
@@ -290,6 +285,36 @@ function detectNestRoutes(files: SourceFile[]): RouteDefinition[] {
 }
 
 /** All server routes found in the given files of one repository. */
+const CONTROLLER = '@Controller(';
+/** Longest `@Controller(...)` argument considered (real decorators are far shorter). */
+const MAX_CONTROLLER_ARG_CHARS = 1_000;
+
+/**
+ * `@Controller()`, `@Controller('prefix')`, `@Controller({ ..., path: 'prefix' })`.
+ * indexOf + anchored patterns on a bounded window: linear in the file size, unlike one
+ * unanchored regex that rescans to the end of the file from every `@Controller(`.
+ */
+function findControllers(src: string): Array<{ index: number; prefix: string }> {
+  const out: Array<{ index: number; prefix: string }> = [];
+  for (let at = src.indexOf(CONTROLLER); at >= 0; at = src.indexOf(CONTROLLER, at + 1)) {
+    const arg = src.slice(
+      at + CONTROLLER.length,
+      at + CONTROLLER.length + MAX_CONTROLLER_ARG_CHARS,
+    );
+    const literal = /^\s*(?:(['"`])([^'"`]*)\1\s*)?\)/.exec(arg);
+    if (literal) {
+      out.push({ index: at, prefix: literal[2] ?? '' });
+      continue;
+    }
+    const object = /^\s*\{([^}]*)\}\s*\)/.exec(arg);
+    if (object) {
+      const path = /\bpath\s*:\s*(['"`])([^'"`]*)\1/.exec(object[1]!);
+      out.push({ index: at, prefix: path?.[2] ?? '' });
+    }
+  }
+  return out;
+}
+
 export function detectRouteDefinitions(files: SourceFile[]): RouteDefinition[] {
   const seen = new Set<string>();
   return [...detectNestRoutes(files), ...detectExpressRoutes(files)].filter((r) => {

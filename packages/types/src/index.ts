@@ -3326,6 +3326,8 @@ export type AuditEventType =
   | 'WORKFLOW_COMPLETED'
   | 'WORKFLOW_FAILED'
   | 'WORKFLOW_CANCELLED'
+  /** Server-only: a running execution with no recorded activity past the stale threshold. */
+  | 'WORKFLOW_ABANDONED'
   | 'PLANNING_STARTED'
   | 'PLANNING_COMPLETED'
   | 'ARTIFACT_CREATED'
@@ -3734,6 +3736,7 @@ export type ReliabilityErrorCode =
   | 'RESUME_NOT_AVAILABLE'
   | 'REPLAY_NOT_AVAILABLE'
   | 'RETRY_NOT_ALLOWED'
+  | 'RETRY_LIMIT_REACHED'
   | 'AUDIT_LIMIT_REACHED'
   | 'INVALID_EXECUTION_STATE'
   | 'UNKNOWN';

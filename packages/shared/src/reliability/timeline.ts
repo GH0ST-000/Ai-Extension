@@ -7,6 +7,7 @@ const TIMELINE_LABELS: Record<string, string> = {
   WORKFLOW_COMPLETED: 'Workflow Completed',
   WORKFLOW_FAILED: 'Workflow Failed',
   WORKFLOW_CANCELLED: 'Workflow Cancelled',
+  WORKFLOW_ABANDONED: 'Marked Stale (No Activity)',
   PLANNING_STARTED: 'Planning Started',
   PLANNING_COMPLETED: 'Planning Finished',
   ARTIFACT_CREATED: 'Artifact Created',

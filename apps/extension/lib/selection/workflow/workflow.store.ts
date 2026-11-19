@@ -141,6 +141,8 @@ type WorkflowStoreState = {
   resumeFailedExecution: (executionId?: string) => Promise<boolean>;
   /** Replay creates a fresh execution; write steps still require confirmation. */
   replayExecution: (executionId?: string) => Promise<boolean>;
+  /** A Replay request is in flight (prevents duplicate submissions). */
+  replayPending: boolean;
 };
 
 function nowIso(): string {
@@ -590,6 +592,7 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
   trustedJiraOverride: null,
   pendingAiStepId: null,
   pendingAiAction: null,
+  replayPending: false,
   pendingAiLaunch: null,
   openPanelHint: null,
   userInput: null,
@@ -1550,50 +1553,57 @@ export const useWorkflowSessionStore = create<WorkflowStoreState>((set, get) => 
   },
 
   replayExecution: async (executionId) => {
-    const { session } = get();
-    if (!session) {
-      set({ lastError: 'Replay requires an existing workflow session.' });
-      return false;
-    }
-    const targetId =
-      executionId ?? getActiveReliabilityExecutionId() ?? getLastReliabilityExecutionId();
-    if (!targetId) {
-      set({ lastError: 'No reliability execution available to replay.' });
-      return false;
-    }
+    // One Replay at a time: a second click while the first is in flight does nothing.
+    if (get().replayPending) return false;
+    set({ replayPending: true });
+    try {
+      const { session } = get();
+      if (!session) {
+        set({ lastError: 'Replay requires an existing workflow session.' });
+        return false;
+      }
+      const targetId =
+        executionId ?? getActiveReliabilityExecutionId() ?? getLastReliabilityExecutionId();
+      if (!targetId) {
+        set({ lastError: 'No reliability execution available to replay.' });
+        return false;
+      }
 
-    const replayed = await reliabilityReplayFromServer(targetId, {
-      ...contextVersionFromBinding(session.contextBinding),
-      ...reliabilityContextExtras(session.contextBinding),
-    });
-    if (!replayed) {
-      set({ lastError: 'Unable to replay workflow execution.' });
-      return false;
-    }
+      const replayed = await reliabilityReplayFromServer(targetId, {
+        ...contextVersionFromBinding(session.contextBinding),
+        ...reliabilityContextExtras(session.contextBinding),
+      });
+      if (!replayed) {
+        set({ lastError: 'Unable to replay workflow execution.' });
+        return false;
+      }
 
-    // Fresh execution of the same plan — reset step results; write steps still pause for confirmation.
-    clearReliabilityResumeSkip();
-    const resetResults: Record<string, WorkflowStepResult> = {};
-    set({
-      session: touchSession(session, {
-        status: 'RUNNING',
-        stepResults: resetResults,
-        currentStepId: undefined,
-        plan: markPlanStepsReady(session.plan, resetResults),
-        execution: {
-          startedAt: nowIso(),
-        },
-      }),
-      lastError: replayed.drift.hasDrift
-        ? `Replay started with context drift: ${replayed.drift.summary}`
-        : null,
-      pendingAiStepId: null,
-      pendingAiAction: null,
-      openPanelHint: null,
-      userInput: null,
-    });
-    get().advance();
-    return true;
+      // Fresh execution of the same plan — reset step results; write steps still pause for confirmation.
+      clearReliabilityResumeSkip();
+      const resetResults: Record<string, WorkflowStepResult> = {};
+      set({
+        session: touchSession(session, {
+          status: 'RUNNING',
+          stepResults: resetResults,
+          currentStepId: undefined,
+          plan: markPlanStepsReady(session.plan, resetResults),
+          execution: {
+            startedAt: nowIso(),
+          },
+        }),
+        lastError: replayed.drift.hasDrift
+          ? `Replay started with context drift: ${replayed.drift.summary}`
+          : null,
+        pendingAiStepId: null,
+        pendingAiAction: null,
+        openPanelHint: null,
+        userInput: null,
+      });
+      get().advance();
+      return true;
+    } finally {
+      set({ replayPending: false });
+    }
   },
 }));
 

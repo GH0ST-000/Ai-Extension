@@ -112,12 +112,22 @@ export function sha256Hex(text: string): string {
   return [h0, h1, h2, h3, h4, h5, h6, h7].map((n) => n.toString(16).padStart(8, '0')).join('');
 }
 
+/**
+ * Unguessable id (`prefix` + 32 hex chars, 122+ random bits) for request, trace, AI operation
+ * and workflow execution ids. Only a cryptographically secure generator is used: Node >= 20
+ * (the supported runtime) and every browser provide one. There is deliberately no
+ * Math.random fallback — failing loudly beats issuing predictable ids.
+ */
 export function createOpaqueId(prefix: string): string {
   const cryptoObj = globalThis.crypto;
   if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
     return `${prefix}${cryptoObj.randomUUID().replace(/-/g, '')}`;
   }
-  return `${prefix}${Date.now().toString(16)}${Math.random().toString(16).slice(2)}${Math.random()
-    .toString(16)
-    .slice(2)}`;
+  // `randomUUID` needs a secure context in browsers; `getRandomValues` does not.
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    cryptoObj.getRandomValues(bytes);
+    return `${prefix}${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  }
+  throw new Error('Secure random generator unavailable for createOpaqueId');
 }

@@ -15,6 +15,23 @@ import { useGithubReviewDraftStore } from '../review-draft';
 
 export type WorkflowOpenPanel = 'patch' | 'review' | 'comment' | 'multi-repo';
 
+/** Step types whose handler requests an AI action (each a normal, metered AI request). */
+export const AI_WORKFLOW_STEP_TYPES: ReadonlySet<WorkflowStepType> = new Set<WorkflowStepType>([
+  Step.ANALYZE_ENGINEERING_ALIGNMENT,
+  Step.SUMMARIZE_JIRA,
+  Step.EXTRACT_ACCEPTANCE_CRITERIA,
+  Step.REVIEW_PULL_REQUEST,
+  Step.ANALYZE_API_CONTRACT,
+  Step.ANALYZE_CI_FAILURE,
+  Step.SUGGEST_FIX,
+  Step.GENERATE_PATCH,
+]);
+
+/** How many steps of a plan will call the AI when the plan runs (again). */
+export function countAiSteps(steps: ReadonlyArray<{ type: WorkflowStepType }>): number {
+  return steps.filter((step) => AI_WORKFLOW_STEP_TYPES.has(step.type)).length;
+}
+
 export type WorkflowHandlerResult =
   | { ok: true; summary?: string; artifactKind?: WorkflowArtifactKind; showPanel?: 'multi-repo' }
   | {

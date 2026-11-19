@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type {
@@ -23,6 +23,7 @@ import {
   createProjectMemoryRule,
   isWorkspaceSelectionError,
   learnProjectMemory,
+  listSystems,
   rejectMemoryCandidate,
   updateProjectMemory,
 } from '../../../lib/api';
@@ -31,6 +32,20 @@ import { fetchMemory, memorySourceLabel } from './memory-data';
 import { runMemoryMutation, WORKSPACE_SELECTION_MESSAGE } from './memory-notifications';
 import { useWorkspace } from '../../../lib/workspace-context';
 import { MemoryActivity } from './memory-activity';
+import { RepositorySelector } from '../../../components/memory/repository-selector';
+import { Dialog } from '../../../components/dialog';
+import { BUTTON_DANGER, BUTTON_SECONDARY } from '../../../components/systems/systems-ui';
+import {
+  buildRepositoryGroups,
+  clearLastRepository,
+  forgetRepository,
+  parseRepositoryInput,
+  readLastRepository,
+  readRecentRepositories,
+  rememberRepository,
+  type RepositoryOption,
+} from '../../../components/memory/repository-selection';
+import { listPrReviewHistory } from '../reviews/reviews-data';
 
 const CATEGORY_LABELS: Record<ProjectMemoryCategory, string> = {
   ARCHITECTURE: 'Architecture',
@@ -142,8 +157,27 @@ function MemoryPageContent() {
     workspaceRevision,
   } = useWorkspace();
   const canManage = hasPermission('memory:manage');
-  const [owner, setOwner] = useState(() => searchParams.get('owner')?.trim() ?? '');
-  const [repo, setRepo] = useState(() => searchParams.get('repo')?.trim() ?? '');
+  // The selected repository lives in the URL (`?owner=&repo=`): shareable, survives refresh.
+  const queryOwner = searchParams.get('owner')?.trim() ?? '';
+  const queryRepo = searchParams.get('repo')?.trim() ?? '';
+  const selected = useMemo<RepositoryOption | null>(
+    () => (queryOwner && queryRepo ? parseRepositoryInput(`${queryOwner}/${queryRepo}`) : null),
+    [queryOwner, queryRepo],
+  );
+  const selectedKey = selected?.fullName ?? null;
+  const [recent, setRecent] = useState<RepositoryOption[]>([]);
+  const [suggestionSources, setSuggestionSources] = useState<{
+    workspaceId: string | null;
+    systems: Parameters<typeof buildRepositoryGroups>[0]['systems'];
+    history: Parameters<typeof buildRepositoryGroups>[0]['history'];
+  }>({ workspaceId: null, systems: [], history: [] });
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  /** Only the newest Memory request may update the page (rapid switching, workspace changes). */
+  const loadSeq = useRef(0);
+  /** Workspace whose repository selection has been restored; Memory loads wait for it. */
+  const [restoredWorkspace, setRestoredWorkspace] = useState<string | null>(null);
+  /** Selection the restore step navigated to; loading waits until the URL reflects it. */
+  const pendingSelection = useRef<string | null | undefined>(undefined);
   const [items, setItems] = useState<ProjectMemoryItem[]>([]);
   const [archivedItems, setArchivedItems] = useState<ProjectMemoryItem[]>([]);
   const [disputedItems, setDisputedItems] = useState<ProjectMemoryItem[]>([]);
@@ -171,9 +205,10 @@ function MemoryPageContent() {
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ownerTrimmed = owner.trim();
-  const repoTrimmed = repo.trim();
-  const canQuery = ownerTrimmed.length > 0 && repoTrimmed.length > 0;
+  // Every action targets the selected (= displayed) repository, never a half-typed value.
+  const ownerTrimmed = selected?.owner ?? '';
+  const repoTrimmed = selected?.repository ?? '';
+  const canQuery = selected !== null;
 
   const activeItems = useMemo(() => items.filter((item) => item.status === 'active'), [items]);
   const grouped = useMemo(() => groupByCategory(activeItems), [activeItems]);
@@ -199,90 +234,224 @@ function MemoryPageContent() {
     [onWorkspaceSelectionError],
   );
 
-  useEffect(() => {
-    const qOwner = searchParams.get('owner')?.trim() ?? '';
-    const qRepo = searchParams.get('repo')?.trim() ?? '';
-    if (!qOwner || !qRepo) {
-      return;
-    }
+  const resetMemory = useCallback(() => {
+    setItems([]);
+    setArchivedItems([]);
+    setDisputedItems([]);
+    setProfile(null);
+    setMemoryVersion(null);
+    setCandidates([]);
+    setLoaded(false);
+    setError(null);
+  }, []);
 
-    let cancelled = false;
-
-    async function loadFromQuery() {
+  /** Read-only Memory load. Results are applied only if no newer request started since. */
+  const loadMemory = useCallback(
+    async (target: RepositoryOption, workspaceId: string) => {
+      const seq = ++loadSeq.current;
       setLoading(true);
       setError(null);
       try {
-        const next = await fetchMemory(qOwner, qRepo);
-        if (cancelled) {
-          return;
-        }
+        const next = await fetchMemory(target.owner, target.repository);
+        if (seq !== loadSeq.current) return;
         setItems(next.list.items);
         setArchivedItems(next.archived);
         setDisputedItems(next.disputed);
         setMemoryVersion(next.list.memoryVersion);
         setProfile(next.profile);
         setLoaded(true);
+        rememberRepository(workspaceId, target);
+        setRecent(readRecentRepositories(workspaceId));
       } catch (err) {
-        if (!cancelled) {
-          setLoaded(true);
-          setItems([]);
-          setArchivedItems([]);
-          setDisputedItems([]);
-          setProfile(null);
-          setMemoryVersion(null);
-          onLoadError(err);
+        if (seq !== loadSeq.current) return;
+        setLoaded(true);
+        setItems([]);
+        setArchivedItems([]);
+        setDisputedItems([]);
+        setProfile(null);
+        setMemoryVersion(null);
+        if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 404)) {
+          // No longer accessible: never restore or suggest it again. The page stays on it and
+          // shows why, rather than silently switching to another repository.
+          forgetRepository(workspaceId, target);
+          setRecent(readRecentRepositories(workspaceId));
         }
+        onLoadError(err);
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (seq === loadSeq.current) setLoading(false);
       }
-    }
+    },
+    [onLoadError],
+  );
 
-    void loadFromQuery();
-    return () => {
-      cancelled = true;
+  // The effects below call the latest callbacks without re-running when their identity changes.
+  const loadMemoryRef = useRef(loadMemory);
+  loadMemoryRef.current = loadMemory;
+
+  // Selecting a repository (or switching workspace) loads its Memory automatically. The
+  // previous repository's data is cleared first so it can never show under the new one.
+  useEffect(() => {
+    resetMemory();
+    const drop = () => {
+      loadSeq.current += 1; // ignore any in-flight response
+      setLoading(false);
     };
-  }, [searchParams, onLoadError]);
+    if (pendingSelection.current !== undefined) {
+      // The restore step is replacing the URL; never load the outgoing selection meanwhile.
+      if (pendingSelection.current !== selectedKey) return drop();
+      pendingSelection.current = undefined;
+    }
+    if (!selected || !currentWorkspaceId || restoredWorkspace !== currentWorkspaceId) {
+      return drop();
+    }
+    void loadMemoryRef.current(selected, currentWorkspaceId);
+    return () => {
+      loadSeq.current += 1;
+    };
+    // `selectedKey` identifies `selected`: re-run only when the repository or workspace changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, currentWorkspaceId, restoredWorkspace, resetMemory]);
 
-  const syncRepoToUrl = useCallback(
-    (nextOwner: string, nextRepo: string) => {
+  const selectRepository = useCallback(
+    (next: RepositoryOption | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      params.set('owner', nextOwner);
-      params.set('repo', nextRepo);
+      if (next) {
+        params.set('owner', next.owner);
+        params.set('repo', next.repository);
+      } else {
+        params.delete('owner');
+        params.delete('repo');
+      }
       const query = params.toString();
       router.replace(query ? `/app/memory?${query}` : '/app/memory');
     },
     [router, searchParams],
   );
 
+  // Per-workspace restore: the active workspace's last repository (a deep link wins on first
+  // load). Switching workspace never keeps the previous workspace's repository.
+  const restoredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentWorkspaceId || restoredFor.current === currentWorkspaceId) return;
+    const firstResolution = restoredFor.current === null;
+    restoredFor.current = currentWorkspaceId;
+    setRecent(readRecentRepositories(currentWorkspaceId));
+    // A deep link (`?owner=&repo=`) wins on first load; otherwise this workspace's last choice.
+    const target = firstResolution && selected ? selected : readLastRepository(currentWorkspaceId);
+    if (target?.fullName !== selected?.fullName) {
+      pendingSelection.current = target?.fullName ?? null;
+      selectRepository(target);
+    } else {
+      pendingSelection.current = undefined;
+    }
+    setRestoredWorkspace(currentWorkspaceId);
+    // Runs on workspace changes only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentWorkspaceId]);
+
+  // Suggestions from existing workspace-scoped APIs (Systems, Review History). Optional: a
+  // failure only means fewer suggestions. Responses for a previous workspace are ignored.
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    const workspaceId = currentWorkspaceId;
+    const controller = new AbortController();
+    setSuggestionSources({ workspaceId, systems: [], history: [] });
+    setLoadingSuggestions(true);
+    void Promise.allSettled([
+      listSystems(),
+      listPrReviewHistory(workspaceId, { limit: 50 }, controller.signal),
+    ]).then(([systems, history]) => {
+      if (controller.signal.aborted) return;
+      setSuggestionSources({
+        workspaceId,
+        systems: systems.status === 'fulfilled' ? systems.value : [],
+        history: history.status === 'fulfilled' ? history.value.items : [],
+      });
+      setLoadingSuggestions(false);
+    });
+    return () => controller.abort();
+  }, [currentWorkspaceId]);
+
+  const repositoryGroups = useMemo(
+    () =>
+      buildRepositoryGroups({
+        recent,
+        ...(suggestionSources.workspaceId === currentWorkspaceId
+          ? { systems: suggestionSources.systems, history: suggestionSources.history }
+          : {}),
+      }),
+    [recent, suggestionSources, currentWorkspaceId],
+  );
+
   const refresh = useCallback(async () => {
-    if (!canQuery) {
+    if (!selected || !currentWorkspaceId) {
       return;
     }
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await fetchMemory(ownerTrimmed, repoTrimmed);
-      setItems(next.list.items);
-      setArchivedItems(next.archived);
-      setDisputedItems(next.disputed);
-      setMemoryVersion(next.list.memoryVersion);
-      setProfile(next.profile);
-      setLoaded(true);
-      syncRepoToUrl(ownerTrimmed, repoTrimmed);
-    } catch (err) {
-      setLoaded(true);
-      setItems([]);
-      setArchivedItems([]);
-      setDisputedItems([]);
-      setProfile(null);
-      setMemoryVersion(null);
-      onLoadError(err);
-    } finally {
-      setLoading(false);
+    await loadMemory(selected, currentWorkspaceId);
+  }, [selected, currentWorkspaceId, loadMemory]);
+
+  /** A repository switch waiting for the user to confirm discarding unsaved rule changes. */
+  const [pendingSwitch, setPendingSwitch] = useState<{ next: RepositoryOption | null } | null>(
+    null,
+  );
+
+  /** Where focus goes when the dialog closes: the draft on "Keep editing", else the opener. */
+  const [switchReturnFocus, setSwitchReturnFocus] = useState<HTMLElement | null>(null);
+
+  /** Cancel the switch and take the user back to the rule they were writing. */
+  function keepEditing() {
+    const draft =
+      typeof document === 'undefined'
+        ? null
+        : document.getElementById(editingId ? `edit-rule-${editingId}` : 'rule-text');
+    setSwitchReturnFocus(draft);
+    setPendingSwitch(null);
+    if (draft instanceof HTMLTextAreaElement || draft instanceof HTMLInputElement) {
+      const reducedMotion =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      requestAnimationFrame(() => {
+        // The dialog returns focus without jumping; glide down to the draft instead.
+        draft.scrollIntoView?.({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
+        const end = draft.value.length;
+        draft.setSelectionRange(end, end);
+        if (!reducedMotion) {
+          // A soft accent glow so the eye lands on the draft once the scroll settles.
+          draft.animate?.(
+            [
+              { boxShadow: '0 0 0 0 hsl(var(--accent) / 0)' },
+              { boxShadow: '0 0 0 4px hsl(var(--accent) / 0.35)', offset: 0.35 },
+              { boxShadow: '0 0 0 0 hsl(var(--accent) / 0)' },
+            ],
+            { duration: 1200, delay: 250, easing: 'ease-out' },
+          );
+        }
+      });
     }
-  }, [canQuery, ownerTrimmed, repoTrimmed, syncRepoToUrl, onLoadError]);
+  }
+
+  /** Switching repositories discards unsaved rule drafts only after confirmation. */
+  function onSelectRepository(next: RepositoryOption | null) {
+    if (next?.fullName === selected?.fullName) return;
+    if (ruleText.trim().length > 0 || editingId !== null) {
+      setSwitchReturnFocus(null);
+      setPendingSwitch({ next });
+      return;
+    }
+    switchRepository(next);
+  }
+
+  function switchRepository(next: RepositoryOption | null) {
+    setPendingSwitch(null);
+    setRuleText('');
+    setEditingId(null);
+    setEditDraft('');
+    setEditError(null);
+    setClearConfirm(false);
+    setShowClearDialog(false);
+    if (!next && currentWorkspaceId) clearLastRepository(currentWorkspaceId);
+    selectRepository(next);
+  }
 
   /** Error hooks shared by every mutation (see memory-notifications.ts). */
   const errorHooks = {
@@ -302,27 +471,18 @@ function MemoryPageContent() {
     }
   }
 
-  // Activity follows the repository that is loaded (synced to the URL), not the input fields.
-  const loadedOwner = searchParams.get('owner')?.trim() ?? '';
-  const loadedRepo = searchParams.get('repo')?.trim() ?? '';
+  // Activity follows the selected repository.
+  const loadedOwner = ownerTrimmed;
+  const loadedRepo = repoTrimmed;
 
   useEffect(() => {
     // A rule id from another workspace or repository must not stay selected.
     setHistoryRule(null);
   }, [workspaceRevision, loadedOwner, loadedRepo]);
 
-  async function onLoad(event?: FormEvent) {
-    event?.preventDefault();
-    if (!canQuery) {
-      setError('Enter both owner and repository.');
-      return;
-    }
-    await refresh();
-  }
-
   async function onLearn() {
     if (!canQuery) {
-      setError('Enter both owner and repository.');
+      setError('Select a repository first.');
       return;
     }
     setLearning(true);
@@ -639,52 +799,23 @@ function MemoryPageContent() {
         </p>
       </header>
 
-      <section className="rise-in-delay-1 space-y-3">
+      {/* Above later sections: each animated section is its own stacking context, so the
+          repository dropdown must be lifted at the section level to overlay them. */}
+      <section className="rise-in-delay-1 relative z-30 space-y-3">
         <h2 className="px-1 font-display text-lg font-semibold tracking-tight">Repository</h2>
-        <form
-          onSubmit={onLoad}
-          className="overflow-hidden rounded-3xl border border-line bg-panel/75 shadow-panel"
-        >
-          <div className="grid gap-4 border-b border-line/80 px-5 py-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="memory-owner" className="text-sm font-semibold text-ink">
-                Owner
-              </label>
-              <input
-                id="memory-owner"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="octocat"
-                value={owner}
-                onChange={(event) => setOwner(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
-              />
-            </div>
-            <div>
-              <label htmlFor="memory-repo" className="text-sm font-semibold text-ink">
-                Repository
-              </label>
-              <input
-                id="memory-repo"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="hello-world"
-                value={repo}
-                onChange={(event) => setRepo(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-line bg-mist px-3 py-2.5 font-mono text-sm text-ink outline-none ring-accent/30 focus:ring-2"
-              />
-            </div>
+        <div className="rounded-3xl border border-line bg-panel/75 shadow-panel">
+          <div className="border-b border-line/80 px-5 py-4">
+            <RepositorySelector
+              selected={selected}
+              groups={repositoryGroups}
+              loadingSuggestions={loadingSuggestions}
+              disabled={!currentWorkspaceId}
+              onSelect={onSelectRepository}
+              onClear={() => onSelectRepository(null)}
+            />
           </div>
-          <div className="flex flex-wrap items-center gap-3 bg-mist/50 px-5 py-4">
-            <button
-              type="submit"
-              disabled={loading || !canQuery}
-              className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-inverse transition hover:opacity-90 disabled:opacity-50"
-            >
-              {loading ? 'Loading…' : 'Load memory'}
-            </button>
+          <div className="flex flex-wrap items-center gap-3 rounded-b-3xl bg-mist/50 px-5 py-4">
+            {/* Learning reads the repository and may use analysis: always an explicit action. */}
             <button
               type="button"
               disabled={learning || !canQuery || !canManage}
@@ -700,12 +831,57 @@ function MemoryPageContent() {
             >
               {learning ? 'Learning…' : 'Learn Project Context'}
             </button>
-            {memoryVersion ? (
-              <p className="text-xs text-muted-foreground">Version {memoryVersion}</p>
-            ) : null}
+            <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+              {!selected
+                ? 'Select a repository to load its memory.'
+                : loading
+                  ? `Loading memory for ${selected.fullName}…`
+                  : memoryVersion
+                    ? `Version ${memoryVersion}`
+                    : null}
+            </p>
           </div>
-        </form>
+        </div>
       </section>
+
+      <Dialog
+        open={pendingSwitch !== null}
+        onClose={keepEditing}
+        returnFocusTo={switchReturnFocus}
+        returnFocusPreventScroll={switchReturnFocus !== null}
+        title="Discard unsaved changes?"
+        className="max-w-md"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={keepEditing} className={BUTTON_SECONDARY}>
+              Keep editing
+            </button>
+            <button
+              type="button"
+              onClick={() => pendingSwitch && switchRepository(pendingSwitch.next)}
+              className={BUTTON_DANGER}
+            >
+              {pendingSwitch?.next ? 'Discard and switch' : 'Discard and clear'}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          You have an unsaved rule for{' '}
+          <span className="font-mono font-semibold text-ink">{selected?.fullName}</span>.{' '}
+          {pendingSwitch?.next ? (
+            <>
+              Switching to{' '}
+              <span className="font-mono font-semibold text-ink">
+                {pendingSwitch.next.fullName}
+              </span>{' '}
+              discards it.
+            </>
+          ) : (
+            'Clearing the selection discards it.'
+          )}
+        </p>
+      </Dialog>
 
       {error && (
         <div className="rise-in-delay-1 space-y-1 px-1">

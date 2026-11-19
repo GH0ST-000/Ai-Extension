@@ -20,6 +20,8 @@ type DialogProps = {
    * (unreliable when the opener was clicked: Safari does not focus clicked buttons).
    */
   returnFocusTo?: HTMLElement | null;
+  /** Return focus without scrolling (the caller animates the scroll itself). */
+  returnFocusPreventScroll?: boolean;
 };
 
 const FOCUSABLE =
@@ -42,6 +44,7 @@ export function Dialog({
   closeLabel = 'Close',
   className,
   returnFocusTo,
+  returnFocusPreventScroll = false,
 }: DialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -50,6 +53,8 @@ export function Dialog({
   onCloseRef.current = onClose;
   const returnFocusRef = useRef(returnFocusTo);
   returnFocusRef.current = returnFocusTo;
+  const preventScrollRef = useRef(returnFocusPreventScroll);
+  preventScrollRef.current = returnFocusPreventScroll;
 
   useEffect(() => {
     if (!open) return;
@@ -82,7 +87,9 @@ export function Dialog({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
       const target = returnFocusRef.current ?? previouslyFocused;
-      if (target?.isConnected) target.focus();
+      if (target?.isConnected) {
+        target.focus(preventScrollRef.current ? { preventScroll: true } : undefined);
+      }
     };
   }, [open]);
 

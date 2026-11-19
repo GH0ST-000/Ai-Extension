@@ -1,21 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type {
-  ContextDriftSummary,
-  WorkflowExecution,
-  WorkflowExecutionDetail,
-} from '@project-x/types';
+import Link from 'next/link';
+import type { WorkflowExecution, WorkflowExecutionDetail } from '@project-x/types';
 
-import {
-  ApiError,
-  getWorkflowExecution,
-  listWorkflowExecutions,
-  previewWorkflowReplay,
-  resumeWorkflowExecution,
-  retryWorkflowExecution,
-  replayWorkflowExecution,
-} from '../../../lib/api';
+import { ApiError, getWorkflowExecution, listWorkflowExecutions } from '../../../lib/api';
 
 const BAND_STYLES: Record<string, string> = {
   Excellent: 'border-accent bg-accent-soft text-ink',
@@ -39,11 +28,9 @@ export default function ReliabilityPage() {
   const [executions, setExecutions] = useState<WorkflowExecution[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<WorkflowExecutionDetail | null>(null);
-  const [drift, setDrift] = useState<ContextDriftSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const selected = useMemo(
     () => executions.find((row) => row.id === selectedId) ?? null,
@@ -73,7 +60,6 @@ export default function ReliabilityPage() {
     try {
       const next = await getWorkflowExecution(executionId);
       setDetail(next);
-      setDrift(null);
     } catch (err) {
       setError(apiMessage(err, 'Unable to load execution detail.'));
     } finally {
@@ -93,105 +79,22 @@ export default function ReliabilityPage() {
     void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
-  async function onResume() {
-    if (!selectedId) return;
-    setBusy(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const result = await resumeWorkflowExecution(selectedId);
-      setMessage(
-        `Resumed from ${result.skipCompletedThrough}. New execution ${result.execution.id}.`,
-      );
-      await loadList();
-      setSelectedId(result.execution.id);
-    } catch (err) {
-      setError(apiMessage(err, 'Resume failed.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onReplayPreview() {
-    if (!selectedId || !detail) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const preview = await previewWorkflowReplay(selectedId, {
-        currentContext: detail.contextVersion,
-      });
-      setDrift(preview.drift);
-      setMessage(
-        preview.drift.hasDrift
-          ? 'Replay available with context drift — writes still require confirmation.'
-          : 'Replay available — GitHub writes still require confirmation.',
-      );
-    } catch (err) {
-      setError(apiMessage(err, 'Replay preview failed.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onReplay() {
-    if (!selectedId || !detail) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await replayWorkflowExecution(selectedId, {
-        currentContext: detail.contextVersion,
-      });
-      setMessage(`Replay started as ${next.id}. Write actions still need confirmation.`);
-      await loadList();
-      setSelectedId(next.id);
-    } catch (err) {
-      setError(apiMessage(err, 'Replay failed.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onRetryAi() {
-    if (!selectedId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await retryWorkflowExecution(selectedId, {
-        stage: 'AI_FETCH',
-        category: 'TIMEOUT',
-        attempt: selected?.retryCount ?? 0,
-      });
-      if (!result.decision.allowed) {
-        setMessage(result.decision.reason);
-        return;
-      }
-      setMessage(`Retry created ${result.execution?.id ?? ''}`);
-      await loadList();
-      if (result.execution) setSelectedId(result.execution.id);
-    } catch (err) {
-      setError(apiMessage(err, 'Retry failed.'));
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Read-only: recovery (resume / replay) happens in the extension's Workflow panel, which
+  // actually re-runs steps. Server-side resume/replay/retry from here only created execution
+  // records that nothing executed, so those controls are intentionally not offered.
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-ink">Reliability</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Workflow executions, health, audit timeline, checkpoints, resume, and replay — without
-          external observability vendors.
+          Read-only history of multi-step runs started from the Workflow tab in the extension:
+          status, audit timeline, and checkpoints. Resume and replay a run from the extension.
         </p>
       </header>
 
       {error ? (
         <p className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink">{error}</p>
-      ) : null}
-      {message ? (
-        <p className="rounded-xl border border-accent bg-accent-soft px-3 py-2 text-sm text-ink">
-          {message}
-        </p>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
@@ -214,10 +117,14 @@ export default function ReliabilityPage() {
 
           {executions.length === 0 && !loading ? (
             <div className="rounded-2xl border border-dashed border-line px-4 py-6">
-              <p className="text-sm font-semibold text-ink">No workflows yet</p>
+              <p className="text-sm font-semibold text-ink">No workflow runs yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Run your first developer workflow from a GitHub pull request, Jira issue, or
-                supported API contract in the extension.
+                Runs started from the Workflow tab in the extension appear here. PR reviews are
+                saved in{' '}
+                <Link href="/app/reviews" className="font-semibold text-ink underline">
+                  Review history
+                </Link>
+                .
               </p>
             </div>
           ) : null}
@@ -267,45 +174,10 @@ export default function ReliabilityPage() {
         <section className="space-y-4">
           {!selected || !detail ? (
             <p className="text-sm text-muted-foreground">
-              Select an execution to inspect reliability detail.
+              {busy ? 'Loading execution…' : 'Select an execution to inspect reliability detail.'}
             </p>
           ) : (
             <>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={busy || !detail.resumeAvailable}
-                  onClick={() => void onResume()}
-                  className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-inverse disabled:opacity-40"
-                >
-                  Resume
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !detail.replayAvailable}
-                  onClick={() => void onReplayPreview()}
-                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-40"
-                >
-                  Preview replay
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !detail.replayAvailable}
-                  onClick={() => void onReplay()}
-                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-40"
-                >
-                  Replay
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void onRetryAi()}
-                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-40"
-                >
-                  Retry AI
-                </button>
-              </div>
-
               <div className="grid gap-3 sm:grid-cols-2">
                 <MetaCard label="Health" value={`${detail.healthScore} · ${detail.healthBand}`} />
                 <MetaCard label="Duration" value={formatDuration(detail.durationMs)} />
@@ -353,20 +225,6 @@ export default function ReliabilityPage() {
                   )}
                 </dl>
               </div>
-
-              {drift ? (
-                <div className="rounded-xl border border-line bg-panel/80 p-3">
-                  <h3 className="text-sm font-semibold text-ink">Context drift</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">{drift.summary}</p>
-                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {drift.fields.map((field) => (
-                      <li key={field.key}>
-                        {field.label}: {field.previous ?? '∅'} → {field.current ?? '∅'}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
 
               <div className="rounded-xl border border-line bg-panel/80 p-3">
                 <h3 className="text-sm font-semibold text-ink">Checkpoints</h3>

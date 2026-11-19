@@ -5,12 +5,16 @@ import { usePathname } from 'next/navigation';
 
 import { NavPendingIndicator } from './nav-pending-indicator';
 
+/**
+ * Reliability (`/app/reliability`) is intentionally not listed for the beta: it only shows
+ * extension Workflow-tab runs, not PR reviews (see Review history). The route still works by
+ * direct URL; restore the entry here and in the mobile "More" menu to show it again.
+ */
 export const DASHBOARD_NAV_ITEMS = [
   { href: '/app', label: 'Overview', hint: 'Workspace pulse' },
   { href: '/app/memory', label: 'Memory', hint: 'Project context' },
   { href: '/app/reviews', label: 'Review history', hint: 'Saved PR reviews' },
   { href: '/app/systems', label: 'Systems', hint: 'Multi-repo scope' },
-  { href: '/app/reliability', label: 'Reliability', hint: 'Audit & recovery' },
   { href: '/app/workspace', label: 'Workspace', hint: 'General settings' },
   { href: '/app/workspace/members', label: 'Members', hint: 'Roles & invites' },
   { href: '/app/billing', label: 'Billing', hint: 'Plan & usage' },

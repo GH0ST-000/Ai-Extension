@@ -6,6 +6,7 @@ import type {
   CreateProjectMemoryRuleRequest,
   CreateProjectSystemRequest,
   DiscoverRelationshipsResponse,
+  MultiRepoScanReport,
   GitHubConnectionStatus,
   JiraConnectionStatus,
   LearnProjectMemoryResponse,
@@ -506,6 +507,8 @@ export type RefreshSystemResponse = {
   candidates: RelatedRepositoryCandidate[];
   unavailable: RepositoryIdentity[];
   truncated: boolean;
+  /** Per-repository read status (additive; older APIs omit it). */
+  scan?: MultiRepoScanReport;
 };
 
 export type CompareRequirementRequest = {

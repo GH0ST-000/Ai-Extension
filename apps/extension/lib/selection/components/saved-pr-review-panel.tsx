@@ -1,3 +1,4 @@
+import { DOWNSTREAM_IMPACT_HEADING, renderDownstreamImpactSection } from '@project-x/shared';
 import type { PageContext, PrReviewReportDetail } from '@project-x/types';
 import { useMemo, useState } from 'react';
 
@@ -65,18 +66,23 @@ export function SavedPrReviewPanel({
 }: SavedPrReviewPanelProps) {
   const [filter, setFilter] = useState<PrFindingFilter>('all');
   const [dispositions, setDispositions] = useState<PrFindingDispositionMap>({});
-  const prReport = useMemo(
-    () =>
-      report.reportMarkdown
-        ? buildPrReviewReport({
-            markdown: report.reportMarkdown,
-            context: savedReviewContext(report),
-            scope: report.snapshot.reviewScope,
-            final: true,
-          })
-        : null,
-    [report],
-  );
+  const prReport = useMemo(() => {
+    if (!report.reportMarkdown) return null;
+    const built = buildPrReviewReport({
+      markdown: report.reportMarkdown,
+      context: savedReviewContext(report),
+      scope: report.snapshot.reviewScope,
+      final: true,
+    });
+    // The shared report Markdown never contains consumer names; the structured impact was
+    // re-authorized for this viewer by the API, so it is rendered from the snapshot.
+    const impact = report.snapshot.downstreamImpact
+      ? renderDownstreamImpactSection(report.snapshot.downstreamImpact)
+      : null;
+    return built && impact
+      ? { ...built, downstreamImpact: impact.slice(DOWNSTREAM_IMPACT_HEADING.length).trim() }
+      : built;
+  }, [report]);
   const memoryLine = savedReviewMemoryLine(report);
   const statusText =
     report.status === 'failed'

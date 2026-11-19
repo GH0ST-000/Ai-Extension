@@ -25,6 +25,11 @@ import {
 import { GithubAccessService } from '../github-app/github-access.service';
 import { MetricsService } from '../observability/metrics.service';
 import { RequestContextService } from '../observability/request-context.service';
+import {
+  ContractImpactService,
+  redactImpactFindings,
+  type RepositoryAccessVerdict,
+} from '../contract-impact/contract-impact.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import {
@@ -128,6 +133,7 @@ export class PrReviewHistoryService {
     private readonly redis: RedisService,
     private readonly requestContext: RequestContextService,
     @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly contractImpact?: ContractImpactService,
   ) {}
 
   // ---------------------------------------------------------------- write side
@@ -381,7 +387,7 @@ export class PrReviewHistoryService {
     });
     if (!row) throw notFound();
     await this.assertRepositoryAccess(userId, workspaceId, row.owner, row.repository);
-    return toDetail(row, userId);
+    return this.authorizeImpact(userId, toDetail(row, userId));
   }
 
   async latest(
@@ -407,7 +413,49 @@ export class PrReviewHistoryService {
         reportMarkdown: true,
       },
     });
-    return row ? toDetail(row, userId) : null;
+    return row ? this.authorizeImpact(userId, toDetail(row, userId)) : null;
+  }
+
+  /**
+   * Downstream impact belongs to the reviewer's dependency graph and may name other private
+   * repositories. Before a report is returned, every consumer is re-verified with the VIEWER's
+   * own GitHub connection; anything not verified is removed (fail closed), leaving a count.
+   * Access checks only — the analysis itself is never re-run, nothing is charged.
+   */
+  private async authorizeImpact(
+    viewerId: string,
+    detail: PrReviewReportDetail,
+  ): Promise<PrReviewReportDetail> {
+    const impact = detail.snapshot.downstreamImpact;
+    if (!impact) return detail;
+    const consumers = impact.findings.flatMap((f) => f.consumers.map((c) => c.repository));
+    if (consumers.length === 0) return detail;
+    const warnings = new Set(impact.warnings);
+    let access = new Map<string, RepositoryAccessVerdict>();
+    if (this.contractImpact) {
+      const verified = await this.contractImpact.verifyAccess(viewerId, consumers);
+      access = verified.access;
+      if (verified.noToken) warnings.add('no_personal_token');
+      if ([...access.values()].includes('unavailable')) warnings.add('access_check_unavailable');
+    } else {
+      warnings.add('access_check_unavailable');
+    }
+    const { findings, withheld } = redactImpactFindings(impact.findings, access);
+    if (withheld > 0) warnings.add('consumers_withheld');
+    const visible = findings.some((f) => f.consumers.length > 0);
+    return {
+      ...detail,
+      snapshot: {
+        ...detail.snapshot,
+        downstreamImpact: {
+          ...impact,
+          status: impact.status === 'verified' && !visible ? 'partial' : impact.status,
+          findings,
+          withheldConsumers: impact.withheldConsumers + withheld,
+          warnings: [...warnings],
+        },
+      },
+    };
   }
 
   // ------------------------------------------------------- repository access

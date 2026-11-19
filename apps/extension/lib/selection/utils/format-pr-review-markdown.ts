@@ -209,6 +209,14 @@ export function formatPrReviewMarkdown(
   parts.push(report.overview);
   parts.push('');
 
+  // The reviewer's own export: consumers were already authorized for them. Never included in
+  // the GitHub comment draft (buildPrReviewCommentDraft) or review drafts.
+  if (report.downstreamImpact) {
+    parts.push('## Downstream Impact');
+    parts.push(report.downstreamImpact);
+    parts.push('');
+  }
+
   parts.push('## Stats');
   parts.push(
     [

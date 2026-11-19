@@ -8,6 +8,7 @@ import type {
 } from '@project-x/types';
 
 import { apiFetch } from '@/lib/api';
+import { renderDownstreamImpactSection } from '@project-x/shared';
 
 /** Read-only history API. None of these calls runs the AI, charges usage or writes to GitHub. */
 function basePath(workspaceId: string): string {
@@ -206,6 +207,11 @@ export function buildHistoryMarkdown(report: PrReviewReportDetail): string {
   } else {
     body = report.status === 'failed' ? '_No report was produced._' : '_No findings._';
   }
+  // Re-authorized for this viewer by the API; the stored report Markdown never contains it.
+  const impact = report.snapshot.downstreamImpact
+    ? renderDownstreamImpactSection(report.snapshot.downstreamImpact)
+    : null;
+  if (impact) body = `${impact}\n\n${body}`;
   return `${header.join('\n')}\n\n---\n\n${body}\n`;
 }
 

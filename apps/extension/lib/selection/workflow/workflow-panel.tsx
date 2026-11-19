@@ -8,6 +8,8 @@ import type { EngineeringSessionsInput } from '../engineering/engineering.store'
 import { useMultiRepoStore } from '../multi-repo';
 import { usePatchApplyStore } from '../patch-apply/patch-apply.store';
 import { useGithubReviewDraftStore } from '../review-draft';
+import { ReplayConfirm } from './replay-confirm';
+import { countAiSteps } from './workflow-handlers';
 import { bindingFromSessions, useWorkflowSessionStore } from './workflow.store';
 
 export type WorkflowPanelProps = {
@@ -40,6 +42,9 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
   const confirmWriteCompleted = useWorkflowSessionStore((s) => s.confirmWriteCompleted);
 
   const [selectedOption, setSelectedOption] = useState<string>('');
+  /** Replay waits for an explicit confirmation (it re-runs AI steps). */
+  const [confirmReplay, setConfirmReplay] = useState(false);
+  const replayPending = useWorkflowSessionStore((s) => s.replayPending);
   const [selectedPlanningOption, setSelectedPlanningOption] = useState<string>('');
 
   const stale = useMemo(
@@ -494,7 +499,22 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
           >
             New goal
           </button>
-          {status === 'FAILED' || status === 'NEEDS_ATTENTION' ? (
+          {(status === 'FAILED' || status === 'NEEDS_ATTENTION') && confirmReplay && session ? (
+            <ReplayConfirm
+              goal={session.goal}
+              binding={session.contextBinding}
+              totalSteps={session.plan.steps.length}
+              aiSteps={countAiSteps(session.plan.steps)}
+              pending={replayPending}
+              onCancel={() => setConfirmReplay(false)}
+              onConfirm={() => {
+                void useWorkflowSessionStore
+                  .getState()
+                  .replayExecution()
+                  .finally(() => setConfirmReplay(false));
+              }}
+            />
+          ) : status === 'FAILED' || status === 'NEEDS_ATTENTION' ? (
             <div className="flex gap-1">
               <button
                 type="button"
@@ -505,7 +525,7 @@ export function WorkflowPanel(props: WorkflowPanelProps) {
               </button>
               <button
                 type="button"
-                onClick={() => void useWorkflowSessionStore.getState().replayExecution()}
+                onClick={() => setConfirmReplay(true)}
                 className="flex-1 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-secondary hover:text-primary"
               >
                 Replay

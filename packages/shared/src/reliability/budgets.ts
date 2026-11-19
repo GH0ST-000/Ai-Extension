@@ -10,4 +10,10 @@ export const RELIABILITY_MAX_SNAPSHOT_GOAL_CHARS = 500;
 export const RELIABILITY_MAX_FAILURE_MESSAGE_CHARS = 500;
 export const RELIABILITY_MAX_LIST_EXECUTIONS = 50;
 export const RELIABILITY_MAX_RETRY_ATTEMPTS = 3;
+/**
+ * A `running` execution with no server-recorded activity (execution update or audit event)
+ * for this long is marked `stale` (never `failed`). Workflows run in the user's browser and
+ * may wait for approvals, so the threshold is deliberately generous.
+ */
+export const RELIABILITY_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 export const RELIABILITY_PROMPT_REGISTRY_NAME = 'project-x-prompt-registry';

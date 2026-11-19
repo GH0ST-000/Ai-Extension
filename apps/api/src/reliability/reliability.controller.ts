@@ -15,6 +15,11 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
 import {
+  RateLimit,
+  RateLimitGuard,
+  type RateLimitPolicy,
+} from '../common/security/rate-limit.guard';
+import {
   AppendAuditEventDto,
   CompleteExecutionDto,
   CreateCheckpointDto,
@@ -27,8 +32,22 @@ import {
 } from './dto/reliability.dto';
 import { ReliabilityService } from './reliability.service';
 
+/**
+ * Per-user limits (existing Redis guard; fails open if Redis is unavailable, like other
+ * non-auth buckets). Reads (list / detail) are not limited.
+ * - start: a new execution per workflow run (the extension starts one per approved plan).
+ * - recovery: retry / resume / replay each create a child execution.
+ * - audit: events, checkpoints, failures, AI audit, lineage, complete — a workflow run sends
+ *   a few per step and is additionally capped at 200 audit events per execution.
+ */
+export const RELIABILITY_RATE_LIMITS = {
+  start: { bucket: 'workflow_start', limit: 30, windowSeconds: 60 },
+  recovery: { bucket: 'workflow_recovery', limit: 10, windowSeconds: 60 },
+  audit: { bucket: 'workflow_audit', limit: 600, windowSeconds: 60 },
+} as const satisfies Record<string, RateLimitPolicy>;
+
 @Controller('reliability')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
 export class ReliabilityController {
   constructor(private readonly reliability: ReliabilityService) {}
 
@@ -37,6 +56,7 @@ export class ReliabilityController {
     return this.reliability.listExecutions(user.id);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.start)
   @Post('executions')
   start(
     @CurrentUser() user: AuthRequestUser,
@@ -53,6 +73,7 @@ export class ReliabilityController {
     return this.reliability.getExecution(user.id, executionId);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/events')
   appendEvent(
     @CurrentUser() user: AuthRequestUser,
@@ -62,6 +83,7 @@ export class ReliabilityController {
     return this.reliability.appendAuditEvent(user.id, executionId, body);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/checkpoints')
   checkpoint(
     @CurrentUser() user: AuthRequestUser,
@@ -71,6 +93,7 @@ export class ReliabilityController {
     return this.reliability.createCheckpoint(user.id, executionId, body);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/failures')
   failure(
     @CurrentUser() user: AuthRequestUser,
@@ -80,6 +103,7 @@ export class ReliabilityController {
     return this.reliability.recordFailure(user.id, executionId, body);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/ai-requests')
   aiRequest(
     @CurrentUser() user: AuthRequestUser,
@@ -89,6 +113,7 @@ export class ReliabilityController {
     return this.reliability.recordAiRequest(user.id, executionId, body);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/lineage')
   lineage(
     @CurrentUser() user: AuthRequestUser,
@@ -106,6 +131,7 @@ export class ReliabilityController {
     });
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/complete')
   complete(
     @CurrentUser() user: AuthRequestUser,
@@ -119,6 +145,7 @@ export class ReliabilityController {
     });
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.audit)
   @Post('executions/:executionId/replay/preview')
   replayPreview(
     @CurrentUser() user: AuthRequestUser,
@@ -130,6 +157,7 @@ export class ReliabilityController {
     });
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.recovery)
   @Post('executions/:executionId/replay')
   replay(
     @CurrentUser() user: AuthRequestUser,
@@ -141,6 +169,7 @@ export class ReliabilityController {
     });
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.recovery)
   @Post('executions/:executionId/resume')
   resume(
     @CurrentUser() user: AuthRequestUser,
@@ -149,6 +178,7 @@ export class ReliabilityController {
     return this.reliability.resumeExecution(user.id, executionId);
   }
 
+  @RateLimit(RELIABILITY_RATE_LIMITS.recovery)
   @Post('executions/:executionId/retry')
   retry(
     @CurrentUser() user: AuthRequestUser,

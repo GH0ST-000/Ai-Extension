@@ -1,4 +1,5 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { HttpException, Injectable, Logger, Optional } from '@nestjs/common';
+import { Prisma as PrismaRuntime } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type {
   Prisma,
@@ -8,7 +9,9 @@ import type {
 import {
   RELIABILITY_MAX_AUDIT_EVENTS_PER_EXECUTION,
   RELIABILITY_MAX_LIST_EXECUTIONS,
+  RELIABILITY_MAX_RETRY_ATTEMPTS,
   RELIABILITY_PROMPT_REGISTRY_NAME,
+  RELIABILITY_STALE_AFTER_MS,
   buildArtifactLineage,
   buildExecutionSnapshot,
   classifyFailure,
@@ -20,7 +23,6 @@ import {
   emptyHealthSignals,
   hashBoundedInput,
   hashPromptContent,
-  nextExecutionNumber,
   preparePromptSnapshotBody,
   redactForReliability,
   resolveNextPromptVersion,
@@ -63,6 +65,15 @@ type ExecutionLoaded = ExecutionRow & {
   promptSnapshot?: PromptSnapshotRow | null;
 };
 
+/** Attempts to allocate an execution number when concurrent starts collide on it. */
+const EXECUTION_NUMBER_ATTEMPTS = 5;
+/** Running executions examined per stale sweep (one user's workspace view). */
+const STALE_SWEEP_LIMIT = 50;
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof PrismaRuntime.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
 @Injectable()
 export class ReliabilityService {
   private readonly logger = new Logger(ReliabilityService.name);
@@ -75,6 +86,7 @@ export class ReliabilityService {
 
   async listExecutions(userId: string): Promise<ListWorkflowExecutionsResponse> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.markStaleExecutions(userId, workspaceId);
     const rows = await this.prisma.workflowExecution.findMany({
       where: { workspaceId, userId },
       orderBy: { startedAt: 'desc' },
@@ -85,7 +97,13 @@ export class ReliabilityService {
   }
 
   async getExecution(userId: string, executionId: string): Promise<WorkflowExecutionDetail> {
-    const row = await this.requireExecution(userId, executionId);
+    let row = await this.requireExecution(userId, executionId);
+    if (
+      row.status === 'running' &&
+      (await this.markStaleExecutions(userId, row.workspaceId, [row.id]))
+    ) {
+      row = await this.requireExecution(userId, executionId);
+    }
     const [events, checkpoints, failures] = await Promise.all([
       this.prisma.workflowAuditEvent.findMany({
         where: { userId, executionId },
@@ -110,11 +128,7 @@ export class ReliabilityService {
   ): Promise<WorkflowExecution> {
     const trigger: WorkflowExecutionTrigger = input.trigger ?? 'user';
     const startedAt = new Date();
-    const existingCount = await this.prisma.workflowExecution.count({
-      where: { userId, workflowId: input.workflowId },
-    });
-    const executionNumber = nextExecutionNumber(existingCount);
-    const id = createWorkflowExecutionId();
+    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
     const contextVersion = (input.contextVersion ?? {}) as ExecutionContextVersion;
     const snapshot = buildExecutionSnapshot({
       goal: input.goal,
@@ -126,7 +140,7 @@ export class ReliabilityService {
 
     let promptSnapshotId: string | undefined;
     if (input.promptBody) {
-      const snap = await this.upsertPromptSnapshot(userId, {
+      const snap = await this.upsertPromptSnapshot(userId, workspaceId, {
         name: input.promptName ?? RELIABILITY_PROMPT_REGISTRY_NAME,
         rawBody: input.promptBody,
         capability: input.capability,
@@ -141,33 +155,35 @@ export class ReliabilityService {
       }
     }
 
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
-
-    const created = await this.prisma.workflowExecution.create({
-      data: {
-        id,
-        workspaceId,
-        userId,
-        workflowId: input.workflowId,
-        executionNumber,
-        trigger,
-        status: 'running',
-        healthScore: 100,
-        healthBand: 'Excellent',
-        startedAt,
-        ...(input.parentExecutionId ? { parentExecutionId: input.parentExecutionId } : {}),
-        goal: truncateSafeText(redactForReliability(input.goal), 500),
-        contextVersionJson: contextVersion as Prisma.InputJsonValue,
-        snapshotJson: snapshot as unknown as Prisma.InputJsonValue,
-        healthSignalsJson: emptyHealthSignals() as unknown as Prisma.InputJsonValue,
-        aiRequestsJson: [] as unknown as Prisma.InputJsonValue,
-        lineageJson: buildArtifactLineage({ artifacts: [] }) as unknown as Prisma.InputJsonValue,
-        ...(promptSnapshotId ? { promptSnapshotId } : {}),
-        resumeAvailable: false,
-        replayAvailable: true,
-      },
-      include: { promptSnapshot: true },
-    });
+    // Numbers are allocated under a per-workflow transaction lock (PostgreSQL advisory lock,
+    // released at commit), so concurrent starts from any process are serialized and get
+    // consecutive numbers. The unique (workspace, workflow, number) index stays the backstop:
+    // a conflict is retried rather than surfacing as a 500.
+    let created: ExecutionLoaded | null = null;
+    for (let attempt = 0; created === null; attempt += 1) {
+      try {
+        created = await this.prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${input.workflowId}))`;
+          const executionNumber = await this.nextExecutionNumber(tx, workspaceId, input.workflowId);
+          return this.createExecutionRow(tx, {
+            id: createWorkflowExecutionId(),
+            workspaceId,
+            userId,
+            executionNumber,
+            trigger,
+            startedAt,
+            input,
+            contextVersion,
+            snapshot,
+            ...(promptSnapshotId ? { promptSnapshotId } : {}),
+          });
+        });
+      } catch (error) {
+        if (!isUniqueViolation(error) || attempt + 1 >= EXECUTION_NUMBER_ATTEMPTS) throw error;
+      }
+    }
+    const executionNumber = created.executionNumber;
+    const id = created.id;
 
     await this.appendEventInternal(userId, created.id, created.workflowId, {
       type:
@@ -200,6 +216,65 @@ export class ReliabilityService {
     });
 
     return toWorkflowExecution(created);
+  }
+
+  /** Next number for a workflow, from persisted rows (correct across processes and restarts). */
+  private async nextExecutionNumber(
+    tx: PrismaRuntime.TransactionClient,
+    workspaceId: string,
+    workflowId: string,
+  ): Promise<number> {
+    const latest = await tx.workflowExecution.aggregate({
+      where: { workspaceId, workflowId },
+      _max: { executionNumber: true },
+    });
+    return (latest._max.executionNumber ?? 0) + 1;
+  }
+
+  private createExecutionRow(
+    tx: PrismaRuntime.TransactionClient,
+    args: {
+      id: string;
+      workspaceId: string;
+      userId: string;
+      executionNumber: number;
+      trigger: WorkflowExecutionTrigger;
+      startedAt: Date;
+      input: StartWorkflowExecutionRequest;
+      contextVersion: ExecutionContextVersion;
+      snapshot: ReturnType<typeof buildExecutionSnapshot>;
+      promptSnapshotId?: string;
+    },
+  ): Promise<ExecutionLoaded> {
+    const { id, workspaceId, userId, executionNumber, trigger, startedAt, input } = args;
+    const contextVersion = args.contextVersion;
+    const snapshot = args.snapshot;
+    const promptSnapshotId = args.promptSnapshotId;
+    return tx.workflowExecution.create({
+      data: {
+        id,
+        workspaceId,
+        userId,
+        workflowId: input.workflowId,
+        executionNumber,
+        trigger,
+        status: 'running',
+        healthScore: 100,
+        healthBand: 'Excellent',
+        startedAt,
+        ...(input.parentExecutionId ? { parentExecutionId: input.parentExecutionId } : {}),
+        goal: truncateSafeText(redactForReliability(input.goal), 500),
+        contextVersionJson: contextVersion as Prisma.InputJsonValue,
+        snapshotJson: snapshot as unknown as Prisma.InputJsonValue,
+        healthSignalsJson: emptyHealthSignals() as unknown as Prisma.InputJsonValue,
+        aiRequestsJson: [] as unknown as Prisma.InputJsonValue,
+        lineageJson: buildArtifactLineage({ artifacts: [] }) as unknown as Prisma.InputJsonValue,
+        ...(promptSnapshotId ? { promptSnapshotId } : {}),
+        resumeAvailable: false,
+        replayAvailable: true,
+      },
+      include: { promptSnapshot: true },
+    });
   }
 
   async appendAuditEvent(
@@ -337,7 +412,7 @@ export class ReliabilityService {
     let promptHash: string | undefined;
     let promptVersion: string | undefined;
     if (input.promptBody) {
-      const snap = await this.upsertPromptSnapshot(userId, {
+      const snap = await this.upsertPromptSnapshot(userId, row.workspaceId, {
         name:
           input.promptName ??
           (input.capability
@@ -692,10 +767,15 @@ export class ReliabilityService {
     input: RetryExecutionRequest,
   ): Promise<RetryExecutionResponse> {
     const row = await this.requireExecution(userId, executionId);
+    // The attempt number is the persisted retry count. `input.attempt` is accepted for API
+    // compatibility but never trusted: a client cannot reset or forge its way past the cap.
+    if (row.retryCount >= RELIABILITY_MAX_RETRY_ATTEMPTS) {
+      throw this.retryLimitReached(row.retryCount);
+    }
     const decision = decideRetry({
       stage: input.stage,
       category: input.category,
-      attempt: input.attempt ?? row.retryCount,
+      attempt: row.retryCount,
       writeConfirmed: input.writeConfirmed,
       idempotentSafe: input.idempotentSafe,
     });
@@ -704,11 +784,22 @@ export class ReliabilityService {
       return { decision };
     }
 
-    await this.prisma.workflowExecution.update({
-      where: { id: executionId },
+    // Reserve the attempt atomically: concurrent requests cannot both pass the cap.
+    const reserved = await this.prisma.workflowExecution.updateMany({
+      where: {
+        id: executionId,
+        userId,
+        workspaceId: row.workspaceId,
+        retryCount: { lt: RELIABILITY_MAX_RETRY_ATTEMPTS },
+      },
       data: { retryCount: { increment: 1 } },
     });
+    if (reserved.count === 0) {
+      throw this.retryLimitReached(RELIABILITY_MAX_RETRY_ATTEMPTS);
+    }
 
+    // The retry is a new child execution; the original keeps its final status (it is not
+    // reopened, which previously left it `running` forever).
     const signals = this.readSignals(row);
     signals.retries += 1;
     const health = computeWorkflowHealthScore(signals);
@@ -718,9 +809,6 @@ export class ReliabilityService {
         healthSignalsJson: signals as unknown as Prisma.InputJsonValue,
         healthScore: health.score,
         healthBand: health.band,
-        status: 'running',
-        completedAt: null,
-        durationMs: null,
       },
     });
 
@@ -759,16 +847,98 @@ export class ReliabilityService {
     try {
       await this.recordAiRequest(userId, executionId, input);
     } catch (error) {
+      // The AI request itself must not fail because auditing did, but the reason is logged:
+      // a 404 means the execution is not this user's in this workspace (denied, not a bug).
+      const status = error instanceof HttpException ? error.getStatus() : undefined;
       this.logger.warn({
-        msg: 'reliability.ai_audit.skipped',
+        msg: status === 404 ? 'reliability.ai_audit.denied' : 'reliability.ai_audit.skipped',
         executionId,
+        ...(status ? { status } : {}),
         error: error instanceof Error ? error.message : 'unknown',
       });
     }
   }
 
+  private retryLimitReached(retryCount: number): HttpException {
+    return reliabilityException(
+      'RETRY_LIMIT_REACHED',
+      `Retry limit reached (${RELIABILITY_MAX_RETRY_ATTEMPTS} attempts).`,
+      { retryCount, maxRetries: RELIABILITY_MAX_RETRY_ATTEMPTS },
+    );
+  }
+
+  /**
+   * Mark this user's abandoned executions `stale`: `running`, and no server-recorded activity
+   * (execution update or audit event, both server clocks) for RELIABILITY_STALE_AFTER_MS.
+   * Runs lazily on reads — no background job. Idempotent and race-safe: the conditional
+   * update only matches rows still `running` and still inactive, so concurrent sweeps record
+   * one transition. Never fails, retries, replays or calls anything external; history is kept,
+   * and a client that is in fact still active can still complete the execution normally.
+   * Returns true when any execution was marked.
+   */
+  private async markStaleExecutions(
+    userId: string,
+    workspaceId: string,
+    executionIds?: string[],
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const cutoff = new Date(now.getTime() - RELIABILITY_STALE_AFTER_MS);
+    const candidates = await this.prisma.workflowExecution.findMany({
+      where: {
+        workspaceId,
+        userId,
+        status: 'running',
+        updatedAt: { lt: cutoff },
+        ...(executionIds ? { id: { in: executionIds } } : {}),
+      },
+      select: { id: true, workflowId: true, startedAt: true },
+      orderBy: { updatedAt: 'asc' },
+      take: STALE_SWEEP_LIMIT,
+    });
+    let marked = false;
+    for (const candidate of candidates) {
+      const latestEvent = await this.prisma.workflowAuditEvent.findFirst({
+        where: { executionId: candidate.id },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      if (latestEvent && latestEvent.createdAt >= cutoff) continue; // still active
+      const lastActivity = latestEvent?.createdAt ?? candidate.startedAt;
+      const result = await this.prisma.workflowExecution.updateMany({
+        where: { id: candidate.id, userId, status: 'running', updatedAt: { lt: cutoff } },
+        data: {
+          status: 'stale',
+          completedAt: now,
+          durationMs: Math.max(0, lastActivity.getTime() - candidate.startedAt.getTime()),
+          resumeAvailable: true,
+        },
+      });
+      if (result.count !== 1) continue; // another sweep (or the client) got there first
+      marked = true;
+      this.metrics?.recordWorkflowStale();
+      try {
+        await this.appendEventInternal(userId, candidate.id, candidate.workflowId, {
+          type: 'WORKFLOW_ABANDONED',
+          message: 'No activity recorded; marked stale',
+          metadata: { staleAfterHours: RELIABILITY_STALE_AFTER_MS / 3_600_000 },
+        });
+      } catch {
+        // Audit limit reached: the status change itself is the record.
+      }
+    }
+    return marked;
+  }
+
+  /**
+   * Prompt versions are content-addressed per workspace — the same scope as the database's
+   * unique (workspace, name, hash) constraint. Looking them up per user made a second member
+   * using the same prompt hit that constraint, and their AI audit was silently dropped.
+   * Snapshot bodies are never returned by the API (only name / version / hash), so sharing
+   * a version row across members exposes nothing; `userId` stays the first recorder.
+   */
   private async upsertPromptSnapshot(
     userId: string,
+    workspaceId: string,
     input: {
       name: string;
       rawBody: string;
@@ -778,33 +948,44 @@ export class ReliabilityService {
   ): Promise<{ id: string; version: number; hash: string }> {
     const prepared = preparePromptSnapshotBody(input.rawBody);
     const hash = hashPromptContent(input.rawBody);
-    const existing = await this.prisma.promptSnapshot.findMany({
-      where: { userId, name: input.name },
-      select: { id: true, hash: true, version: true },
-      orderBy: { version: 'desc' },
-      take: 100,
-    });
-    const match = existing.find((row) => row.hash === hash);
-    if (match) {
-      return { id: match.id, version: match.version, hash: match.hash };
+    for (let attempt = 0; ; attempt += 1) {
+      const existing = await this.prisma.promptSnapshot.findMany({
+        where: { workspaceId, name: input.name },
+        select: { id: true, hash: true, version: true },
+        orderBy: { version: 'desc' },
+        take: 100,
+      });
+      const match =
+        existing.find((row) => row.hash === hash) ??
+        (await this.prisma.promptSnapshot.findFirst({
+          where: { workspaceId, name: input.name, hash },
+          select: { id: true, hash: true, version: true },
+        }));
+      if (match) {
+        return { id: match.id, version: match.version, hash: match.hash };
+      }
+      const resolved = resolveNextPromptVersion(existing, hash);
+      try {
+        const created = await this.prisma.promptSnapshot.create({
+          data: {
+            workspaceId,
+            userId,
+            name: input.name,
+            version: resolved.version,
+            hash,
+            body: prepared.body,
+            truncated: prepared.truncated,
+            redacted: prepared.redacted,
+            ...(input.capability ? { capability: input.capability } : {}),
+            ...(input.action ? { action: input.action } : {}),
+          },
+        });
+        return { id: created.id, version: created.version, hash: created.hash };
+      } catch (error) {
+        // A concurrent recorder created the same version: read it on the next pass.
+        if (!isUniqueViolation(error) || attempt >= 2) throw error;
+      }
     }
-    const resolved = resolveNextPromptVersion(existing, hash);
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
-    const created = await this.prisma.promptSnapshot.create({
-      data: {
-        workspaceId,
-        userId,
-        name: input.name,
-        version: resolved.version,
-        hash,
-        body: prepared.body,
-        truncated: prepared.truncated,
-        redacted: prepared.redacted,
-        ...(input.capability ? { capability: input.capability } : {}),
-        ...(input.action ? { action: input.action } : {}),
-      },
-    });
-    return { id: created.id, version: created.version, hash: created.hash };
   }
 
   private async appendEventInternal(

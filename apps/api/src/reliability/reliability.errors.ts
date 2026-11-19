@@ -1,4 +1,10 @@
-import { BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import type { ReliabilityErrorBody, ReliabilityErrorCode } from '@project-x/types';
 
 export function reliabilityException(
@@ -17,6 +23,8 @@ export function reliabilityException(
     case 'EXECUTION_NOT_FOUND':
     case 'CHECKPOINT_NOT_FOUND':
       return new NotFoundException(body);
+    case 'RETRY_LIMIT_REACHED':
+      return new ConflictException(body);
     case 'RESUME_NOT_AVAILABLE':
     case 'REPLAY_NOT_AVAILABLE':
     case 'RETRY_NOT_ALLOWED':
@@ -34,6 +42,8 @@ function statusForCode(code: ReliabilityErrorCode): number {
     case 'EXECUTION_NOT_FOUND':
     case 'CHECKPOINT_NOT_FOUND':
       return HttpStatus.NOT_FOUND;
+    case 'RETRY_LIMIT_REACHED':
+      return HttpStatus.CONFLICT;
     case 'RESUME_NOT_AVAILABLE':
     case 'REPLAY_NOT_AVAILABLE':
     case 'RETRY_NOT_ALLOWED':

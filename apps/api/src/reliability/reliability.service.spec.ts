@@ -61,9 +61,12 @@ describe('ReliabilityService', () => {
       count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      aggregate: vi.fn(),
     },
     workflowAuditEvent: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       count: vi.fn(),
       create: vi.fn(),
     },
@@ -77,8 +80,11 @@ describe('ReliabilityService', () => {
     },
     promptSnapshot: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
     },
+    $executeRaw: vi.fn(async () => 1),
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
   };
 
   let service: ReliabilityService;
@@ -88,6 +94,11 @@ describe('ReliabilityService', () => {
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.workspaceMembership.findFirst.mockResolvedValue(null);
     prisma.workflowExecution.count.mockResolvedValue(0);
+    prisma.workflowExecution.findMany.mockResolvedValue([]);
+    prisma.workflowExecution.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowExecution.aggregate.mockResolvedValue({ _max: { executionNumber: null } });
+    prisma.workflowAuditEvent.findFirst.mockResolvedValue(null);
+    prisma.promptSnapshot.findFirst.mockResolvedValue(null);
     prisma.workflowAuditEvent.count.mockResolvedValue(0);
     prisma.workflowAuditEvent.create.mockResolvedValue({});
     prisma.workflowAuditEvent.findMany.mockResolvedValue([]);

@@ -2062,6 +2062,11 @@ export function withoutRuleText(
   return { ...metadata, rules: metadata.rules.map((rule) => ({ ...rule, title: '' })) };
 }
 
+/**
+ * Fingerprint of one logical request (user, action, normalized payload), used only to detect
+ * a duplicate in-flight or retried request. It is not a credential hash: nothing is verified
+ * against it and it never leaves the usage table, so a fast digest is the right tool.
+ */
 function inFlightKey(userId: string, action: string, payload: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify([userId, action, payload]))

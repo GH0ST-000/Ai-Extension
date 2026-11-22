@@ -227,7 +227,10 @@ describe('redactSecretsForAi — diffs', () => {
     ]) {
       redact(input);
     }
-    expect(Date.now() - started).toBeLessThan(3_000);
+    // ~0.2 s on a developer machine; a generous bound because shared CI runners executing
+    // several suites in parallel have taken over 3 s. A quadratic pattern on these 200k-char
+    // inputs takes minutes, so the guard still catches what it is for.
+    expect(Date.now() - started).toBeLessThan(30_000);
   });
 });
 

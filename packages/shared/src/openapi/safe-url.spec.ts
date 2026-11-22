@@ -24,6 +24,20 @@ describe('validateOpenApiFetchUrl', () => {
     }
   });
 
+  it.each([
+    'vbscript:msgbox(1)',
+    'blob:https://example.com/550e8400-e29b-41d4-a716-446655440000',
+    'ws://example.com/openapi.json',
+    'gopher://example.com/',
+    'file:///etc/passwd',
+    'data:application/json,{}',
+    'javascript:alert(1)',
+    'ftp://example.com/openapi.json',
+  ])('refuses every scheme that is not https: %s', (url) => {
+    expect(validateOpenApiFetchUrl(url).ok).toBe(false);
+    expect(validateOpenApiFetchUrl(url, { allowHttp: true }).ok).toBe(false);
+  });
+
   it('rejects http by default (https-only)', () => {
     const result = validateOpenApiFetchUrl('http://api.example.com/openapi.json');
     expect(result.ok).toBe(false);

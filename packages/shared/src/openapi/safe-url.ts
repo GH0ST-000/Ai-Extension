@@ -260,18 +260,12 @@ export function validateOpenApiFetchUrl(
     return { ok: false, reason: 'invalid' };
   }
 
-  if (url.protocol === 'https:') {
-    // ok
-  } else if (url.protocol === 'http:' && options?.allowHttp) {
-    // ok for explicit local-dev opt-in only — Day 18 default is https
-  } else if (
-    url.protocol === 'file:' ||
-    url.protocol === 'ftp:' ||
-    url.protocol === 'data:' ||
-    url.protocol === 'javascript:'
-  ) {
-    return { ok: false, reason: 'scheme' };
-  } else {
+  // An ALLOWLIST of schemes: https, or http only with the explicit local-development opt-in.
+  // Everything else (file:, ftp:, data:, javascript:, vbscript:, blob:, …) is refused without
+  // being enumerated — a denylist would always be missing one.
+  const schemeAllowed =
+    url.protocol === 'https:' || (url.protocol === 'http:' && options?.allowHttp === true);
+  if (!schemeAllowed) {
     return { ok: false, reason: 'scheme' };
   }
 

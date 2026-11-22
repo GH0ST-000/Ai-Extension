@@ -29,6 +29,8 @@ import {
 import { useWorkspaceStore } from './lib/workspace/workspace.store';
 import { WorkspaceSwitcher } from './lib/workspace/workspace-switcher';
 
+import { isSignInPage, SIGN_IN_COMPLETE_MESSAGE } from './lib/popup-view';
+
 import './style.css';
 
 type Mode = 'login' | 'register';
@@ -99,15 +101,58 @@ function BrandHeader({ badge }: { badge?: string }) {
   );
 }
 
+/** True when this document was opened in a tab to sign in (see lib/popup-view). */
+const SIGN_IN_PAGE = typeof window !== 'undefined' && isSignInPage(window.location.search);
+
 function Shell({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative w-[340px] overflow-hidden bg-[var(--px-bg)] text-[var(--px-text-primary)]">
+  const card = (
+    <div
+      className={[
+        'relative overflow-hidden bg-[var(--px-bg)] text-[var(--px-text-primary)]',
+        SIGN_IN_PAGE
+          ? 'w-full max-w-[400px] rounded-3xl border border-[var(--px-border)] shadow-2xl'
+          : 'w-[340px]',
+      ].join(' ')}
+    >
       <div
         className="pointer-events-none absolute inset-0 opacity-90"
         style={{ backgroundImage: 'var(--px-wash)' }}
         aria-hidden
       />
-      <div className="relative space-y-4 p-4">{children}</div>
+      <div className={['relative space-y-4', SIGN_IN_PAGE ? 'p-6' : 'p-4'].join(' ')}>
+        {children}
+      </div>
+    </div>
+  );
+  if (!SIGN_IN_PAGE) return card;
+  // Full-tab layout: the card is centered on a page that fills the window.
+  return (
+    <main className="flex min-h-screen w-screen items-start justify-center bg-[var(--px-bg)] px-4 pb-10 pt-[14vh]">
+      {card}
+    </main>
+  );
+}
+
+/** Shown on the sign-in page once signed in: the user came from a page and should go back. */
+function SignedInNotice() {
+  return (
+    <div
+      role="status"
+      className="space-y-2 rounded-2xl border border-[var(--px-accent)]/35 bg-[var(--px-accent-soft)] px-3.5 py-3"
+    >
+      <p className="text-[13px] font-semibold text-[var(--px-text-primary)]">
+        You&apos;re signed in.
+      </p>
+      <p className="text-[12px] leading-relaxed text-[var(--px-text-secondary)]">
+        Taking you back to the page you were on… If nothing happens, return to it and press Retry.
+      </p>
+      <button
+        type="button"
+        onClick={() => window.close()}
+        className="rounded-full bg-[var(--px-accent)] px-3 py-1.5 text-[12px] font-semibold text-[#042f2e] transition hover:brightness-110"
+      >
+        Close this tab
+      </button>
     </div>
   );
 }
@@ -298,6 +343,11 @@ function IndexPopup() {
             })
           : await login({ email, password });
       setUser(result.user);
+      if (SIGN_IN_PAGE) {
+        // Opened from a page that needed sign-in: go back there and resume the action. If
+        // this tab was opened some other way the background ignores it and the tab stays.
+        void chrome.runtime.sendMessage({ type: SIGN_IN_COMPLETE_MESSAGE }).catch(() => undefined);
+      }
       setOfferProfileQuestions(offerProfileQuestionsAfterAuth(mode));
       setPassword('');
       setShowWelcome(false);
@@ -366,7 +416,8 @@ function IndexPopup() {
     );
   }
 
-  if (!user && showWelcome) {
+  // On the sign-in page the user asked to sign in: skip the welcome screen.
+  if (!user && showWelcome && !SIGN_IN_PAGE) {
     return (
       <Shell>
         <BrandHeader badge="Beta" />
@@ -423,6 +474,7 @@ function IndexPopup() {
     return (
       <Shell>
         <BrandHeader badge="Ready" />
+        {SIGN_IN_PAGE ? <SignedInNotice /> : null}
 
         <div className="space-y-1">
           <p className="truncate text-[13px] font-semibold tracking-tight text-[var(--px-text-primary)]">

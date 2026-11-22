@@ -11,6 +11,7 @@ import type {
 import { normalizeError } from '@project-x/shared';
 
 import { EmptyState } from '../../../components/empty-state';
+import { StudioSelect, type StudioSelectOption } from '../../../components/studio-select';
 import { notify } from '../../../lib/notify';
 import { useWorkspace } from '../../../lib/workspace-context';
 import {
@@ -37,6 +38,13 @@ const STATUS_STYLES: Record<PrReviewReportStatus, string> = {
 };
 
 type Filters = { repo: string; pr: string; status: '' | PrReviewReportStatus };
+
+const STATUS_FILTER_OPTIONS: readonly StudioSelectOption<Filters['status']>[] = [
+  { value: '', label: 'All' },
+  { value: 'completed', label: 'Complete' },
+  { value: 'partial', label: 'Partial' },
+  { value: 'failed', label: 'Failed' },
+];
 
 function StatusBadge({ status }: { status: PrReviewReportStatus }) {
   return (
@@ -289,19 +297,15 @@ function ReviewsPageInner() {
             className="rounded-lg border border-line bg-panel px-2.5 py-1.5 text-sm"
           />
         </label>
-        <label className="flex w-36 flex-col gap-1 text-xs font-medium text-ink">
-          Status
-          <select
-            value={draft.status}
-            onChange={(e) => setDraft({ ...draft, status: e.target.value as Filters['status'] })}
-            className="rounded-lg border border-line bg-panel px-2.5 py-1.5 text-sm"
-          >
-            <option value="">All</option>
-            <option value="completed">Complete</option>
-            <option value="partial">Partial</option>
-            <option value="failed">Failed</option>
-          </select>
-        </label>
+        <StudioSelect
+          id="review-history-status"
+          label="Status"
+          size="compact"
+          className="w-36"
+          value={draft.status}
+          options={STATUS_FILTER_OPTIONS}
+          onChange={(status) => setDraft({ ...draft, status })}
+        />
         <div className="flex gap-2">
           <button
             type="submit"

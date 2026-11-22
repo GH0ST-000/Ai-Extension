@@ -387,7 +387,7 @@ export class PrReviewHistoryService {
     });
     if (!row) throw notFound();
     await this.assertRepositoryAccess(userId, workspaceId, row.owner, row.repository);
-    return this.authorizeImpact(userId, toDetail(row, userId));
+    return this.authorizeImpact(userId, workspaceId, toDetail(row, userId));
   }
 
   async latest(
@@ -413,7 +413,7 @@ export class PrReviewHistoryService {
         reportMarkdown: true,
       },
     });
-    return row ? this.authorizeImpact(userId, toDetail(row, userId)) : null;
+    return row ? this.authorizeImpact(userId, workspaceId, toDetail(row, userId)) : null;
   }
 
   /**
@@ -424,6 +424,7 @@ export class PrReviewHistoryService {
    */
   private async authorizeImpact(
     viewerId: string,
+    workspaceId: string,
     detail: PrReviewReportDetail,
   ): Promise<PrReviewReportDetail> {
     const impact = detail.snapshot.downstreamImpact;
@@ -432,7 +433,8 @@ export class PrReviewHistoryService {
     if (consumers.length === 0) return detail;
     const warnings = new Set(impact.warnings);
     let access = new Map<string, RepositoryAccessVerdict>();
-    if (this.contractImpact) {
+    // M4: consumers come from Systems data — only for viewers with systems:read.
+    if (this.contractImpact && (await this.contractImpact.canReadSystems(viewerId, workspaceId))) {
       const verified = await this.contractImpact.verifyAccess(viewerId, consumers);
       access = verified.access;
       if (verified.noToken) warnings.add('no_personal_token');
@@ -603,9 +605,16 @@ export class PrReviewHistoryService {
     let token: string | null;
     try {
       identity = await this.githubAccess.resolveCredentialIdentity(userId, workspaceId);
-      token = identity
-        ? ((await this.githubAccess.resolveApiToken(userId, workspaceId))?.token ?? null)
-        : null;
+      if (!identity) return 'denied';
+      // H1: with the workspace App, the viewer's own GitHub read access is verified first.
+      const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+        owner,
+        repository,
+        access: 'read',
+        workspaceId,
+      });
+      if (!resolved.ok) return resolved.reason === 'unavailable' ? 'unavailable' : 'denied';
+      token = resolved.token;
     } catch {
       return 'unavailable';
     }

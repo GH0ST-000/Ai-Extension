@@ -37,7 +37,8 @@ function AnalysisResultBody({
 }: {
   state: AnalysisState;
   onRetry: () => void;
-  onAddRepository: () => void;
+  /** Absent without systems:manage: the suggestion to add a repository is not offered. */
+  onAddRepository?: () => void;
   onDismiss: () => void;
 }) {
   if (state.status === 'idle') return null;
@@ -103,7 +104,7 @@ function AnalysisResultBody({
         }
         action={
           <>
-            {summary.suggestAddRepository ? (
+            {summary.suggestAddRepository && onAddRepository ? (
               <button type="button" onClick={onAddRepository} className={BUTTON_SECONDARY}>
                 Add repository
               </button>

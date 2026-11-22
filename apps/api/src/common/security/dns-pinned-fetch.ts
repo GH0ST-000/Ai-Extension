@@ -16,6 +16,14 @@ export class DnsPinError extends Error {
   }
 }
 
+/** The response body exceeded the caller's `maxResponseBytes` (nothing more was buffered). */
+export class ResponseTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super('RESPONSE_TOO_LARGE');
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
 /** Resolve hostname and ensure every answer is a public IP (SSRF / rebinding guard). */
 export async function resolvePublicHostAddresses(
   hostname: string,
@@ -76,7 +84,15 @@ function headersToFetchHeaders(headers: IncomingHttpHeaders): Headers {
  */
 export async function dnsPinnedFetch(
   url: URL,
-  init: RequestInit & { pinRecords?: Array<{ address: string; family: number }> } = {},
+  init: RequestInit & {
+    pinRecords?: Array<{ address: string; family: number }>;
+    /**
+     * F-11: hard cap on the response body, enforced WHILE streaming. A declared Content-Length
+     * above it is refused before any byte is read; otherwise the connection is destroyed as
+     * soon as the received bytes pass it. Rejects with ResponseTooLargeError.
+     */
+    maxResponseBytes?: number;
+  } = {},
 ): Promise<Response> {
   const records = init.pinRecords ?? (await resolvePublicHostAddresses(url.hostname));
   const pin = pickPinTarget(records);
@@ -100,7 +116,8 @@ export async function dnsPinnedFetch(
   } else if (headerInit) {
     Object.assign(headers, headerInit);
   }
-  headers.Host = url.hostname;
+  // url.host keeps a non-default port (Host must match the origin the client asked for).
+  headers.Host = url.host;
 
   const method = init.method ?? 'GET';
   const body =
@@ -127,9 +144,36 @@ export async function dnsPinnedFetch(
         signal: init.signal ?? undefined,
       },
       (res) => {
+        const maxBytes = init.maxResponseBytes;
+        const tooLarge = () => {
+          res.destroy();
+          req.destroy();
+          reject(new ResponseTooLargeError(maxBytes!));
+        };
+        if (maxBytes !== undefined) {
+          const declared = Number(res.headers['content-length']);
+          if (Number.isFinite(declared) && declared > maxBytes) {
+            tooLarge();
+            return;
+          }
+        }
         const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let received = 0;
+        let aborted = false;
+        res.on('data', (chunk: Buffer) => {
+          if (aborted) return;
+          received += chunk.length;
+          if (maxBytes !== undefined && received > maxBytes) {
+            aborted = true;
+            chunks.length = 0;
+            tooLarge();
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('error', (err) => reject(err));
         res.on('end', () => {
+          if (aborted) return;
           const buffer = Buffer.concat(chunks);
           resolve(
             new Response(buffer, {

@@ -11,7 +11,9 @@ describe('password reset email', () => {
     });
     expect(email.subject).toBe('Reset your Project X password');
     expect(email.html).not.toContain('<img src=x');
-    expect(email.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    // Adversarial review N2: the account name is never echoed (escaped or not).
+    expect(email.html).not.toContain('onerror');
+    expect(email.text).not.toContain('onerror');
     expect(email.html).not.toContain('"><script>');
     expect(email.html).toContain(
       'href="https://app.example.test/reset-password#token=abc&quot;&gt;&lt;script&gt;"',

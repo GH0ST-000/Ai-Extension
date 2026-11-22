@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   getProductPlan,
   isValidWorkspaceSlug,
@@ -13,12 +13,21 @@ import type {
   WorkspaceRole,
   WorkspaceStatus,
 } from '@project-x/types';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
-import { EntitlementService } from '../entitlements/entitlements.service';
+import { EntitlementService, effectivePlanId } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
+import { SecurityAuditService } from '../observability/security-audit.service';
 import { WorkspaceAuthorizationService } from './workspace-authorization.service';
+import { recordWorkspaceAudit, recordWorkspaceDenial } from './workspace-audit';
+import { revokePendingInvitationsFor } from './workspace-membership-lock';
+import {
+  assertFreeWorkspaceSlot,
+  freeWorkspaceUsage,
+  type FreeWorkspaceUsage,
+  lockAccountWorkspaces,
+} from './workspace-limits';
 import { workspaceException } from './workspace.errors';
 import type {
   CreateWorkspaceDto,
@@ -28,11 +37,14 @@ import type {
 
 @Injectable()
 export class WorkspacesService {
+  private readonly logger = new Logger(WorkspacesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly authorization: WorkspaceAuthorizationService,
     private readonly entitlements: EntitlementService,
     private readonly usage: UsageService,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   async bootstrap(
@@ -119,11 +131,39 @@ export class WorkspacesService {
 
   async create(userId: string, input: CreateWorkspaceDto): Promise<Workspace> {
     const name = input.name.trim();
-    const slug = await this.allocateSlug(
-      input.slug ? normalizeWorkspaceSlug(input.slug) : normalizeWorkspaceSlug(name),
-    );
+    const desired = input.slug ? normalizeWorkspaceSlug(input.slug) : normalizeWorkspaceSlug(name);
 
-    const created = await this.prisma.$transaction(async (tx) => {
+    // F-25: "is the slug free?" cannot see another transaction's uncommitted insert, so two
+    // concurrent creations of one name both pass it and the second hits the unique index. That
+    // is not an error: the whole transaction is retried with a freshly allocated (suffixed)
+    // slug instead of surfacing a raw database error as HTTP 500.
+    let created: Awaited<ReturnType<typeof this.createWithSlug>> | undefined;
+    for (let attempt = 0; attempt < WORKSPACE_SLUG_ATTEMPTS && !created; attempt += 1) {
+      const slug = await this.allocateSlug(
+        attempt === 0 ? desired : `${desired.slice(0, 40)}-${randomSuffix()}`,
+      );
+      try {
+        created = await this.createWithSlug(userId, name, slug);
+      } catch (error) {
+        if (isSlugConflict(error) && attempt + 1 < WORKSPACE_SLUG_ATTEMPTS) continue;
+        if (isSlugConflict(error)) {
+          throw workspaceException('UNKNOWN', 'Unable to allocate a unique workspace slug.');
+        }
+        throw error;
+      }
+    }
+    if (!created) throw workspaceException('UNKNOWN', 'Unable to create the workspace.');
+
+    this.entitlements.invalidate(created.id);
+    return mapWorkspace(created);
+  }
+
+  private createWithSlug(userId: string, name: string, slug: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // Decision B: a new workspace starts on the free plan — counted and decided under the
+      // account lock, so concurrent creations cannot exceed the free limit.
+      await lockAccountWorkspaces(tx, userId);
+      await assertFreeWorkspaceSlot(tx, userId, 'create');
       const workspace = await tx.workspace.create({
         data: {
           name,
@@ -155,9 +195,11 @@ export class WorkspacesService {
 
       return workspace;
     });
+  }
 
-    this.entitlements.invalidate(created.id);
-    return mapWorkspace(created);
+  /** Decision B: the caller's free-workspace usage (for the dashboard). */
+  async freeWorkspaceUsage(userId: string): Promise<FreeWorkspaceUsage> {
+    return freeWorkspaceUsage(this.prisma, userId);
   }
 
   async update(workspaceId: string, userId: string, input: UpdateWorkspaceDto): Promise<Workspace> {
@@ -186,65 +228,114 @@ export class WorkspacesService {
       data.slug = slug;
     }
 
-    const updated = await this.prisma.workspace.update({
-      where: { id: workspaceId },
-      data,
-    });
+    let updated;
+    try {
+      updated = await this.prisma.workspace.update({
+        where: { id: workspaceId },
+        data,
+      });
+    } catch (error) {
+      // F-25: another workspace took the slug between the check above and this write.
+      if (isSlugConflict(error)) {
+        throw workspaceException('WORKSPACE_LIMIT_REACHED', 'Workspace slug is already taken.');
+      }
+      throw error;
+    }
     return mapWorkspace(updated);
   }
 
-  async softDelete(workspaceId: string, userId: string): Promise<void> {
-    await this.authorization.assertAccess({
-      userId,
-      workspaceId,
-      permission: 'workspace:delete',
-    });
-
-    await this.prisma.workspace.update({
-      where: { id: workspaceId },
-      data: { status: 'deleted' },
-    });
-    this.entitlements.invalidate(workspaceId);
-  }
-
+  /**
+   * Explicit ownership transfer (unchanged semantics: the target becomes owner, the acting
+   * owner becomes admin). M3: one transaction under the workspace membership lock, actor and
+   * target re-validated there, and both people's pending invitations revoked with the change.
+   */
   async transferOwnership(
     workspaceId: string,
     actorUserId: string,
     input: TransferWorkspaceOwnershipDto,
   ): Promise<void> {
-    await this.authorization.assertAccess({
-      userId: actorUserId,
+    const auditTarget = {
+      actorUserId,
       workspaceId,
-      permission: 'workspace:delete',
-    });
-
-    const actorMembership = await this.prisma.workspaceMembership.findFirst({
-      where: { workspaceId, userId: actorUserId, status: 'active', role: 'owner' },
-    });
-    if (!actorMembership) {
-      throw workspaceException('WORKSPACE_OWNER_REQUIRED', 'Only an owner can transfer ownership.');
-    }
-
-    const target = await this.prisma.workspaceMembership.findFirst({
-      where: { id: input.membershipId, workspaceId, status: 'active' },
-    });
-    if (!target) {
-      throw workspaceException('WORKSPACE_MEMBER_NOT_FOUND', 'Target membership not found.');
-    }
-    if (target.id === actorMembership.id) {
-      return;
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.workspaceMembership.update({
-        where: { id: target.id },
-        data: { role: 'owner' },
+      action: 'transfer_ownership',
+      targetId: input.membershipId,
+    };
+    try {
+      await this.authorization.assertAccess({
+        userId: actorUserId,
+        workspaceId,
+        permission: 'workspace:delete',
       });
-      await tx.workspaceMembership.update({
-        where: { id: actorMembership.id },
-        data: { role: 'admin' },
+
+      const transferred = await this.prisma.$transaction(async (tx) => {
+        await this.authorization.assertAccess({
+          userId: actorUserId,
+          workspaceId,
+          permission: 'workspace:delete',
+          tx,
+        });
+        const actorMembership = await tx.workspaceMembership.findFirst({
+          where: { workspaceId, userId: actorUserId, status: 'active', role: 'owner' },
+          include: { user: { select: { email: true } } },
+        });
+        if (!actorMembership) {
+          throw workspaceException(
+            'WORKSPACE_OWNER_REQUIRED',
+            'Only an owner can transfer ownership.',
+          );
+        }
+        const target = await tx.workspaceMembership.findFirst({
+          where: { id: input.membershipId, workspaceId, status: 'active' },
+          include: { user: { select: { email: true } } },
+        });
+        if (!target) {
+          throw workspaceException('WORKSPACE_MEMBER_NOT_FOUND', 'Target membership not found.');
+        }
+        if (target.id === actorMembership.id) {
+          return false;
+        }
+        // INFO (final audit): transferring to someone who is already an owner would only demote
+        // the actor; two concurrent transfers to the same person would demote both. Refused.
+        // Decision B: receiving a FREE workspace uses one of the new owner's free slots
+        // (otherwise transfers would bypass the limit). Paid workspaces are never counted.
+        const subscription = await tx.workspaceSubscription.findUnique({
+          where: { workspaceId },
+          select: { planId: true, status: true },
+        });
+        if (effectivePlanId(subscription) === 'free') {
+          await lockAccountWorkspaces(tx, target.userId);
+          await assertFreeWorkspaceSlot(tx, target.userId, 'receive');
+        }
+        if (target.role === 'owner') {
+          throw workspaceException(
+            'WORKSPACE_ACCESS_DENIED',
+            'This member is already an owner. Ownership was not transferred.',
+          );
+        }
+        await tx.workspaceMembership.update({
+          where: { id: target.id },
+          data: { role: 'owner' },
+        });
+        await tx.workspaceMembership.update({
+          where: { id: actorMembership.id },
+          data: { role: 'admin' },
+        });
+        await revokePendingInvitationsFor(tx, workspaceId, target.user.email);
+        await revokePendingInvitationsFor(tx, workspaceId, actorMembership.user.email);
+        return true;
       });
-    });
+
+      if (transferred) {
+        recordWorkspaceAudit(this.audit, this.logger, {
+          ...auditTarget,
+          type: 'workspace.ownership.transferred',
+          outcome: 'success',
+        });
+      }
+    } catch (error) {
+      recordWorkspaceDenial(this.audit, this.logger, error, auditTarget);
+      throw error;
+    }
   }
 
   private async buildCurrentContext(
@@ -320,6 +411,18 @@ function mapWorkspace(row: {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+const WORKSPACE_SLUG_ATTEMPTS = 5;
+
+/** A unique violation on `workspaces.slug` (Prisma P2002). */
+function isSlugConflict(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+    return false;
+  }
+  const target = error.meta?.target;
+  const text = Array.isArray(target) ? target.join(',') : String(target ?? '');
+  return text.toLowerCase().includes('slug');
 }
 
 function randomSuffix(): string {

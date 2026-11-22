@@ -117,10 +117,15 @@ export class EntitlementService {
     const generationAtStart = this.generationOf(workspaceId);
     const subscription = await this.prisma.workspaceSubscription.findUnique({
       where: { workspaceId },
-      select: { planId: true, status: true },
+      select: { planId: true, status: true, workspace: { select: { status: true } } },
     });
 
-    const planId = effectivePlanId(subscription);
+    // Defense in depth: a workspace that is not active (pending deletion, deleted, suspended)
+    // never has paid entitlements, whatever a (possibly late) billing event stored. Access to
+    // such workspaces is already refused by every workspace check.
+    const workspaceInactive =
+      subscription?.workspace !== undefined && subscription.workspace.status !== 'active';
+    const planId = workspaceInactive ? 'free' : effectivePlanId(subscription);
     const entry: CachedEntitlements = {
       planId,
       entitlements: getProductPlan(planId).entitlements,

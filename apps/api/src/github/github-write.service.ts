@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
+  Optional,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -12,8 +14,11 @@ import type {
 } from '@project-x/types';
 
 import { RedisService } from '../redis/redis.service';
-import { GithubAccessService } from '../github-app/github-access.service';
+import { GithubAccessService, repositoryAccessError } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
+import { SecurityAuditService } from '../observability/security-audit.service';
+import { attributeAppPost, isValidGithubLogin } from './github-attribution';
+import { recordGithubWrite } from './github-write-audit';
 
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24; // 24h
 const LOCK_TTL_SECONDS = 30;
@@ -27,10 +32,12 @@ type GitHubCommentResponse = {
 
 @Injectable()
 export class GithubWriteService {
+  private readonly logger = new Logger(GithubWriteService.name);
   constructor(
     private readonly githubAccess: GithubAccessService,
     private readonly redis: RedisService,
     private readonly errors: GithubErrorNormalizer,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   async postPullRequestComment(
@@ -105,29 +112,104 @@ export class GithubWriteService {
         return { ...afterLock.result, deduplicated: true };
       }
 
-      const token = await this.githubAccess.getDecryptedToken(userId);
-      if (!token) {
-        throw new ForbiddenException(
-          'Connect a GitHub token in dashboard Settings before posting comments.',
-        );
+      // H1: a PR comment needs the user's own read access (GitHub lets readers comment);
+      // through the App on a public repository it needs write (N-17, see 'comment').
+      const access = await this.githubAccess.resolveRepositoryAccess(userId, {
+        owner,
+        repository,
+        access: 'comment',
+      });
+      if (!access.ok) {
+        const denied = repositoryAccessError(access.reason);
+        recordGithubWrite(this.audit, this.logger, {
+          operation: 'comment',
+          outcome: 'blocked',
+          userId,
+          workspaceId: access.workspaceId,
+          owner,
+          repository,
+          pullRequestNumber: input.pullRequestNumber,
+          detail: denied.code,
+        });
+        throw this.errors.toHttpException(denied.code, denied.message);
       }
+      const token = access.token;
 
-      await this.assertPullRequestOpen({
+      const pull = await this.assertPullRequestOpen({
         token,
         owner,
         repository,
         pullRequestNumber: input.pullRequestNumber,
       });
+      // N-17: on a locked conversation only collaborators with write may comment on GitHub.
+      // The App could still post, so the App path requires the user's own write access.
+      if (pull.locked && access.source === 'installation') {
+        const writer = await this.githubAccess.resolveRepositoryAccess(userId, {
+          owner,
+          repository,
+          access: 'write',
+        });
+        if (!writer.ok) {
+          recordGithubWrite(this.audit, this.logger, {
+            operation: 'comment',
+            outcome: 'blocked',
+            userId,
+            workspaceId: access.workspaceId,
+            owner,
+            repository,
+            pullRequestNumber: input.pullRequestNumber,
+            detail: 'CONVERSATION_LOCKED',
+          });
+          throw this.errors.toHttpException(
+            'INSUFFICIENT_PERMISSION',
+            'This pull request conversation is locked on GitHub. Only collaborators with write access can comment.',
+          );
+        }
+      }
+
+      // Decision C: through the App the comment appears as the bot — attribute it to the
+      // requesting user's VERIFIED GitHub login; refuse rather than post unattributed.
+      let postedBody = body;
+      if (access.source === 'installation') {
+        if (!isValidGithubLogin(access.actorGithubLogin)) {
+          recordGithubWrite(this.audit, this.logger, {
+            operation: 'comment',
+            outcome: 'blocked',
+            userId,
+            workspaceId: access.workspaceId,
+            owner,
+            repository,
+            pullRequestNumber: input.pullRequestNumber,
+            detail: 'GITHUB_IDENTITY_UNKNOWN',
+          });
+          throw this.errors.toHttpException(
+            'NOT_CONNECTED',
+            'Project X could not confirm your GitHub username. Reconnect your GitHub token in dashboard Settings.',
+          );
+        }
+        postedBody = attributeAppPost(body, access.actorGithubLogin);
+      }
 
       const result = await this.createIssueComment({
         token,
         owner,
         repository,
         pullRequestNumber: input.pullRequestNumber,
-        body,
+        body: postedBody,
       });
 
       await this.storeIdempotentResult(cacheKey, fingerprint, result);
+      recordGithubWrite(this.audit, this.logger, {
+        operation: 'comment',
+        outcome: 'success',
+        userId,
+        workspaceId: access.workspaceId,
+        owner,
+        repository,
+        pullRequestNumber: input.pullRequestNumber,
+        credential: access.source,
+        resultId: result.commentId,
+      });
       return { ...result, deduplicated: false };
     } finally {
       await this.releaseLock(lockKey);
@@ -139,7 +221,7 @@ export class GithubWriteService {
     owner: string;
     repository: string;
     pullRequestNumber: number;
-  }): Promise<void> {
+  }): Promise<{ locked: boolean }> {
     const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/pulls/${input.pullRequestNumber}`;
 
     let response: Response;
@@ -160,6 +242,7 @@ export class GithubWriteService {
     const payload = (await response.json().catch(() => ({}))) as {
       state?: string;
       merged?: boolean;
+      locked?: boolean;
       message?: string;
     };
 
@@ -189,6 +272,7 @@ export class GithubWriteService {
         'This pull request is closed or merged. Refresh the PR page before posting.',
       );
     }
+    return { locked: payload.locked === true };
   }
 
   private async createIssueComment(input: {

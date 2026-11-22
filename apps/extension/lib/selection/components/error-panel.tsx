@@ -15,6 +15,7 @@ import { isEntitlementFailureCode } from '~/lib/workspace/entitlement';
 
 import { getActionLabel, USER_FACING_AI_ERROR } from '../constants';
 import { BrandMark } from './brand-mark';
+import { resendEmailVerification, resendStatusMessage } from '~/lib/services/auth-client';
 
 type ErrorPanelProps = {
   action: AIAction;
@@ -41,6 +42,8 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
   ref,
 ) {
   const [copied, setCopied] = useState(false);
+  const [resendNote, setResendNote] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const entitlement = isEntitlementFailureCode(code as WorkspaceErrorCode | null);
   const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
   const mapped = mapToUserFacingError({
@@ -105,6 +108,14 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
       }
       return;
     }
+    if (kind === 'resend_verification') {
+      if (resending) return;
+      setResending(true);
+      void resendEmailVerification()
+        .then((status) => setResendNote(resendStatusMessage(status)))
+        .finally(() => setResending(false));
+      return;
+    }
     if (kind === 'copy_reference') {
       void copyReference();
       return;
@@ -150,6 +161,11 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
                   {mapped.title}
                 </p>
                 <p className="mt-1.5 text-[12.5px] leading-5 text-secondary">{mapped.message}</p>
+                {resendNote ? (
+                  <p role="status" className="mt-1.5 text-[12px] leading-5 text-primary">
+                    {resendNote}
+                  </p>
+                ) : null}
                 {requestId ? (
                   <p className="mt-2 font-mono text-[10px] text-muted">Reference: {requestId}</p>
                 ) : null}
@@ -172,7 +188,18 @@ export const ErrorPanel = forwardRef<HTMLDivElement, ErrorPanelProps>(function E
             onClick={runPrimary}
             className="rounded-full bg-accent px-3 py-1.5 text-[11.5px] font-semibold text-[#042f2e] transition-opacity hover:opacity-90"
           >
-            {mapped.primaryAction.label}
+            {mapped.primaryAction.kind === 'resend_verification' && resending
+              ? 'Sending…'
+              : mapped.primaryAction.label}
+          </button>
+        ) : null}
+        {mapped.primaryAction?.kind === 'resend_verification' ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
+          >
+            Retry
           </button>
         ) : null}
         {requestId ? (

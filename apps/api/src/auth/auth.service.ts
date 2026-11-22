@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -9,6 +15,8 @@ import type { AuthTokenResponse } from '@project-x/types';
 import { MARKETING_CONSENT_VERSION } from '@project-x/types';
 
 import type { ApiConfig } from '../config/configuration';
+import { Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { durationToSeconds } from './auth-cookies';
 import { sanitizeSignupAttribution } from './signup-attribution';
@@ -24,6 +32,23 @@ import { SecurityAuditService } from '../observability/security-audit.service';
 const REFRESH_ROTATION_GRACE_MS = 30_000;
 
 /** Refresh lost a race with a concurrent rotation; the session itself is still valid. */
+/** Serializes rotation and family revocation of one refresh-token family (released at commit). */
+async function lockRefreshFamily(tx: Prisma.TransactionClient, familyId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('refresh-family'), hashtext(${familyId}))`;
+}
+
+const REGISTRATION_SLUG_ATTEMPTS = 3;
+
+/** The unique-constraint target of a Prisma P2002 error (lower-cased), or null. */
+function uniqueViolationTarget(error: unknown): string | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+    return null;
+  }
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  const text = Array.isArray(target) ? target.join(',') : String(target ?? '');
+  return text.toLowerCase();
+}
+
 export class RefreshTokenRotatedException extends UnauthorizedException {
   constructor() {
     super('Refresh token was already rotated.');
@@ -39,6 +64,8 @@ export type AuthIssueContext = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -63,7 +90,61 @@ export class AuthService {
     const attribution = sanitizeSignupAttribution(input.attribution);
     const consentAt = new Date();
 
-    const user = await this.prisma.$transaction(async (tx) => {
+    // Registration races (root cause of an intermittent 500, see below) are resolved here:
+    // - concurrent registrations of the SAME email: the unique violation is answered with the
+    //   same generic 409 as the existence check above (never a 500);
+    // - personal-workspace slug collisions: the slug is derived from the first 16 characters
+    //   of the user id (cuid: timestamp + counter + part of the process fingerprint), which can
+    //   coincide for registrations in different processes within the same millisecond. The
+    //   "is the slug free?" check cannot see another transaction's uncommitted insert, so the
+    //   insert may hit the unique index; the whole transaction is retried with a random suffix.
+    let user:
+      { id: string; email: string; name: string | null; sessionVersion: number } | undefined;
+    for (let attempt = 0; attempt < REGISTRATION_SLUG_ATTEMPTS && !user; attempt += 1) {
+      try {
+        user = await this.createAccount(
+          { email, passwordHash, name, client, marketingConsent, attribution, consentAt },
+          attempt,
+        );
+      } catch (error) {
+        const target = uniqueViolationTarget(error);
+        if (target?.includes('email')) {
+          throw new ConflictException('Unable to create an account with the provided details.');
+        }
+        if (target?.includes('slug') && attempt + 1 < REGISTRATION_SLUG_ATTEMPTS) {
+          this.logger.warn({ msg: 'auth.register.slug_collision_retry', attempt });
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (!user) throw new Error('registration did not complete');
+
+    this.securityAudit?.record({
+      type: 'auth.register',
+      outcome: 'success',
+      actorUserId: user.id,
+      ip: ctx.ip,
+    });
+
+    return this.issueSession(user, ctx);
+  }
+
+  /** One registration attempt (user, settings, personal workspace) in a single transaction. */
+  private createAccount(
+    input: {
+      email: string;
+      passwordHash: string;
+      name: string | null;
+      client: 'dashboard' | 'extension';
+      marketingConsent: boolean;
+      attribution: ReturnType<typeof sanitizeSignupAttribution>;
+      consentAt: Date;
+    },
+    attempt: number,
+  ) {
+    const { email, passwordHash, name, client, marketingConsent, attribution, consentAt } = input;
+    return this.prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
           email,
@@ -93,11 +174,15 @@ export class AuthService {
       });
 
       const workspaceId = `ws_${created.id}`;
-      let slug = personalWorkspaceSlug(created.id);
-      let attempt = 0;
+      const base =
+        attempt === 0
+          ? personalWorkspaceSlug(created.id)
+          : `${personalWorkspaceSlug(created.id)}-${randomBytes(3).toString('hex')}`;
+      let slug = base;
+      let taken = 0;
       while (await tx.workspace.findUnique({ where: { slug } })) {
-        attempt += 1;
-        slug = `${personalWorkspaceSlug(created.id)}-${attempt}`;
+        taken += 1;
+        slug = `${base}-${taken}`;
       }
 
       await tx.workspace.create({
@@ -135,15 +220,6 @@ export class AuthService {
 
       return created;
     });
-
-    this.securityAudit?.record({
-      type: 'auth.register',
-      outcome: 'success',
-      actorUserId: user.id,
-      ip: ctx.ip,
-    });
-
-    return this.issueSession(user, ctx);
   }
 
   async login(input: LoginDto, ctx: AuthIssueContext = {}): Promise<AuthTokenResponse> {
@@ -182,12 +258,16 @@ export class AuthService {
       ip: ctx.ip,
     });
 
+    // The password was checked against `user.passwordHash` a bcrypt-compare ago. The session
+    // is issued only if that is still the account's password and session generation — a
+    // password reset or logout-all that committed in between wins (see issueSession).
     return this.issueSession(
       {
         id: user.id,
         email: user.email,
         name: user.name,
         sessionVersion: user.sessionVersion,
+        verifiedPasswordHash: user.passwordHash,
       },
       ctx,
     );
@@ -216,9 +296,14 @@ export class AuthService {
       if (rotatedRecently) {
         throw new RefreshTokenRotatedException();
       }
-      await this.prisma.refreshToken.updateMany({
-        where: { familyId: existing.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      // Same per-family lock as rotation (adversarial N3): a rotation racing this revocation
+      // either commits first (its new token is revoked here) or waits and sees the revocation.
+      await this.prisma.$transaction(async (tx) => {
+        await lockRefreshFamily(tx, existing.familyId);
+        await tx.refreshToken.updateMany({
+          where: { familyId: existing.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
       });
       await this.prisma.user.update({
         where: { id: existing.userId },
@@ -249,12 +334,35 @@ export class AuthService {
       Date.now() + durationToSeconds(refreshExpiresIn, 7 * 24 * 3600) * 1000,
     );
 
-    await this.prisma.$transaction([
-      this.prisma.refreshToken.update({
-        where: { id: existing.id },
+    // N-14: atomic single-use rotation. Only the request that flips revokedAt from null wins;
+    // a concurrent refresh with the same token gets "already rotated" (as within the grace
+    // window) and is never issued a second, valid descendant.
+    //
+    // F-31: the rotation also holds the USER row lock, taken first. Logout-all and password
+    // reset start by updating that row (session_version) before they revoke the refresh
+    // tokens, so the two serialize: a global revocation either commits first (this rotation
+    // then finds its token revoked and issues nothing) or waits for this rotation and then
+    // revokes the token it just created. Without it the revocation's snapshot could miss the
+    // not-yet-committed new token, which then survived "sign out everywhere".
+    const sessionVersion = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ session_version: number }>>`
+        SELECT session_version FROM users WHERE id = ${existing.userId} FOR UPDATE`;
+      if (!locked[0]) throw new UnauthorizedException('Invalid refresh token.');
+      await lockRefreshFamily(tx, existing.familyId);
+      const rotated = await tx.refreshToken.updateMany({
+        where: { id: existing.id, revokedAt: null },
         data: { revokedAt: new Date(), replacedByTokenId: nextId },
-      }),
-      this.prisma.refreshToken.create({
+      });
+      // Revoked by a concurrent rotation (same token) or by a global revocation that won.
+      if (rotated.count !== 1) {
+        const now = await tx.refreshToken.findUnique({
+          where: { id: existing.id },
+          select: { replacedByTokenId: true },
+        });
+        if (now?.replacedByTokenId) throw new RefreshTokenRotatedException();
+        throw new UnauthorizedException('Session ended. Please sign in again.');
+      }
+      await tx.refreshToken.create({
         data: {
           id: nextId,
           userId: existing.userId,
@@ -264,12 +372,14 @@ export class AuthService {
           userAgent: truncate(ctx.userAgent, 512),
           ip: truncate(ctx.ip, 64),
         },
-      }),
-    ]);
+      });
+      return locked[0].session_version;
+    });
 
     const accessExpiresIn = this.config.get('jwt.expiresIn', { infer: true });
+    // Signed with the version read under the lock (never a value read before a revocation).
     const accessToken = this.jwt.sign(
-      { sub: existing.user.id, email: existing.user.email, sv: existing.user.sessionVersion },
+      { sub: existing.user.id, email: existing.user.email, sv: sessionVersion },
       { expiresIn: accessExpiresIn },
     );
 
@@ -338,29 +448,60 @@ export class AuthService {
     return this.logout(userId);
   }
 
+  /**
+   * Create a session (access JWT + a new refresh-token family).
+   *
+   * The refresh token is inserted under the USER row lock, the same lock a password reset and
+   * logout-all take first — so a global revocation either committed before (and is seen here)
+   * or will see this token and revoke it. For a login (`verifiedPasswordHash` set) the insert
+   * is refused when the credentials that were just verified are no longer the account's: a
+   * reset that committed while bcrypt was running must not be followed by a session minted
+   * from the OLD password. The JWT is signed with the session version read under the lock.
+   */
   private async issueSession(
-    user: { id: string; email: string; name: string | null; sessionVersion: number },
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+      sessionVersion: number;
+      verifiedPasswordHash?: string;
+    },
     ctx: AuthIssueContext,
   ): Promise<AuthTokenResponse> {
     const accessExpiresIn = this.config.get('jwt.expiresIn', { infer: true });
     const refreshExpiresIn = this.config.get('jwt.refreshExpiresIn', { infer: true });
-    const accessToken = this.jwt.sign(
-      { sub: user.id, email: user.email, sv: user.sessionVersion },
-      { expiresIn: accessExpiresIn },
-    );
 
     const rawRefresh = createRefreshToken();
     const familyId = randomUUID();
-    await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(rawRefresh),
-        familyId,
-        expiresAt: new Date(Date.now() + durationToSeconds(refreshExpiresIn, 7 * 24 * 3600) * 1000),
-        userAgent: truncate(ctx.userAgent, 512),
-        ip: truncate(ctx.ip, 64),
-      },
+    const sessionVersion = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ session_version: number; password_hash: string }>>`
+        SELECT session_version, password_hash FROM users WHERE id = ${user.id} FOR UPDATE`;
+      const current = locked[0];
+      if (!current) throw new UnauthorizedException('Invalid email or password.');
+      if (
+        user.verifiedPasswordHash !== undefined &&
+        current.password_hash !== user.verifiedPasswordHash
+      ) {
+        throw new UnauthorizedException('Invalid email or password.');
+      }
+      await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(rawRefresh),
+          familyId,
+          expiresAt: new Date(
+            Date.now() + durationToSeconds(refreshExpiresIn, 7 * 24 * 3600) * 1000,
+          ),
+          userAgent: truncate(ctx.userAgent, 512),
+          ip: truncate(ctx.ip, 64),
+        },
+      });
+      return current.session_version;
     });
+    const accessToken = this.jwt.sign(
+      { sub: user.id, email: user.email, sv: sessionVersion },
+      { expiresIn: accessExpiresIn },
+    );
 
     return {
       accessToken,

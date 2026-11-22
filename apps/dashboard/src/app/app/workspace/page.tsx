@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ApiError } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace-context';
 import { deleteWorkspace, updateWorkspace } from '../../../lib/workspace-api';
+import { PendingDeletionsNotice } from '../../../components/workspace/pending-deletions-notice';
 
 function apiMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -75,6 +76,8 @@ export default function WorkspaceSettingsPage() {
       setMessage('Workspace deleted.');
       router.replace('/app');
     } catch (err) {
+      // A 502 means billing cancellation is not confirmed yet: the workspace is pending
+      // deletion (no longer usable) and is listed above with a retry action.
       setError(apiMessage(err, 'Unable to delete workspace.'));
     } finally {
       setDeleting(false);
@@ -91,8 +94,11 @@ export default function WorkspaceSettingsPage() {
 
   if (!workspace) {
     return (
-      <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-red-600 dark:text-red-400 shadow-panel">
-        No workspace selected.
+      <div className="space-y-6">
+        <PendingDeletionsNotice />
+        <div className="rounded-3xl border border-line bg-panel/75 px-5 py-8 text-sm text-red-600 dark:text-red-400 shadow-panel">
+          No workspace selected.
+        </div>
       </div>
     );
   }
@@ -101,6 +107,7 @@ export default function WorkspaceSettingsPage() {
 
   return (
     <div className="space-y-8">
+      <PendingDeletionsNotice />
       <header className="rise-in">
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
           Workspace

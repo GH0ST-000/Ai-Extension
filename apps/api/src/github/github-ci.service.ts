@@ -11,7 +11,7 @@ import type {
 import { CI_MAX_LOG_BYTES } from '@project-x/types';
 
 import { AiService } from '../ai/ai.service';
-import { GithubAccessService } from '../github-app/github-access.service';
+import { GithubAccessService, repositoryAccessError } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { normalizeRepositoryPath } from './patch-path';
 import { parseCIFailureAnalysisJson } from './ci/ci-analysis-parse';
@@ -104,7 +104,7 @@ export class GithubCiService {
     const repository = repositoryRaw.trim();
     this.assertPrIdentity(owner, repository, pullRequestNumber);
 
-    const token = await this.requireToken(userId);
+    const token = await this.requireToken(userId, owner, repository);
     const pull = await this.fetchPullRequest({ token, owner, repository, pullRequestNumber });
     const headSha = pull.head?.sha?.trim();
     if (!headSha) {
@@ -171,7 +171,7 @@ export class GithubCiService {
     const repository = repositoryRaw.trim();
     this.assertPrIdentity(owner, repository, pullRequestNumber);
 
-    const token = await this.requireToken(userId);
+    const token = await this.requireToken(userId, owner, repository);
     const pull = await this.fetchPullRequest({ token, owner, repository, pullRequestNumber });
     const headSha = pull.head?.sha?.trim();
     if (!headSha) {
@@ -431,15 +431,22 @@ export class GithubCiService {
     }
   }
 
-  private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubAccess.getDecryptedToken(userId);
-    if (!token) {
-      throw this.errors.toHttpException(
-        'NOT_CONNECTED',
-        'Connect a GitHub token in dashboard Settings before viewing CI status.',
-      );
+  /**
+   * H1: credential for this repository only after the acting user's own GitHub access was
+   * verified (see GithubAccessService.resolveRepositoryAccess). Never falls back to a broader
+   * credential.
+   */
+  private async requireToken(userId: string, owner: string, repository: string): Promise<string> {
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner,
+      repository,
+      access: 'read',
+    });
+    if (!resolved.ok) {
+      const { code, message } = repositoryAccessError(resolved.reason);
+      throw this.errors.toHttpException(code, message);
     }
-    return token;
+    return resolved.token;
   }
 
   private githubHeaders(token: string): Record<string, string> {
@@ -823,6 +830,8 @@ const PASS_THROUGH_CODES = new Set([
   'SUBSCRIPTION_REQUIRED',
   'SUBSCRIPTION_INACTIVE',
   'AI_OPERATION_IN_PROGRESS',
+  // Decision 1: actionable (confirm the email); must not become AI_ANALYSIS_FAILED.
+  'EMAIL_VERIFICATION_REQUIRED',
 ]);
 
 export function isEntitlementRefusal(error: unknown): boolean {

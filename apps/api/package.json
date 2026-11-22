@@ -15,7 +15,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test:integration": "bash test/integration/run-memory-it.sh"
+    "test:integration": "bash test/integration/run-memory-it.sh",
+    "test:integration:ci": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.18",
@@ -51,7 +52,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typescript": "^5.7.2",
-    "zod": "^3.24.1"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",

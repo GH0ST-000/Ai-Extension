@@ -76,6 +76,7 @@ export class GithubController {
   }
 
   @Get('pull-requests/:owner/:repo/:number/checks')
+  @RateLimit({ bucket: 'github-read', limit: 60, windowSeconds: 60 })
   listPullRequestChecks(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,
@@ -86,6 +87,7 @@ export class GithubController {
   }
 
   @Get('pull-requests/:owner/:repo/:number/checks/:checkId')
+  @RateLimit({ bucket: 'github-read', limit: 60, windowSeconds: 60 })
   getCheckFailureEvidence(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,
@@ -102,7 +104,10 @@ export class GithubController {
     );
   }
 
+  // F-07: a model call per request — rate limited like every other AI entry point (the usage
+  // quota alone does not bound it: an unusable result is refunded, within a daily budget).
   @Post('pull-requests/:owner/:repo/:number/checks/:checkId/analyze')
+  @RateLimit({ bucket: 'ai_ci_analysis', limit: 20, windowSeconds: 60 })
   analyzeCheckFailure(
     @CurrentUser() user: AuthRequestUser,
     @Param('owner') owner: string,
@@ -125,6 +130,7 @@ export class GithubController {
    * Day 18 — read-only: fetch one repo path at explicit baseSha + headSha (Contents API).
    * Does not mutate GitHub. Used for OpenAPI contract diffs on PR pages.
    */
+  @RateLimit({ bucket: 'github-read', limit: 60, windowSeconds: 60 })
   @Post('repos/:owner/:repo/file-versions')
   fetchFileVersions(
     @CurrentUser() user: AuthRequestUser,
@@ -138,6 +144,7 @@ export class GithubController {
   /**
    * Day 18 — read-only: resolve PR base/head SHAs, then fetch one path at both.
    */
+  @RateLimit({ bucket: 'github-read', limit: 60, windowSeconds: 60 })
   @Post('pull-requests/:owner/:repo/:number/file-versions')
   fetchPullRequestFileVersions(
     @CurrentUser() user: AuthRequestUser,

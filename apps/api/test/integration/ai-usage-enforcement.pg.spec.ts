@@ -83,7 +83,13 @@ describe.skipIf(!URL_ENV)('AI usage enforcement on PostgreSQL', () => {
     run += 1;
     const user = `enf_user_${run}_${Date.now()}`;
     await prisma.user.create({
-      data: { id: user, email: `${user}@it.test`, passwordHash: 'x', lastWorkspaceId: ws },
+      data: {
+        id: user,
+        email: `${user}@it.test`,
+        passwordHash: 'x',
+        lastWorkspaceId: ws,
+        emailVerifiedAt: new Date(),
+      },
     });
     await prisma.workspaceMembership.create({
       data: { workspaceId: ws, userId: user, role: 'owner', status: 'active' },

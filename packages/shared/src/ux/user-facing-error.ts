@@ -65,6 +65,21 @@ export function mapToUserFacingError(input: MapErrorInput): UserFacingError {
   const referenceId = input.referenceId ?? undefined;
 
   switch (code) {
+    case 'EMAIL_VERIFICATION_REQUIRED':
+      // Decision 1: not a provider failure. The server message distinguishes "your email" from
+      // "the workspace owner's email"; it never names another user.
+      return error({
+        title: 'Confirm your email to use free AI',
+        message:
+          input.message?.trim() ||
+          'Confirm your email address to use free AI actions. Check your inbox or request a new link.',
+        severity: 'warning',
+        code,
+        referenceId,
+        primaryAction: action('Resend verification email', 'resend_verification'),
+        secondaryAction: action('Retry', 'retry'),
+      });
+
     case 'NOT_CONNECTED':
       return error({
         title: 'Connect GitHub',

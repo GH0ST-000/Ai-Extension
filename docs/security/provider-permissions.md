@@ -57,7 +57,7 @@ Documented for users in shared GitHub trust copy:
 | `GET /api/integrations/github-app/setup` | GitHub setup URL callback (links installation → workspace) |
 | `POST /api/webhooks/github-app` | Installation lifecycle (`created`, `deleted`, `suspend`, …) |
 | `GET /api/workspaces/:id/integrations/github-app/status` | Workspace installation status (no secrets) |
-| `DELETE /api/workspaces/:id/integrations/github-app` | Disconnect (best-effort GitHub uninstall + mark removed) |
+| `DELETE /api/workspaces/:id/integrations/github-app` | Disconnect: unlinks the workspace and revokes its cached token. Never uninstalls the App on GitHub (an organization owner does that in GitHub settings). |
 
 User PAT connect/disconnect remains **`/api/settings/github`** (unchanged).
 

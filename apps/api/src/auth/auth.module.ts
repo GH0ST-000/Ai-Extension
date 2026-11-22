@@ -12,6 +12,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 import { PasswordResetService } from './password-reset.service';
+import { EmailVerificationService } from './email-verification.service';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PasswordResetService } from './password-reset.service';
   providers: [
     AuthService,
     PasswordResetService,
+    EmailVerificationService,
     JwtStrategy,
     OptionalJwtAuthGuard,
     JwtAuthGuard,
@@ -40,6 +42,6 @@ import { PasswordResetService } from './password-reset.service';
       useClass: JwtAuthGuard,
     },
   ],
-  exports: [AuthService, JwtModule, PassportModule, JwtAuthGuard],
+  exports: [AuthService, JwtModule, PassportModule, JwtAuthGuard, EmailVerificationService],
 })
 export class AuthModule {}

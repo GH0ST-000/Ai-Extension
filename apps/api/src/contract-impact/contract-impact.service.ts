@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type {
   ApiContractChange,
   DownstreamImpactFinding,
@@ -16,6 +16,7 @@ import { MULTI_REPO_MAX_RELATIONSHIPS, MULTI_REPO_MAX_REPOS_PER_SYSTEM } from '@
 import { GithubAccessService } from '../github-app/github-access.service';
 import { toRepositoryRelationship } from '../multi-repo/multi-repo.mapper';
 import { PrismaService } from '../prisma/prisma.service';
+import { WorkspaceAuthorizationService } from '../workspaces/workspace-authorization.service';
 
 /** Consumer repositories re-authorized per analysis / per history read. */
 export const CONSUMER_ACCESS_MAX_CHECKS = 10;
@@ -110,7 +111,23 @@ export class ContractImpactService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly githubAccess: GithubAccessService,
+    @Optional() private readonly authorization?: WorkspaceAuthorizationService,
   ) {}
+
+  /**
+   * M4: may `userId` read Systems data (relationships, impact) in `workspaceId`? The existing
+   * RBAC check (active membership, active workspace, systems:read). Fails closed — also when
+   * no authorization service is wired.
+   */
+  async canReadSystems(userId: string, workspaceId: string): Promise<boolean> {
+    if (!this.authorization) return false;
+    try {
+      await this.authorization.assertAccess({ userId, workspaceId, permission: 'systems:read' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async computeForProvider(
     userId: string,
@@ -124,6 +141,18 @@ export class ContractImpactService {
     },
   ): Promise<{ result: DownstreamImpactResult; systemsConsidered: number }> {
     const provider = toRepositoryIdentity(input.owner, input.repository);
+    if (!(await this.canReadSystems(userId, workspaceId))) {
+      // No Systems data for this user: as if no system covered the provider (nothing leaks).
+      return {
+        result: computeDownstreamImpact({
+          provider,
+          changes: input.changes,
+          relationships: [],
+          ...(input.now ? { now: input.now } : {}),
+        }),
+        systemsConsidered: 0,
+      };
+    }
     const { relationships, systemsConsidered } = await loadScopedHttpConsumers(this.prisma, {
       userId,
       workspaceId,
@@ -157,7 +186,9 @@ export class ContractImpactService {
 
     let token: string | null;
     try {
-      token = await this.githubAccess.getDecryptedToken(userId);
+      // The user's own personal token only: the workspace App token would reveal consumers
+      // the user cannot see.
+      token = await this.githubAccess.getPersonalToken(userId);
     } catch {
       token = null;
     }

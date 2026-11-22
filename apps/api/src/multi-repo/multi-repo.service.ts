@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type {
   ProjectSystem as ProjectSystemRow,
   ProjectSystemRepository as ProjectSystemRepositoryRow,
@@ -91,12 +91,19 @@ import { MULTI_REPO_MAX_CANDIDATE_LOOKUPS, MULTI_REPO_MAX_GITHUB_REQUESTS } from
 
 import { GithubContentService } from '../github/github-content.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SecurityAuditService } from '../observability/security-audit.service';
 import { resolveWorkspaceIdForUser } from '../workspaces/resolve-workspace-id';
+import { WorkspaceAuthorizationService } from '../workspaces/workspace-authorization.service';
+import { recordWorkspaceAudit } from '../workspaces/workspace-audit';
+import type { SecurityAuditEventType, WorkspacePermission } from '@project-x/types';
 import { FeatureGate } from '../entitlements/feature-gate';
 import { EntitlementService } from '../entitlements/entitlements.service';
 import { UsageService, withRetry } from '../usage/usage.service';
 import { ProjectMemoryService } from '../project-memory/project-memory.service';
-import { GithubAccessService } from '../github-app/github-access.service';
+import {
+  GithubAccessService,
+  type RepositoryAccessDenial,
+} from '../github-app/github-access.service';
 import { multiRepoException } from './multi-repo.errors';
 import { toProjectSystem, toRepositoryRelationship } from './multi-repo.mapper';
 import { RepositoryScanner, ScanBudget, type ScannedFile } from './repository-scanner';
@@ -226,10 +233,65 @@ export class MultiRepoService {
     private readonly featureGate: FeatureGate,
     private readonly entitlements: EntitlementService,
     private readonly usage: UsageService,
+    private readonly authorization: WorkspaceAuthorizationService,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
-  async listSystems(userId: string): Promise<ProjectSystem[]> {
+  /**
+   * M4 — the single authorization step of every Systems entry point (HTTP and internal).
+   * Resolves the acting workspace (X-Workspace-Id, else the documented fallback), then the
+   * existing RBAC check: active membership, ACTIVE workspace (deleted / deletion_pending are
+   * refused), and the permission. Nothing is read or changed before it passes.
+   */
+  private async authorize(userId: string, permission: WorkspacePermission): Promise<string> {
     const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    await this.authorization.assertAccess({ userId, workspaceId, permission });
+    return workspaceId;
+  }
+
+  /**
+   * A configuration change (systems:manage): authorized, executed, audited. Refusals are
+   * audited as `systems.access.denied`. Safe metadata only — ids and action, never repository
+   * contents or tokens.
+   */
+  private async managed<T>(
+    userId: string,
+    action: { type: SecurityAuditEventType; name: string; targetId?: string },
+    run: (workspaceId: string) => Promise<T>,
+    targetOf?: (result: T) => string | undefined,
+  ): Promise<T> {
+    let workspaceId: string | undefined;
+    try {
+      workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+      await this.authorization.assertAccess({ userId, workspaceId, permission: 'systems:manage' });
+    } catch (error) {
+      if (workspaceId) {
+        recordWorkspaceAudit(this.audit, this.logger, {
+          type: 'systems.access.denied',
+          outcome: 'blocked',
+          actorUserId: userId,
+          workspaceId,
+          action: action.name,
+          ...(action.targetId ? { targetId: action.targetId } : {}),
+        });
+      }
+      throw error;
+    }
+    const result = await run(workspaceId);
+    const targetId = action.targetId ?? targetOf?.(result);
+    recordWorkspaceAudit(this.audit, this.logger, {
+      type: action.type,
+      outcome: 'success',
+      actorUserId: userId,
+      workspaceId,
+      action: action.name,
+      ...(targetId ? { targetId } : {}),
+    });
+    return result;
+  }
+
+  async listSystems(userId: string): Promise<ProjectSystem[]> {
+    const workspaceId = await this.authorize(userId, 'systems:read');
     const rows = await this.prisma.projectSystem.findMany({
       where: { workspaceId },
       include: { repositories: { orderBy: { createdAt: 'asc' } } },
@@ -239,7 +301,19 @@ export class MultiRepoService {
   }
 
   async createSystem(userId: string, input: CreateProjectSystemRequest): Promise<ProjectSystem> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    return this.managed(
+      userId,
+      { type: 'systems.system.created', name: 'create_system' },
+      (workspaceId) => this.createSystemIn(workspaceId, userId, input),
+      (created) => created.id,
+    );
+  }
+
+  private async createSystemIn(
+    workspaceId: string,
+    userId: string,
+    input: CreateProjectSystemRequest,
+  ): Promise<ProjectSystem> {
     await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
     const ents = await this.entitlements.getEntitlements(workspaceId);
     const maxSystems = effectiveMaxProjectSystems(ents.maxProjectSystems);
@@ -325,7 +399,19 @@ export class MultiRepoService {
     systemId: string,
     patch: UpdateProjectSystemRequest,
   ): Promise<ProjectSystem> {
-    const existing = await this.requireSystem(userId, systemId);
+    return this.managed(
+      userId,
+      { type: 'systems.system.updated', name: 'update_system', targetId: systemId },
+      () => this.updateSystemAuthorized(userId, systemId, patch),
+    );
+  }
+
+  private async updateSystemAuthorized(
+    userId: string,
+    systemId: string,
+    patch: UpdateProjectSystemRequest,
+  ): Promise<ProjectSystem> {
+    const existing = await this.requireSystem(userId, systemId, 'systems:manage');
     const nextPrimary =
       patch.primaryOwner || patch.primaryRepository
         ? normalizeOwnerRepo(
@@ -378,9 +464,15 @@ export class MultiRepoService {
   }
 
   async deleteSystem(userId: string, systemId: string): Promise<{ deleted: true; id: string }> {
-    await this.requireSystem(userId, systemId);
-    await this.prisma.projectSystem.delete({ where: { id: systemId } });
-    return { deleted: true, id: systemId };
+    return this.managed(
+      userId,
+      { type: 'systems.system.deleted', name: 'delete_system', targetId: systemId },
+      async () => {
+        await this.requireSystem(userId, systemId, 'systems:manage');
+        await this.prisma.projectSystem.delete({ where: { id: systemId } });
+        return { deleted: true as const, id: systemId };
+      },
+    );
   }
 
   async addRepository(
@@ -388,7 +480,19 @@ export class MultiRepoService {
     systemId: string,
     input: AddSystemRepositoryRequest,
   ): Promise<ProjectSystem> {
-    const system = await this.requireSystem(userId, systemId);
+    return this.managed(
+      userId,
+      { type: 'systems.repository.added', name: 'add_repository', targetId: systemId },
+      () => this.addRepositoryAuthorized(userId, systemId, input),
+    );
+  }
+
+  private async addRepositoryAuthorized(
+    userId: string,
+    systemId: string,
+    input: AddSystemRepositoryRequest,
+  ): Promise<ProjectSystem> {
+    const system = await this.requireSystem(userId, systemId, 'systems:manage');
     const identity = normalizeOwnerRepo(input.owner, input.repository);
     await this.assertRepositoryAccess(userId, identity.owner, identity.repository);
 
@@ -431,7 +535,21 @@ export class MultiRepoService {
     repositoryRaw: string,
     input: { role?: MultiRepoRepositoryRole; enabled?: boolean },
   ): Promise<ProjectSystem> {
-    const system = await this.requireSystem(userId, systemId);
+    return this.managed(
+      userId,
+      { type: 'systems.repository.updated', name: 'update_repository', targetId: systemId },
+      () => this.updateRepositoryAuthorized(userId, systemId, ownerRaw, repositoryRaw, input),
+    );
+  }
+
+  private async updateRepositoryAuthorized(
+    userId: string,
+    systemId: string,
+    ownerRaw: string,
+    repositoryRaw: string,
+    input: { role?: MultiRepoRepositoryRole; enabled?: boolean },
+  ): Promise<ProjectSystem> {
+    const system = await this.requireSystem(userId, systemId, 'systems:manage');
     const identity = normalizeOwnerRepo(ownerRaw, repositoryRaw);
     const row = system.repositories.find(
       (r) => r.owner === identity.owner && r.repository === identity.repository,
@@ -473,7 +591,20 @@ export class MultiRepoService {
     ownerRaw: string,
     repositoryRaw: string,
   ): Promise<ProjectSystem> {
-    const system = await this.requireSystem(userId, systemId);
+    return this.managed(
+      userId,
+      { type: 'systems.repository.removed', name: 'remove_repository', targetId: systemId },
+      () => this.removeRepositoryAuthorized(userId, systemId, ownerRaw, repositoryRaw),
+    );
+  }
+
+  private async removeRepositoryAuthorized(
+    userId: string,
+    systemId: string,
+    ownerRaw: string,
+    repositoryRaw: string,
+  ): Promise<ProjectSystem> {
+    const system = await this.requireSystem(userId, systemId, 'systems:manage');
     const identity = normalizeOwnerRepo(ownerRaw, repositoryRaw);
 
     if (
@@ -513,9 +644,9 @@ export class MultiRepoService {
   }
 
   async listRelationships(userId: string, systemId: string): Promise<RepositoryRelationship[]> {
-    await this.requireSystem(userId, systemId);
+    const system = await this.requireSystem(userId, systemId);
     const rows = await this.prisma.repositoryRelationship.findMany({
-      where: { userId, systemId },
+      where: { userId, systemId, workspaceId: system.workspaceId },
       orderBy: [{ updatedAt: 'desc' }],
       take: MULTI_REPO_MAX_RELATIONSHIPS,
     });
@@ -602,7 +733,8 @@ export class MultiRepoService {
    * usage charge, and one scan at a time per user and system (Refresh and Discover share it).
    */
   private async chargedDiscovery(userId: string, systemId: string): Promise<DiscoveryResult> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    // systems:read (product decision, M4): discovery stores only the caller's own findings.
+    const workspaceId = await this.authorize(userId, 'systems:read');
     await this.requireSystem(userId, systemId); // 404 before anything is reserved
     await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
     return this.charged(
@@ -730,7 +862,7 @@ export class MultiRepoService {
     userId: string,
     input: AnalyzeChangeImpactRequest,
   ): Promise<MultiRepoChangeImpactAnalysis> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await this.authorize(userId, 'systems:read');
     await this.featureGate.require(workspaceId, 'MULTI_REPO_INTELLIGENCE');
     return this.charged(workspaceId, userId, async () => {
       const system = await this.requireSystem(userId, input.systemId);
@@ -974,7 +1106,7 @@ export class MultiRepoService {
       now?: Date;
     },
   ): Promise<DownstreamImpactResult> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await this.authorize(userId, 'systems:read');
     const provider = toRepositoryIdentity(input.owner, input.repository);
     const { relationships: scoped } = await loadScopedHttpConsumers(this.prisma, {
       userId,
@@ -1291,13 +1423,14 @@ export class MultiRepoService {
   }
 
   async assertRepositoryAccess(userId: string, owner: string, repository: string): Promise<string> {
-    const token = await this.githubAccess.getDecryptedToken(userId);
-    if (!token) {
-      throw multiRepoException(
-        'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
-        'Connect a GitHub token in dashboard Settings before using multi-repo systems.',
-      );
-    }
+    // H1: the acting user's own read access is verified before an App token is used.
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner,
+      repository,
+      access: 'read',
+    });
+    if (!resolved.ok) throw systemsAccessError(resolved.reason);
+    const token = resolved.token;
 
     const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
     let response: Response;
@@ -1351,8 +1484,16 @@ export class MultiRepoService {
     }
   }
 
-  private async requireSystem(userId: string, systemId: string): Promise<SystemWithRepos> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+  /**
+   * A system of the caller's workspace, after the permission check. A system id is never an
+   * authorization credential: another workspace's id is "not found" (no existence oracle).
+   */
+  private async requireSystem(
+    userId: string,
+    systemId: string,
+    permission: WorkspacePermission = 'systems:read',
+  ): Promise<SystemWithRepos> {
+    const workspaceId = await this.authorize(userId, permission);
     const row = await this.prisma.projectSystem.findFirst({
       where: { id: systemId, workspaceId },
       include: { repositories: { orderBy: { createdAt: 'asc' } } },
@@ -1374,11 +1515,28 @@ export class MultiRepoService {
   private async runDiscovery(userId: string, systemId: string): Promise<DiscoveryResult> {
     const system = await this.requireSystem(userId, systemId);
     const enabled = system.repositories.filter((r) => r.enabled);
-    const token = await this.githubAccess.getDecryptedToken(userId);
+    // H1: every repository is checked for THIS user before it is scanned; with the workspace
+    // App installed a repository the user cannot read is reported unavailable, never scanned.
+    const verdicts = await Promise.all(
+      enabled.map((r) =>
+        this.githubAccess.resolveRepositoryAccess(userId, {
+          owner: r.owner,
+          repository: r.repository,
+          access: 'read',
+        }),
+      ),
+    );
+    const readable = new Set<string>();
+    let token: string | null = null;
+    verdicts.forEach((verdict, i) => {
+      if (!verdict.ok) return;
+      readable.add(repositoryKey(toRepositoryIdentity(enabled[i]!.owner, enabled[i]!.repository)));
+      token ??= verdict.token;
+    });
     if (!token) {
-      throw multiRepoException(
-        'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
-        'Connect a GitHub token in dashboard Settings before using multi-repo systems.',
+      const firstDenial = verdicts.find((v) => !v.ok);
+      throw systemsAccessError(
+        firstDenial && !firstDenial.ok ? firstDenial.reason : 'not_connected',
       );
     }
     const budget = new ScanBudget(MULTI_REPO_MAX_GITHUB_REQUESTS);
@@ -1404,8 +1562,13 @@ export class MultiRepoService {
     for (const repo of enabled) {
       const identity = toRepositoryIdentity(repo.owner, repo.repository);
       const remaining = remainingTotalFileBudget(filesUsed);
-      const result =
-        remaining > 0
+      const result = !readable.has(repositoryKey(identity))
+        ? {
+            status: 'unavailable' as const,
+            files: [],
+            issues: new Map<MultiRepoScanIssueCode, number>([['repository_inaccessible', 1]]),
+          }
+        : remaining > 0
           ? await scanner.scan(
               identity.owner,
               identity.repository,
@@ -1744,7 +1907,8 @@ export class MultiRepoService {
       MULTI_REPO_MAX_RELATIONSHIPS,
     );
     truncated = truncated || relTruncated;
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    // The system's own workspace (authorized above): rows never cross workspaces.
+    const workspaceId = system.workspaceId;
     const kept = new Set<string>();
     for (const rel of limited) {
       await this.upsertRelationship(userId, workspaceId, systemId, rel);
@@ -2140,7 +2304,12 @@ export class MultiRepoService {
 
     if (input.pullRequestNumber) {
       try {
-        const token = await this.githubAccess.getDecryptedToken(userId);
+        const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+          owner: primary.owner,
+          repository: primary.repository,
+          access: 'read',
+        });
+        const token = resolved.ok ? resolved.token : null;
         if (token) {
           const url = `https://api.github.com/repos/${encodeURIComponent(primary.owner)}/${encodeURIComponent(primary.repository)}/pulls/${input.pullRequestNumber}/files?per_page=50`;
           const response = await fetch(url, {
@@ -2214,4 +2383,26 @@ export class MultiRepoService {
       httpRequiredFieldAdds,
     };
   }
+}
+
+/** H1: Systems errors for a refused repository credential (no repository-existence leak). */
+function systemsAccessError(reason: RepositoryAccessDenial) {
+  if (reason === 'not_connected' || reason === 'identity_required') {
+    return multiRepoException(
+      'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
+      reason === 'identity_required'
+        ? 'This workspace uses the Project X GitHub App. Connect your own GitHub token in dashboard Settings so Project X can confirm your repository access.'
+        : 'Connect a GitHub token in dashboard Settings before using multi-repo systems.',
+    );
+  }
+  if (reason === 'unavailable') {
+    return multiRepoException(
+      'SYSTEM_CONTEXT_STALE',
+      'Unable to reach GitHub to verify repository access.',
+    );
+  }
+  return multiRepoException(
+    'SYSTEM_REPOSITORY_NOT_ACCESSIBLE',
+    'GitHub denied access to this repository for the connected account.',
+  );
 }

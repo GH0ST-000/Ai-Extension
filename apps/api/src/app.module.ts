@@ -27,6 +27,8 @@ import { UsageModule } from './usage/usage.module';
 import { BillingModule } from './billing/billing.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { SecurityModule } from './common/security/security.module';
+import { redactUrlForLog } from './common/http/redact-url';
+import { redisConnectionOptions } from './redis/redis-connection';
 
 @Module({
   imports: [
@@ -58,7 +60,7 @@ import { SecurityModule } from './common/security/security.module';
               req: (req: { id?: string; method?: string; url?: string }) => ({
                 id: req.id,
                 method: req.method,
-                url: req.url,
+                url: redactUrlForLog(req.url),
               }),
               res: (res: { statusCode?: number }) => ({
                 statusCode: res.statusCode,
@@ -85,11 +87,13 @@ import { SecurityModule } from './common/security/security.module';
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        connection: {
+        // N-5: same options as RedisService (REDIS_TLS honored, certificates verified).
+        connection: redisConnectionOptions({
           host: config.getOrThrow<string>('redis.host'),
           port: config.getOrThrow<number>('redis.port'),
-          password: config.get<string>('redis.password') || undefined,
-        },
+          password: config.get<string>('redis.password'),
+          tls: config.get<boolean>('redis.tls') === true,
+        }),
       }),
     }),
     SecurityModule,

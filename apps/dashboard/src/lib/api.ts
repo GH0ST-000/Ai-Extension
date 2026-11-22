@@ -307,6 +307,39 @@ export async function confirmPasswordReset(input: {
   });
 }
 
+/** Decision A: the signed-in user's email verification state. */
+export async function getEmailVerificationStatus(): Promise<{ email: string; verified: boolean }> {
+  return apiFetch<{ email: string; verified: boolean }>('/auth/email-verification', {
+    workspaceId: null,
+  });
+}
+
+export type EmailVerificationResendStatus =
+  'sent' | 'already_verified' | 'throttled' | 'mail_not_configured' | 'mail_failed';
+
+/** Decision A: send a new verification link to the signed-in user's own address. */
+export async function resendEmailVerification(): Promise<{
+  status: EmailVerificationResendStatus;
+}> {
+  return apiFetch<{ status: EmailVerificationResendStatus }>('/auth/email-verification/resend', {
+    method: 'POST',
+    workspaceId: null,
+  });
+}
+
+/**
+ * Decision A + F-05: confirm an email with the token from the link. Requires a session of the
+ * account the link was issued for: 401 when signed out, 403 EMAIL_VERIFICATION_WRONG_ACCOUNT
+ * when signed in as another account (the token is not consumed in either case).
+ */
+export async function confirmEmailVerification(token: string): Promise<{ verified: true }> {
+  return apiFetch<{ verified: true }>('/auth/email-verification/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+    workspaceId: null,
+  });
+}
+
 export async function login(input: LoginRequest): Promise<AuthTokenResponse> {
   const result = await apiFetch<AuthTokenResponse>('/auth/login', {
     method: 'POST',

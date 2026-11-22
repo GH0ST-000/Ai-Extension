@@ -12,6 +12,7 @@ import {
 import { validatedFinding } from './pr-review-fixtures';
 import { buildVerificationContent, decisiveCodeIsGrounded } from './pr-review-verify';
 import { PullRequestDiffService } from './pull-request-diff.service';
+import { repositoryAccessStub } from '../../github-app/github-access.test-helpers';
 
 const SERVICE = [
   "import { Injectable } from '@nestjs/common';", // 1
@@ -93,7 +94,9 @@ describe('enclosing code context', () => {
 
 describe('PullRequestDiffService.createFileProvider (read-only context at the PR head)', () => {
   const resolveApiToken = vi.fn();
-  const service = new PullRequestDiffService({ resolveApiToken } as never);
+  const accessDouble = repositoryAccessStub({}, () => resolveApiToken());
+  const resolveAccess = vi.spyOn(accessDouble, 'resolveRepositoryAccess');
+  const service = new PullRequestDiffService(accessDouble as never);
   const fetchMock = vi.fn();
   const realFetch = global.fetch;
   const base = {
@@ -118,7 +121,13 @@ describe('PullRequestDiffService.createFileProvider (read-only context at the PR
   it('uses the acting workspace credentials, the head SHA and the contents API', async () => {
     const provider = service.createFileProvider(base);
     expect(await provider('apps/api/src/a b.ts')).toBe('file body');
-    expect(resolveApiToken).toHaveBeenCalledWith('u1', 'ws_team');
+    // H1: a repository-scoped READ for this exact repository and workspace.
+    expect(resolveAccess).toHaveBeenCalledWith('u1', {
+      owner: 'GH0ST-000',
+      repository: 'Ai-Extension',
+      access: 'read',
+      workspaceId: 'ws_team',
+    });
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
       'https://api.github.com/repos/GH0ST-000/Ai-Extension/contents/apps/api/src/a%20b.ts?ref=69e1fc4abc',
     );

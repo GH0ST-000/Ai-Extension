@@ -1427,6 +1427,11 @@ export const OPENAPI_MAX_OPERATIONS = 200;
 export const OPENAPI_MAX_SCHEMAS = 300;
 export const OPENAPI_MAX_SCHEMA_DEPTH = 12;
 export const OPENAPI_MAX_PROPERTIES = 80;
+/**
+ * Total schema nodes normalized per document (all schemas and operations together). Bounds
+ * `$ref` fan-out, which is otherwise exponential in depth (F-01).
+ */
+export const OPENAPI_MAX_SCHEMA_NODES = 50_000;
 export const OPENAPI_MAX_DESCRIPTION_CHARS = 2_000;
 export const OPENAPI_MAX_AI_CONTEXT_CHARS = 18_000;
 export const OPENAPI_MAX_REDIRECTS = 3;

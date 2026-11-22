@@ -47,6 +47,7 @@ export function SystemSelectorCard({
   onRefresh,
   onDiscover,
   onOpenSettings,
+  canManage = true,
 }: {
   systems: ProjectSystem[];
   selected: ProjectSystem;
@@ -60,6 +61,8 @@ export function SystemSelectorCard({
   onRefresh: () => void;
   onDiscover: () => void;
   onOpenSettings: () => void;
+  /** systems:manage — System settings (rename / delete) only for Owners and Admins. */
+  canManage?: boolean;
 }) {
   const busy = operation !== null;
   return (
@@ -125,14 +128,16 @@ export function SystemSelectorCard({
             {operation === 'discover' ? <Spinner /> : null}
             {operation === 'discover' ? 'Discovering…' : 'Discover relationships'}
           </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onOpenSettings}
-            className={BUTTON_SECONDARY}
-          >
-            System settings
-          </button>
+          {canManage ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onOpenSettings}
+              className={BUTTON_SECONDARY}
+            >
+              System settings
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="mt-4 space-y-1.5 border-t border-line/70 pt-3 text-xs leading-relaxed text-muted-foreground">
@@ -238,9 +243,12 @@ export function RepositoryList({
   onToggleEnabled,
   onChangeRole,
   onRemove,
+  canManage = true,
 }: {
   system: ProjectSystem;
   operation: Operation;
+  /** systems:manage — without it the list is read-only (the API refuses changes anyway). */
+  canManage?: boolean;
   onAdd: () => void;
   onToggleEnabled: (ref: ProjectSystemRepositoryRef) => void;
   onChangeRole: (ref: ProjectSystemRepositoryRef, role: MultiRepoRepositoryRole) => void;
@@ -254,9 +262,11 @@ export function RepositoryList({
       title="Repositories"
       description="The GitHub repositories grouped in this system. Enabled repositories take part in analysis; roles help describe how they fit together."
       actions={
-        <button type="button" disabled={busy} onClick={onAdd} className={BUTTON_PRIMARY}>
-          Add repository
-        </button>
+        canManage ? (
+          <button type="button" disabled={busy} onClick={onAdd} className={BUTTON_PRIMARY}>
+            Add repository
+          </button>
+        ) : undefined
       }
     >
       <ul className="divide-y divide-line/70">
@@ -290,15 +300,21 @@ export function RepositoryList({
                 aria-labelledby={nameId}
                 className="flex flex-wrap items-end gap-3 md:shrink-0 md:flex-nowrap"
               >
-                <div className="w-44">
-                  <StudioSelect
-                    id={`role-${label}`}
-                    label="Role"
-                    value={ref.role}
-                    options={ROLE_OPTIONS}
-                    onChange={(role) => onChangeRole(ref, role)}
-                  />
-                </div>
+                {canManage ? (
+                  <div className="w-44">
+                    <StudioSelect
+                      id={`role-${label}`}
+                      label="Role"
+                      value={ref.role}
+                      options={ROLE_OPTIONS}
+                      onChange={(role) => onChangeRole(ref, role)}
+                    />
+                  </div>
+                ) : (
+                  <Badge tone="neutral">
+                    {ROLE_OPTIONS.find((o) => o.value === ref.role)?.label ?? ref.role}
+                  </Badge>
+                )}
                 <label
                   className="flex h-[42px] items-center gap-2 text-xs font-semibold text-ink"
                   title={isPrimary ? 'The primary repository is always analyzed' : undefined}
@@ -308,13 +324,13 @@ export function RepositoryList({
                     role="switch"
                     aria-label={`Analyze ${label}`}
                     checked={ref.enabled}
-                    disabled={busy || isPrimary}
+                    disabled={busy || isPrimary || !canManage}
                     onChange={() => onToggleEnabled(ref)}
                     className="size-4"
                   />
                   Analyze
                 </label>
-                {!isPrimary ? (
+                {!isPrimary && canManage ? (
                   <button
                     type="button"
                     disabled={busy}
@@ -455,8 +471,11 @@ export function CandidateList({
   onAccept,
   onDismiss,
   onRefresh,
+  canManage = true,
 }: {
   candidates: RelatedRepositoryCandidate[];
+  /** systems:manage — adding a suggestion changes the system. */
+  canManage?: boolean;
   analyzed: boolean;
   operation: Operation;
   onAccept: (candidate: RelatedRepositoryCandidate) => void;
@@ -524,18 +543,20 @@ export function CandidateList({
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={busy || notRecommended}
-                    title={
-                      notRecommended ? 'Project X does not recommend adding this one' : undefined
-                    }
-                    onClick={() => onAccept(candidate)}
-                    className={BUTTON_PRIMARY}
-                    aria-label={`Add ${label} to system`}
-                  >
-                    Add to system
-                  </button>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      disabled={busy || notRecommended}
+                      title={
+                        notRecommended ? 'Project X does not recommend adding this one' : undefined
+                      }
+                      onClick={() => onAccept(candidate)}
+                      className={BUTTON_PRIMARY}
+                      aria-label={`Add ${label} to system`}
+                    >
+                      Add to system
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     disabled={busy}

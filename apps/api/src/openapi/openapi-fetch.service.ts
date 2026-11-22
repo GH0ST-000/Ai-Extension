@@ -1,5 +1,6 @@
 import {
   DnsPinError,
+  ResponseTooLargeError,
   dnsPinnedFetch,
   resolvePublicHostAddresses,
 } from '../common/security/dns-pinned-fetch';
@@ -82,12 +83,20 @@ export class OpenApiFetchService {
           redirect: 'manual',
           signal: controller.signal,
           pinRecords,
+          // F-11: enforced while streaming — an oversized body is never buffered.
+          maxResponseBytes: OPENAPI_MAX_DOCUMENT_BYTES,
           headers: {
             Accept: 'application/json, application/yaml, text/yaml, text/plain, */*',
             'User-Agent': 'Project-X-OpenAPI',
           },
         });
-      } catch {
+      } catch (err) {
+        if (err instanceof ResponseTooLargeError) {
+          throw this.errors.toHttpException(
+            'API_DOC_TOO_LARGE',
+            'This OpenAPI document is too large to analyze safely.',
+          );
+        }
         throw this.errors.toHttpException(
           'API_DOC_FETCH_FAILED',
           'Unable to fetch the OpenAPI document.',

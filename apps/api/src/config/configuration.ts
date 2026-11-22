@@ -1,15 +1,30 @@
 import {
   apiEnvSchema,
+  isLocalNodeEnv,
   applyDatabaseSslFlag,
   assertProductionSecurity,
   isGitHubAppFullyConfigured,
   type ApiEnv,
+  resolveApiHost,
+  resolveDeploymentStage,
+  resolveTrustProxyHops,
 } from '@project-x/config';
 
 export interface ApiConfig {
   nodeEnv: ApiEnv['NODE_ENV'];
+  /**
+   * `staging`: NODE_ENV=production with APP_STAGE=staging — production hardening, Paddle
+   * sandbox only. `local`: development / test.
+   */
+  deploymentStage: 'production' | 'staging' | 'local';
   host: string;
   port: number;
+  /** F-26: trusted reverse-proxy hops (Express `trust proxy`); 0 = ignore X-Forwarded-For. */
+  trustProxyHops: number;
+  /**
+   * The URL the database client connects with: DATABASE_URL with DATABASE_SSL applied (F-10).
+   * PrismaService uses THIS, not the raw environment variable.
+   */
   databaseUrl: string;
   logLevel: ApiEnv['LOG_LEVEL'];
   appBaseUrl: string;
@@ -135,15 +150,18 @@ export default (): ApiConfig => {
   const env = apiEnvSchema.parse(process.env);
   assertProductionSecurity(env);
 
-  const encryptionKey =
-    env.NODE_ENV === 'production'
-      ? (env.TOKEN_ENCRYPTION_KEY?.trim() as string)
-      : env.TOKEN_ENCRYPTION_KEY?.trim() || env.JWT_SECRET;
+  // Only explicit local environments may fall back to JWT_SECRET (production requires a
+  // distinct TOKEN_ENCRYPTION_KEY; development on a public APP_BASE_URL requires one too).
+  const encryptionKey = isLocalNodeEnv(env.NODE_ENV)
+    ? env.TOKEN_ENCRYPTION_KEY?.trim() || env.JWT_SECRET
+    : (env.TOKEN_ENCRYPTION_KEY?.trim() as string);
 
   return {
     nodeEnv: env.NODE_ENV,
-    host: env.API_HOST,
+    deploymentStage: resolveDeploymentStage(env),
+    host: resolveApiHost(env),
     port: env.API_PORT,
+    trustProxyHops: resolveTrustProxyHops(env),
     databaseUrl: applyDatabaseSslFlag(env.DATABASE_URL, env.DATABASE_SSL),
     logLevel: env.LOG_LEVEL,
     appBaseUrl: env.APP_BASE_URL,

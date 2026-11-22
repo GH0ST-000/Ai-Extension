@@ -13,6 +13,7 @@ import { ThemeToggle } from './theme-toggle';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { logout } from '../lib/api';
 import { useWorkspace, WorkspaceProvider } from '../lib/workspace-context';
+import { EmailVerificationNotice } from './account/email-verification-notice';
 
 function DashboardShell({ children }: { children: ReactNode }) {
   const user = useAuthUser();
@@ -103,6 +104,9 @@ function DashboardShell({ children }: { children: ReactNode }) {
             key={`${currentWorkspaceId ?? 'none'}-${workspaceRevision}`}
             className="relative z-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:px-1 md:py-6 md:pb-6"
           >
+            <div className="mb-4 empty:hidden">
+              <EmailVerificationNotice />
+            </div>
             <DashboardErrorBoundary>{children}</DashboardErrorBoundary>
           </main>
         </div>

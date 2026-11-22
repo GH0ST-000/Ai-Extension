@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Project Memory PostgreSQL integration tests against a throwaway database.
+# PostgreSQL integration tests (all suites in test/integration) against a throwaway database.
 #
 # Starts a disposable postgres:16-alpine container (tmpfs, bound to 127.0.0.1, removed on
 # exit), applies the real Prisma migrations, runs test/integration, and tears down.
@@ -27,4 +27,4 @@ done
 docker exec "$NAME" pg_isready -U postgres -d "$DB" >/dev/null
 
 DATABASE_URL="$URL" npx prisma migrate deploy
-MEMORY_IT_DATABASE_URL="$URL" npx vitest run test/integration "$@"
+MEMORY_IT_DATABASE_URL="$URL" npx vitest run --config vitest.integration.config.ts "$@"

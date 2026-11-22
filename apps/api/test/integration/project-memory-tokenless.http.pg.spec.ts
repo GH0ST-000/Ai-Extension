@@ -1,11 +1,12 @@
 /**
- * Project Memory for Team members WITHOUT a personal GitHub token (PostgreSQL + real HTTP).
+ * Project Memory with the workspace GitHub App, members with and WITHOUT a personal GitHub
+ * token (PostgreSQL + real HTTP).
  *
- * Trust model under test: a repository is trusted for a workspace only through that
- * workspace's active GitHub App installation, verified live by GitHub on every write
- * (installation token → GET /repos/:owner/:repo). Personal tokens keep working as before.
- * Workspaces without an installation have no workspace-level trust, so tokenless writes
- * are refused there.
+ * Trust model under test (H1): the workspace's active GitHub App installation is used for
+ * repository access only after the acting user's OWN GitHub access was verified with their
+ * personal token. A member without a token has no verified GitHub identity and is refused,
+ * whatever the installation covers. Workspaces without an installation use the personal token
+ * directly; without either there is no access.
  *
  * Real: PostgreSQL, ProjectMemoryController + ValidationPipe (main.ts options), RequestContext
  * middleware (X-Workspace-Id), exception filter, ProjectMemoryService, WorkspaceAuthorization,
@@ -76,7 +77,9 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
       requestContext,
       appTokens as never,
       installations,
-      { getDecryptedToken: async (userId: string) => PATS[userId] ?? null } as never,
+      {
+        getDecryptedToken: async (userId: string) => PATS[userId] ?? null,
+      } as never,
     );
     const redisStore = new Map<string, string>();
     memory = new ProjectMemoryService(
@@ -151,7 +154,10 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
           ? Response.json({ id: 1, full_name: full })
           : Response.json({ message: 'Not Found' }, { status: 404 });
       }
-      if (token.startsWith('ghp_')) return Response.json({ id: 1, full_name: full });
+      // A personal token as GitHub answers it for an authenticated user: with permissions.
+      if (token.startsWith('ghp_')) {
+        return Response.json({ id: 1, full_name: full, permissions: { pull: true, push: true } });
+      }
       return Response.json({ message: 'Bad credentials' }, { status: 401 });
     }) as typeof fetch;
   });
@@ -251,10 +257,19 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
 
   // ── 1. own preference lifecycle, no token, trusted repository ────────────
 
-  it('[1] member without a token creates, edits, disputes, archives and reactivates own preference', async () => {
+  it('[0] H1: a member WITHOUT a token is refused, even though the installation covers the repo', async () => {
+    const { users } = await seed({ roles: { owner: 'owner', m: 'member' }, installation: TRUSTED });
+    const refused = await pref(users.m!);
+    expect(refused.status).toBe(403);
+    expect(JSON.stringify(refused.body)).toContain('Connect your own GitHub token');
+    expect(await rowsBy(users.m!)).toEqual([]);
+  });
+
+  it('[1] member with a token (verified access) creates, edits, disputes, archives and reactivates own preference', async () => {
     const { ws, users } = await seed({
       roles: { owner: 'owner', m: 'member' },
       installation: TRUSTED,
+      withPat: ['m'],
     });
     const m = users.m!;
     const created = await pref(m);
@@ -290,6 +305,7 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
     const { users } = await seed({
       roles: { owner: 'owner', m1: 'member', m2: 'member' },
       installation: TRUSTED,
+      withPat: ['owner', 'm1', 'm2'],
     });
     const theirs = (await pref(users.m1!, 'Keep comments terse.')).body.id as string;
     for (const req of [
@@ -310,7 +326,11 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
   // ── 3. shared rules ──────────────────────────────────────────────────────
 
   it('[3] member cannot create or modify shared rules, whatever the payload', async () => {
-    const { users } = await seed({ roles: { owner: 'owner', m: 'member' }, installation: TRUSTED });
+    const { users } = await seed({
+      roles: { owner: 'owner', m: 'member' },
+      installation: TRUSTED,
+      withPat: ['owner', 'm'],
+    });
     const m = users.m!;
     const rule = (await shared(users.owner!)).body.id as string;
     for (const res of [
@@ -453,7 +473,7 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
 
   // ── 8. owners and admins ─────────────────────────────────────────────────
 
-  it('[8] owners and admins: unchanged with a token, and via the installation without one', async () => {
+  it('[8] owners and admins: unchanged with a token; via the installation only with their own token', async () => {
     const patOnly = await seed({ roles: { owner: 'owner' }, withPat: ['owner'] });
     const id = (await shared(patOnly.users.owner!)).body.id as string;
     expect(
@@ -461,7 +481,14 @@ describe.skipIf(!URL_ENV)('Project Memory for members without a GitHub token', (
     ).toBe(200);
     expect((await call(patOnly.users.owner!, 'DELETE', `${BASE}/${id}`)).status).toBe(200);
 
-    const installed = await seed({ roles: { admin: 'admin' }, installation: TRUSTED });
+    const tokenless = await seed({ roles: { admin: 'admin' }, installation: TRUSTED });
+    expect((await shared(tokenless.users.admin!)).status).toBe(403); // H1: no verified identity
+
+    const installed = await seed({
+      roles: { admin: 'admin' },
+      installation: TRUSTED,
+      withPat: ['admin'],
+    });
     const rule = await shared(installed.users.admin!);
     expect(rule.status).toBe(201);
     expect(

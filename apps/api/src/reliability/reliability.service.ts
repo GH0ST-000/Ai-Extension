@@ -85,7 +85,12 @@ export class ReliabilityService {
   ) {}
 
   async listExecutions(userId: string): Promise<ListWorkflowExecutionsResponse> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await resolveWorkspaceIdForUser(
+      this.prisma,
+      userId,
+      undefined,
+      'workflow:execute',
+    );
     await this.markStaleExecutions(userId, workspaceId);
     const rows = await this.prisma.workflowExecution.findMany({
       where: { workspaceId, userId },
@@ -128,7 +133,12 @@ export class ReliabilityService {
   ): Promise<WorkflowExecution> {
     const trigger: WorkflowExecutionTrigger = input.trigger ?? 'user';
     const startedAt = new Date();
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await resolveWorkspaceIdForUser(
+      this.prisma,
+      userId,
+      undefined,
+      'workflow:execute',
+    );
     const contextVersion = (input.contextVersion ?? {}) as ExecutionContextVersion;
     const snapshot = buildExecutionSnapshot({
       goal: input.goal,
@@ -1003,12 +1013,21 @@ export class ReliabilityService {
     }
 
     const metadata = sanitizeSafeMetadata(input.metadata);
+    // N-1: events are written only into the CURRENT authorized workspace; an execution of a
+    // workspace the user no longer belongs to (removed, deleted) is not addressable.
+    const workspaceId = await resolveWorkspaceIdForUser(
+      this.prisma,
+      userId,
+      undefined,
+      'workflow:execute',
+    );
     const execution = await this.prisma.workflowExecution.findFirst({
       where: { id: executionId, userId },
       select: { workspaceId: true },
     });
-    const workspaceId =
-      execution?.workspaceId ?? (await resolveWorkspaceIdForUser(this.prisma, userId));
+    if (execution && execution.workspaceId !== workspaceId) {
+      throw reliabilityException('EXECUTION_NOT_FOUND', 'Workflow execution not found.');
+    }
     await this.prisma.workflowAuditEvent.create({
       data: {
         workspaceId,
@@ -1028,7 +1047,12 @@ export class ReliabilityService {
   }
 
   private async requireExecution(userId: string, executionId: string): Promise<ExecutionLoaded> {
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+    const workspaceId = await resolveWorkspaceIdForUser(
+      this.prisma,
+      userId,
+      undefined,
+      'workflow:execute',
+    );
     const row = await this.prisma.workflowExecution.findFirst({
       where: { id: executionId, workspaceId, userId },
       include: { promptSnapshot: true },

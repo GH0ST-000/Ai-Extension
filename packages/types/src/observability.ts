@@ -170,7 +170,45 @@ export type SecurityAuditEventType =
   | 'auth.refresh.reuse_detected'
   | 'auth.session.invalidated'
   | 'auth.password_reset.requested'
-  | 'auth.password_reset.completed';
+  | 'auth.password_reset.completed'
+  /** Decision A: email ownership verified. */
+  | 'auth.email.verified'
+  /** F-05: a verification link was presented by a session of a different account. */
+  | 'auth.email.verification_wrong_account'
+  /** Decision 1: free AI refused for an unverified actor / workspace owner (abuse signal). */
+  | 'ai.free_quota.verification_required'
+  /** Decision 1: a free workspace exhausted its monthly AI quota (multi-account monitoring). */
+  | 'ai.free_quota.exhausted'
+  /** H1: GitHub writes made for a Project X user (also through the workspace App). */
+  | 'github.write.comment'
+  | 'github.write.review'
+  | 'github.write.patch'
+  | 'github.write.denied'
+  /** M3: workspace membership and invitation lifecycle. */
+  | 'workspace.invitation.created'
+  | 'workspace.invitation.accepted'
+  | 'workspace.invitation.revoked'
+  | 'workspace.member.removed'
+  | 'workspace.member.role_changed'
+  | 'workspace.ownership.transferred'
+  | 'workspace.membership.denied'
+  /** M4: Systems configuration changes and refused Systems operations. */
+  | 'systems.system.created'
+  | 'systems.system.updated'
+  | 'systems.system.deleted'
+  | 'systems.repository.added'
+  | 'systems.repository.updated'
+  | 'systems.repository.removed'
+  | 'systems.access.denied'
+  /** N-3: a required billing cancellation failed and is scheduled for retry. */
+  | 'billing.cancellation.failed'
+  /** F-02: a subscription webhook named a workspace without a checkout of that workspace. */
+  | 'billing.subscription.unbound'
+  /** F-23: a second billable subscription appeared while another is still billable. */
+  | 'billing.subscription.conflict'
+  /** N-2: workspace deletion lifecycle. */
+  | 'workspace.deletion.started'
+  | 'workspace.deletion.completed';
 
 export type SecurityAuditOutcome = 'success' | 'failure' | 'blocked';
 

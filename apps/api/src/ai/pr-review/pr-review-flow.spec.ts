@@ -29,6 +29,8 @@ import { PR_REVIEW_VERIFY_INSTRUCTIONS, VERIFY_REQUEST_OVERHEAD_CHARS } from './
 import type { ChangedFile } from './pr-review-files';
 import { PrReviewOrchestrator } from './pr-review-orchestrator.service';
 import { PullRequestDiffService } from './pull-request-diff.service';
+import { repositoryAccessStub } from '../../github-app/github-access.test-helpers';
+import { personalWorkspaceMembership } from '../../workspaces/workspace-membership.test-helpers';
 
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
@@ -143,6 +145,9 @@ describe('REVIEW_ENTIRE_PR batched flow in AiService', () => {
     reserve: vi.fn(),
     commit: vi.fn(),
     releaseReservation: vi.fn(),
+    // F-06: operations whose provider work already ran. Default double: within the daily
+    // refund budget, i.e. the reservation is released exactly as UsageService does.
+    settleAfterProviderWork: vi.fn(),
     renewLease: vi.fn(async () => true),
     startHeartbeat: vi.fn(() => () => undefined),
     markDelivered: vi.fn(async () => true),
@@ -262,10 +267,16 @@ describe('REVIEW_ENTIRE_PR batched flow in AiService', () => {
       );
     usage.commit.mockReset().mockResolvedValue(true);
     usage.releaseReservation.mockReset().mockResolvedValue(true);
+    usage.settleAfterProviderWork.mockReset().mockImplementation(async (reservation: unknown) => {
+      await usage.releaseReservation(reservation);
+      return 'refunded';
+    });
     diff.resolve.mockReset();
     featureGate.require.mockReset().mockResolvedValue(undefined);
     prisma.user.findUnique.mockReset().mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockReset().mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst
+      .mockReset()
+      .mockImplementation(personalWorkspaceMembership);
     requestWorkspace = undefined;
   });
 
@@ -294,7 +305,7 @@ describe('REVIEW_ENTIRE_PR batched flow in AiService', () => {
     try {
       const service = build({
         diffService: new PullRequestDiffService({
-          resolveApiToken: vi.fn(async () => ({ token: 't', source: 'pat' })),
+          ...repositoryAccessStub({}, async () => ({ token: 't', source: 'pat' as const })),
         } as never),
       });
       const result = await service.generateActionWithMetadata('u1', input);
@@ -787,6 +798,38 @@ describe('REVIEW_ENTIRE_PR batched flow in AiService', () => {
     await build().pipeActionStream('u1', input, res as never, controller.signal);
     expect(body().trim()).toBe(''); // no review content for a cancelled request
     expect(usage.releaseReservation).toHaveBeenCalledTimes(1);
+    // F-06: model calls had started, so the refund went through the per-user budget.
+    expect(usage.settleAfterProviderWork).toHaveBeenCalledTimes(1);
+    expect(usage.settleAfterProviderWork.mock.calls[0]![1]).toBe('u1');
+  });
+
+  it('[F-06] once the refund budget is spent, a cancelled or failed review is charged and says so', async () => {
+    usage.settleAfterProviderWork.mockReset().mockImplementation(async (reservation: unknown) => {
+      await usage.commit(reservation);
+      return 'charged';
+    });
+    diff.resolve.mockResolvedValue(github([makeFile('src/a.ts', makePatch(5))]));
+    generateTextMock.mockRejectedValue(
+      new APICallError({
+        message: 'x',
+        url: 'u',
+        requestBodyValues: {},
+        statusCode: 500,
+        isRetryable: true,
+      }),
+    );
+    const error = await build()
+      .generateActionWithMetadata('u1', input)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect((error as Error).message).not.toContain('No usage was charged');
+
+    const { res, body } = fakeResponse();
+    await build().pipeActionStream('u1', input, res as never);
+    expect(body()).not.toContain('No usage was charged');
+    expect(body().trimEnd().endsWith(`${PR_REVIEW_INCOMPLETE_MARKER} reason=error]]`)).toBe(true);
+    expect(usage.releaseReservation).not.toHaveBeenCalled();
+    expect(usage.commit).toHaveBeenCalledTimes(2);
   });
 
   it('cancellation during cross-file dependency fetch: stops promptly, no verifier call, unit released', async () => {
@@ -1201,7 +1244,10 @@ describe('REVIEW_ENTIRE_PR batched flow in AiService', () => {
 
   it('diff, memory, feature gate and usage all use the same membership-checked workspace', async () => {
     requestWorkspace = 'ws_team';
-    prisma.workspaceMembership.findFirst.mockResolvedValue({ workspaceId: 'ws_team' });
+    prisma.workspaceMembership.findFirst.mockResolvedValue({
+      workspaceId: 'ws_team',
+      role: 'member',
+    });
     const projectMemory = {
       resolvePromptContext: vi.fn(async () => ({
         status: 'skipped',

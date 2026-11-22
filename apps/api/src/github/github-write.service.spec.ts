@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 
 import { GithubWriteService } from './github-write.service';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
 
 describe('GithubWriteService', () => {
-  const githubConnections = {
+  const githubConnections = repositoryAccessStub({
     getDecryptedToken: vi.fn(),
-  };
+  });
   const redis = {
     status: 'ready' as string,
     connect: vi.fn(),

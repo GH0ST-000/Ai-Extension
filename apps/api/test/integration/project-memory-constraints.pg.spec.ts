@@ -6,7 +6,7 @@
  * ProjectMemoryService (Prisma client and raw SQL), and that the migration resolves existing
  * duplicates by superseding (never deleting) them with an audit record.
  */
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PrismaClient } from '@prisma/client';
@@ -199,7 +199,6 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
 
   describe('existing duplicates are resolved without data loss', () => {
     const schema = `uidx_dedup_${process.pid}`;
-    let scratchUrl: string;
 
     beforeAll(async () => {
       await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
@@ -208,9 +207,6 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
       await prisma.$executeRawUnsafe(
         `CREATE TABLE "${schema}".project_memories (LIKE public.project_memories INCLUDING DEFAULTS)`,
       );
-      const url = new URL(URL_ENV!);
-      url.searchParams.set('schema', schema);
-      scratchUrl = url.toString();
     });
 
     afterAll(async () => {
@@ -243,10 +239,24 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
       );
     }
 
+    /**
+     * The migration file, applied to the scratch schema in-process. Previously each run spawned
+     * `npx prisma db execute` (Node + Prisma CLI boot): measured 1.3–2.9 s per spawn, ~4.2 s of
+     * this test's ~4.3 s, which pushed it past the 5 s limit when 27 suites ran in parallel.
+     * Same SQL, executed statement by statement in one transaction (LOCK TABLE needs one) with
+     * the search_path set to the scratch schema, as `db execute --url …?schema=` does.
+     */
+    const statements = readFileSync(MIGRATION, 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*--/.test(line))
+      .join('\n')
+      .split(/;\s*(?:\n|$)/)
+      .map((statement) => statement.trim())
+      .filter(Boolean);
     const applyMigration = () =>
-      execFileSync('npx', ['prisma', 'db', 'execute', '--url', scratchUrl, '--file', MIGRATION], {
-        cwd: join(__dirname, '../..'),
-        stdio: 'pipe',
+      prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL search_path TO "${schema}"`);
+        for (const statement of statements) await tx.$executeRawUnsafe(statement);
       });
 
     const snapshot = () =>
@@ -260,6 +270,12 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
         `SELECT memory_id, kept_memory_id, previous_status, reason
          FROM "${schema}".project_memory_dedup_audit ORDER BY memory_id`,
       );
+
+    it('the migration file splits into its 8 statements (nothing skipped)', () => {
+      expect(statements).toHaveLength(8);
+      expect(statements[0]).toMatch(/^LOCK TABLE/);
+      expect(statements.filter((st) => /^CREATE UNIQUE INDEX/.test(st))).toHaveLength(3);
+    });
 
     it('keeps the explicit / newest rule per slot, supersedes the rest, audits, is idempotent', async () => {
       const W = 'ws_x';
@@ -301,7 +317,7 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
       for (const r of rows) await insert(r);
       const before = await snapshot();
 
-      applyMigration();
+      await applyMigration();
 
       const after = await snapshot();
       expect(after).toHaveLength(before.length); // nothing deleted
@@ -332,7 +348,7 @@ describe.skipIf(!URL_ENV)('Project Memory active-slot unique indexes (PostgreSQL
       expect(await audit()).toEqual(expectedAudit);
 
       // Re-running is a no-op, and the constraint is now live in the scratch schema.
-      applyMigration();
+      await applyMigration();
       expect(await snapshot()).toEqual(after);
       expect(await audit()).toEqual(expectedAudit);
       await expect(insert({ id: 'w_dup_after', userId: 'u3', workspaceId: W })).rejects.toThrow(

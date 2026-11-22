@@ -5,6 +5,11 @@ import {
   collectGitHubAppConfigIssues,
   collectProductionSecurityIssues,
 } from './index';
+import { generateKeyPairSync } from 'node:crypto';
+
+const TEST_PRIVATE_KEY = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs1', format: 'pem' })
+  .toString();
 
 function baseProductionEnv(overrides: Record<string, string | undefined> = {}) {
   return apiEnvSchema.parse({
@@ -13,7 +18,8 @@ function baseProductionEnv(overrides: Record<string, string | undefined> = {}) {
     NODE_ENV: 'production',
     JWT_SECRET: 'production-jwt-secret-with-enough-entropy-32b',
     TOKEN_ENCRYPTION_KEY: 'production-encryption-key-with-entropy-32',
-    AI_CORS_ORIGINS: 'https://app.example.com,chrome-extension://abcdefghijklmnopqrstuvwxyz123456',
+    AI_CORS_ORIGINS:
+      'https://app.projectx-fixture.dev,chrome-extension://abcdefghijklmnopqrstuvwxyz123456',
     METRICS_SCRAPE_TOKEN: 'metrics-token-16chars',
     INTERNAL_OBSERVABILITY_TOKEN: 'internal-token-16c',
     HEALTH_DETAILS_TOKEN: 'health-token-16chars',
@@ -22,7 +28,9 @@ function baseProductionEnv(overrides: Record<string, string | undefined> = {}) {
     PADDLE_WEBHOOK_SECRET: 'paddle-webhook-secret-safe',
     PADDLE_PRICE_PRO_MONTHLY: 'pri_pro_m',
     PADDLE_PRICE_TEAM_MONTHLY: 'pri_team_m',
-    APP_BASE_URL: 'https://app.example.com',
+    APP_BASE_URL: 'https://app.projectx-fixture.dev',
+    RESEND_API_KEY: 're_FixtureKey0123456789abcdef',
+    MAIL_FROM: 'Project X <no-reply@mail.projectx-fixture.dev>',
     ...overrides,
   });
 }
@@ -43,8 +51,8 @@ describe('GitHub App config validation', () => {
     const issues = collectGitHubAppConfigIssues(
       baseProductionEnv({
         GITHUB_APP_ID: '12345',
-        GITHUB_APP_PRIVATE_KEY:
-          '-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----',
+        // A real key generated at test time (env style: escaped newlines).
+        GITHUB_APP_PRIVATE_KEY: TEST_PRIVATE_KEY.replace(/\n/g, '\\n'),
         GITHUB_APP_WEBHOOK_SECRET: 'webhook-secret-16chars',
         GITHUB_APP_SLUG: 'project-x',
       }),
@@ -63,6 +71,20 @@ describe('GitHub App config validation', () => {
       }),
     );
     expect(issues.some((i) => i.code === 'GITHUB_APP_OAUTH_PAIR')).toBe(true);
+  });
+
+  it('Decision D: a malformed private key fails at startup', () => {
+    const issues = collectGitHubAppConfigIssues(
+      baseProductionEnv({
+        GITHUB_APP_ID: '12345',
+        GITHUB_APP_PRIVATE_KEY:
+          '-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----',
+        GITHUB_APP_WEBHOOK_SECRET: 'webhook-secret-16chars',
+        GITHUB_APP_SLUG: 'project-x',
+      }),
+    );
+    expect(issues.map((i) => i.code)).toContain('GITHUB_APP_PRIVATE_KEY_INVALID');
+    expect(JSON.stringify(issues)).not.toContain('abc'); // never echoes key material
   });
 
   it('surfaces GitHub App issues via production security collector', () => {

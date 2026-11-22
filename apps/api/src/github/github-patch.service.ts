@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger, Optional } from '@nestjs/common';
 import type {
   ApplyPullRequestPatchRequest,
   ApplyPullRequestPatchResponse,
@@ -14,11 +14,33 @@ import {
 } from '@project-x/types';
 
 import { RedisService } from '../redis/redis.service';
-import { GithubAccessService } from '../github-app/github-access.service';
+import {
+  GithubAccessService,
+  repositoryAccessError,
+  type GitHubApiTokenSource,
+  type ResolvedGitHubApiToken,
+} from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { countLineDiff, normalizeRepositoryPath } from './patch-path';
+import { SecurityAuditService } from '../observability/security-audit.service';
+import { attributeAppCommitMessage, isValidGithubLogin } from './github-attribution';
+import { recordGithubWrite } from './github-write-audit';
 
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
+/**
+ * Ruleset rule types that never restrict an ordinary commit to an existing branch (they
+ * govern deletion, force pushes, merging or deployment). Any other — or unknown — rule makes
+ * the App path refuse (N-16, fail closed).
+ */
+const APP_SAFE_BRANCH_RULES = new Set([
+  'deletion',
+  'non_fast_forward',
+  'required_linear_history',
+  'required_deployments',
+  'required_status_checks',
+  'creation',
+  'merge_queue',
+]);
 const LOCK_TTL_SECONDS = 45;
 
 type GitHubPullResponse = {
@@ -81,10 +103,12 @@ type IdempotencyRecord =
 
 @Injectable()
 export class GithubPatchService {
+  private readonly logger = new Logger(GithubPatchService.name);
   constructor(
     private readonly githubAccess: GithubAccessService,
     private readonly redis: RedisService,
     private readonly errors: GithubErrorNormalizer,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   async preparePullRequestPatch(
@@ -113,7 +137,7 @@ export class GithubPatchService {
       );
     }
 
-    const token = await this.requireToken(userId);
+    const { token } = await this.requireToken(userId, owner, repository);
     const pull = await this.fetchPullRequest({ token, owner, repository, pullRequestNumber });
     if (pull.state !== 'open' || pull.merged) {
       throw this.errors.toHttpException(
@@ -137,8 +161,14 @@ export class GithubPatchService {
       );
     }
 
+    // N-8: the commit lands in the PR's HEAD repository (a fork or another repository for
+    // cross-repository PRs). The acting user's own write access is required on exactly that
+    // repository too, and its credential is used for every head read and write.
+    const head = await this.requireToken(userId, headOwner, headRepository);
+    await this.assertBranchWritable(head, headOwner, headRepository, headRef);
+
     const file = await this.fetchFileContent({
-      token,
+      token: head.token,
       owner: headOwner,
       repository: headRepository,
       path,
@@ -351,7 +381,7 @@ export class GithubPatchService {
         return { ...afterLock.result, deduplicated: true };
       }
 
-      const token = await this.requireToken(userId);
+      const { token, workspaceId } = await this.requireToken(userId, owner, repository);
       const pull = await this.fetchPullRequest({
         token,
         owner,
@@ -388,9 +418,13 @@ export class GithubPatchService {
         );
       }
 
+      // N-8: re-authorize the repository that receives the commit, immediately before it.
+      const head = await this.requireToken(userId, headOwner, headRepository);
+      await this.assertBranchWritable(head, headOwner, headRepository, headRef);
+
       // Re-check file blob before write
       const file = await this.fetchFileContent({
-        token,
+        token: head.token,
         owner: headOwner,
         repository: headRepository,
         path: preparation.path,
@@ -404,16 +438,27 @@ export class GithubPatchService {
       }
 
       let result: CachedApplyResult;
+      // Decision C: an App-made commit names the requesting user's current GitHub login.
+      let attributedMessage = commitMessage;
+      if (head.source === 'installation') {
+        if (!isValidGithubLogin(head.actorGithubLogin)) {
+          throw this.errors.toHttpException(
+            'NOT_CONNECTED',
+            'Project X could not confirm your GitHub username. Reconnect your GitHub token in dashboard Settings.',
+          );
+        }
+        attributedMessage = attributeAppCommitMessage(commitMessage, head.actorGithubLogin);
+      }
       try {
         result = await this.commitFileUpdate({
-          token,
+          token: head.token,
           owner: headOwner,
           repository: headRepository,
           path: preparation.path,
           branch: headRef,
           expectedBlobSha: preparation.expectedBlobSha,
           newContent: preparation.newContent,
-          commitMessage,
+          commitMessage: attributedMessage,
         });
       } catch (error) {
         if (error instanceof TypeError) {
@@ -426,6 +471,20 @@ export class GithubPatchService {
       }
 
       await this.storeIdempotentSuccess(cacheKey, writeFingerprint, result);
+      recordGithubWrite(this.audit, this.logger, {
+        operation: 'patch',
+        outcome: 'success',
+        userId,
+        workspaceId,
+        owner,
+        repository,
+        pullRequestNumber,
+        credential: head.source,
+        ...(headOwner !== owner || headRepository !== repository
+          ? { detail: `target=${headOwner}/${headRepository}` }
+          : {}),
+        resultId: result.commitSha,
+      });
       await this.deletePreparation(userId, preparedPatchId);
       return { ...result, deduplicated: false };
     } finally {
@@ -448,15 +507,97 @@ export class GithubPatchService {
     }
   }
 
-  private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubAccess.getDecryptedToken(userId);
-    if (!token) {
+  /**
+   * H1: credential for this repository only after the acting user's own GitHub access was
+   * verified (see GithubAccessService.resolveRepositoryAccess). Never falls back to a broader
+   * credential.
+   */
+  private async requireToken(
+    userId: string,
+    owner: string,
+    repository: string,
+  ): Promise<ResolvedGitHubApiToken & { workspaceId: string; actorGithubLogin: string | null }> {
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner,
+      repository,
+      access: 'write',
+    });
+    if (!resolved.ok) {
+      const { code, message } = repositoryAccessError(resolved.reason);
+      recordGithubWrite(this.audit, this.logger, {
+        operation: 'patch',
+        outcome: 'blocked',
+        userId,
+        workspaceId: resolved.workspaceId,
+        owner,
+        repository,
+        detail: code,
+      });
+      throw this.errors.toHttpException(code, message);
+    }
+    return {
+      token: resolved.token,
+      source: resolved.source,
+      workspaceId: resolved.workspaceId,
+      actorGithubLogin: resolved.actorGithubLogin ?? null,
+    };
+  }
+
+  /**
+   * N-16: through the workspace App the commit is made as the App, which may be exempt from
+   * branch-level restrictions that apply to the user (protected branches, push allowlists,
+   * ruleset bypass lists). Repository-level push permission does not prove branch-level
+   * authorization, so the App path refuses any protected branch or push-restricting rule and
+   * fails closed when GitHub cannot answer. With the user's own token GitHub enforces the
+   * user's branch rules itself.
+   */
+  private async assertBranchWritable(
+    credential: { token: string; source: GitHubApiTokenSource },
+    owner: string,
+    repository: string,
+    branch: string,
+  ): Promise<void> {
+    if (credential.source !== 'installation') return;
+    const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${credential.token}`,
+      'User-Agent': 'Project-X',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    const unverifiable = () =>
+      this.errors.toHttpException(
+        'BRANCH_NOT_WRITABLE',
+        'Could not verify the branch rules of the pull request head. Apply this fix on GitHub with your own account.',
+      );
+    let branchInfo: { protected?: boolean };
+    let rules: Array<{ type?: string }>;
+    try {
+      const [branchResponse, rulesResponse] = await Promise.all([
+        fetch(`${base}/branches/${encodeURIComponent(branch)}`, {
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        }),
+        fetch(`${base}/rules/branches/${encodeURIComponent(branch)}`, {
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        }),
+      ]);
+      if (!branchResponse.ok || !rulesResponse.ok) throw unverifiable();
+      branchInfo = (await branchResponse.json()) as { protected?: boolean };
+      rules = (await rulesResponse.json()) as Array<{ type?: string }>;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw unverifiable();
+    }
+    if (!Array.isArray(rules)) throw unverifiable();
+    const restricting = rules.filter((rule) => !APP_SAFE_BRANCH_RULES.has(rule.type ?? ''));
+    if (branchInfo.protected === true || restricting.length > 0) {
       throw this.errors.toHttpException(
-        'NOT_CONNECTED',
-        'Connect a GitHub token in dashboard Settings before applying a fix.',
+        'BRANCH_PROTECTED',
+        'The pull request branch is protected or has push rules. Project X cannot confirm that your own GitHub account may push to it, so apply this fix on GitHub with your account.',
       );
     }
-    return token;
   }
 
   private normalizeCommitMessage(raw: string): string {
@@ -756,7 +897,12 @@ export class GithubPatchService {
       const result = await this.redis.set(lockKey, fingerprint, 'EX', LOCK_TTL_SECONDS, 'NX');
       return result === 'OK';
     } catch {
-      return true;
+      // F-17: fail closed, like comments and reviews (the commit itself is still protected by
+      // the blob-SHA compare-and-swap; this keeps the three write paths consistent).
+      throw this.errors.toHttpException(
+        'GITHUB_UNAVAILABLE',
+        'Unable to coordinate write safety. Nothing was written to GitHub. Please try again shortly.',
+      );
     }
   }
 

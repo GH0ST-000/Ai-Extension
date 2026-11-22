@@ -27,6 +27,7 @@ import { ProjectMemoryController } from '../../src/project-memory/project-memory
 import { ProjectMemoryService } from '../../src/project-memory/project-memory.service';
 import { WorkspaceAuthorizationService } from '../../src/workspaces/workspace-authorization.service';
 import { WorkspaceGuard } from '../../src/workspaces/workspace.guard';
+import { repositoryAccessStub } from '../../src/github-app/github-access.test-helpers';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 const OWNER = 'acme';
@@ -64,7 +65,9 @@ describe.skipIf(!URL_ENV)('Project Memory audit log (PostgreSQL + HTTP)', () => 
         set: vi.fn(async (k: string, v: string) => redisStore.set(k, v)),
         del: vi.fn(async (k: string) => redisStore.delete(k)),
       } as never,
-      { getDecryptedToken: vi.fn(async () => 'ghp_integration_token') } as never,
+      repositoryAccessStub({
+        getDecryptedToken: vi.fn(async () => 'ghp_integration_token'),
+      }) as never,
       {
         fetchRepositoryFileAtRef: vi.fn(
           async (_u: string, _o: string, _r: string, path: string) => learnFiles.get(path) ?? null,
@@ -285,7 +288,7 @@ describe.skipIf(!URL_ENV)('Project Memory audit log (PostgreSQL + HTTP)', () => 
     // A candidate (as Learn stores it for ask_user facts), confirmed by the user.
     const stored = await (
       memory as unknown as { storeCandidate: (...a: unknown[]) => Promise<{ id: string }> }
-    ).storeCandidate(u, OWNER, REPO, {
+    ).storeCandidate(ws, u, OWNER, REPO, {
       category: 'PROJECT_CONSTRAINT',
       key: 'deploy.region',
       proposedValue: { summary: 'Deploy only to eu-west-1.' },

@@ -25,6 +25,7 @@ import { FeatureGate } from '../../src/entitlements/feature-gate';
 import { RequestContextService } from '../../src/observability/request-context.service';
 import { PrReviewHistoryService } from '../../src/pr-review-history/pr-review-history.service';
 import { UsageService } from '../../src/usage/usage.service';
+import { WorkspaceAuthorizationService } from '../../src/workspaces/workspace-authorization.service';
 
 const generateTextMock = vi.fn();
 vi.mock('ai', async (importOriginal) => {
@@ -143,11 +144,17 @@ describe.skipIf(!URL_ENV)('PR Review downstream impact (PostgreSQL, mocked GitHu
   // Credentials: the workspace/PR credential (PR diff + contract reads) and each user's own
   // personal token (consumer re-authorization) are distinct, like in production.
   const githubAccess = {
-    resolveApiToken: async (userId: string) => ({
+    // Repository reads (PR diff, contracts): the repository-scoped credential (H1-checked in
+    // production; covered by github-repository-authorization.pg.spec.ts).
+    resolveRepositoryAccess: async (userId: string) => ({
+      ok: true,
       token: `ghs_pr_${userId}`,
       source: 'installation',
+      workspaceId: 'ws',
     }),
     resolveCredentialIdentity: async (userId: string) => `id:${userId}`,
+    // Consumer visibility: the user's OWN personal token only.
+    getPersonalToken: async (userId: string) => pats.get(userId) ?? null,
     getDecryptedToken: async (userId: string) => pats.get(userId) ?? null,
   };
 
@@ -159,7 +166,11 @@ describe.skipIf(!URL_ENV)('PR Review downstream impact (PostgreSQL, mocked GitHu
     prisma = new PrismaClient({ datasourceUrl: URL_ENV });
     await prisma.$connect();
     usage = new UsageService(prisma as never, new EntitlementService(prisma as never));
-    const contractImpact = new ContractImpactService(prisma as never, githubAccess as never);
+    const contractImpact = new ContractImpactService(
+      prisma as never,
+      githubAccess as never,
+      new WorkspaceAuthorizationService(prisma as never),
+    );
     history = new PrReviewHistoryService(
       prisma as never,
       githubAccess as never,
@@ -190,7 +201,11 @@ describe.skipIf(!URL_ENV)('PR Review downstream impact (PostgreSQL, mocked GitHu
     const diffLike = Object.assign(diff, {
       fetchFileAtRef: realDiff.fetchFileAtRef.bind(realDiff),
     });
-    const contractImpact = new ContractImpactService(prisma as never, githubAccess as never);
+    const contractImpact = new ContractImpactService(
+      prisma as never,
+      githubAccess as never,
+      new WorkspaceAuthorizationService(prisma as never),
+    );
     const modelFactory = {
       getDefaultModel: () => 'm',
       getProviderName: () => 'openai',

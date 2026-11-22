@@ -22,6 +22,7 @@ import { PrReviewOrchestrator } from './pr-review-orchestrator.service';
 import { renderCodeLine } from './pr-review-context';
 import { PR_REVIEW_VERIFY_INSTRUCTIONS } from './pr-review-verify';
 import { usageStub } from './pr-review-fixtures';
+import { personalWorkspaceMembership } from '../../workspaces/workspace-membership.test-helpers';
 
 /** Exact rendered code line, as the verifier sees it. */
 const line = (tag: 'ADD' | 'CTX' | 'HEAD', n: number, text: string) =>
@@ -705,7 +706,7 @@ async function run(cases: Case[]) {
     } as never,
     {
       user: { findUnique: vi.fn(async () => null) },
-      workspaceMembership: { findFirst: vi.fn(async () => null) },
+      workspaceMembership: { findFirst: vi.fn(personalWorkspaceMembership) },
     } as never,
     { require: vi.fn() } as never,
     usageStub() as never,

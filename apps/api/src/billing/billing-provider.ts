@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { Environment, Paddle } from '@paddle/paddle-node-sdk';
+import { ApiError as PaddleApiError, Environment, Paddle } from '@paddle/paddle-node-sdk';
 import type {
   BillingCycle,
   BillingCheckoutResponse,
@@ -17,6 +17,13 @@ import {
 
 export type BillingCheckoutInput = {
   workspaceId: string;
+  /**
+   * F-02: server-generated, unguessable id of this checkout. It travels in the transaction's
+   * custom_data (which Paddle copies to the subscription and into every subscription webhook)
+   * and is what binds a subscription to the workspace — `workspaceId` alone is not, because
+   * anyone can open a Paddle.js checkout with arbitrary custom data.
+   */
+  checkoutId: string;
   planId: Exclude<ProductPlanId, 'free'>;
   billingCycle: BillingCycle;
   customerEmail: string;
@@ -76,6 +83,11 @@ export interface BillingProvider {
     providerSubscriptionId: string,
     atPeriodEnd: boolean,
   ): Promise<NormalizedProviderSubscription>;
+  /**
+   * F-03: resolves null ONLY when the provider positively reports that the subscription does
+   * not exist. Every other failure (auth, rate limit, 5xx, network) rejects — "the provider
+   * did not answer" must never be read as "the subscription is gone".
+   */
   getSubscription(providerSubscriptionId: string): Promise<NormalizedProviderSubscription | null>;
   /** List prices by id; unknown ids are omitted. */
   getPrices(priceIds: string[]): Promise<Record<string, BillingPrice>>;
@@ -93,6 +105,8 @@ export type ParsedPaddleWebhook = {
   eventType: string;
   occurredAt?: string;
   workspaceId?: string;
+  /** custom_data.checkoutId of a server-created checkout (see BillingCheckoutInput). */
+  checkoutId?: string;
   /** Present only for `subscription.*` events — the only events that change billing state. */
   subscription?: NormalizedProviderSubscription;
 };
@@ -105,7 +119,11 @@ type PaddleWebhookJson = {
   occurred_at?: string;
   data?: {
     workspace_id?: string;
-    custom_data?: { workspaceId?: string; workspace_id?: string } | null;
+    custom_data?: {
+      workspaceId?: string;
+      workspace_id?: string;
+      checkoutId?: unknown;
+    } | null;
     id?: string;
     customer_id?: string;
     status?: string;
@@ -137,6 +155,10 @@ export function parsePaddleWebhookPayload(rawBody: Buffer): ParsedPaddleWebhook 
     eventType,
     ...(json.occurred_at ? { occurredAt: json.occurred_at } : {}),
     ...(workspaceId ? { workspaceId } : {}),
+    ...(typeof customData?.checkoutId === 'string' &&
+    /^chk_[a-f0-9]{32}$/.test(customData.checkoutId)
+      ? { checkoutId: customData.checkoutId }
+      : {}),
   };
 
   // transaction.* / customer.* carry their own ids and statuses (draft, completed, …);
@@ -192,7 +214,10 @@ function verifyLegacySandboxWebhook(
   }
 }
 
-export type BillingProviderConfig = Pick<ApiConfig, 'nodeEnv' | 'paddle'>;
+export type BillingProviderConfig = Pick<ApiConfig, 'nodeEnv' | 'paddle'> & {
+  /** `staging`: a production-hardened server whose billing is the Paddle sandbox. */
+  deploymentStage?: ApiConfig['deploymentStage'];
+};
 
 export function createBillingProvider(config: BillingProviderConfig): BillingProvider {
   const { nodeEnv, paddle } = config;
@@ -200,9 +225,18 @@ export function createBillingProvider(config: BillingProviderConfig): BillingPro
   const apiKey = paddle.apiKey?.trim() ?? '';
 
   if (nodeEnv === 'production') {
-    if (paddle.environment !== 'production') {
+    // Staging (APP_STAGE=staging): the REAL Paddle client against the sandbox API — real
+    // signature verification, real keys, no development secret, no trusted plan_id — and
+    // never the live environment. Production: live only.
+    const staging = config.deploymentStage === 'staging';
+    if (staging && paddle.environment !== 'sandbox') {
       throw new Error(
-        'Sandbox Paddle billing is forbidden in production (set PADDLE_ENVIRONMENT=production).',
+        'APP_STAGE=staging must use PADDLE_ENVIRONMENT=sandbox (a staging server must never bill real customers).',
+      );
+    }
+    if (!staging && paddle.environment !== 'production') {
+      throw new Error(
+        'Sandbox Paddle billing is forbidden in production (set PADDLE_ENVIRONMENT=production, or APP_STAGE=staging for a staging deployment).',
       );
     }
     if (!apiKey || !webhookSecret) {
@@ -211,7 +245,7 @@ export function createBillingProvider(config: BillingProviderConfig): BillingPro
     return new PaddleBillingProvider({
       apiKey,
       webhookSecret,
-      environment: Environment.production,
+      environment: staging ? Environment.sandbox : Environment.production,
     });
   }
 
@@ -315,6 +349,14 @@ export class SandboxBillingProvider implements BillingProvider {
   }
 }
 
+/**
+ * Paddle's API error for a missing entity (`code: not_found`, HTTP 404). The SDK exposes the
+ * error `code` but not the HTTP status, so the code is the only signal.
+ */
+export function isPaddleNotFound(error: unknown): boolean {
+  return error instanceof PaddleApiError && /(?:^|_)not_found$/.test(String(error.code));
+}
+
 export class PaddleBillingProvider implements BillingProvider {
   private readonly paddle: Paddle;
 
@@ -340,7 +382,7 @@ export class PaddleBillingProvider implements BillingProvider {
   async createCheckout(input: BillingCheckoutInput): Promise<BillingCheckoutResponse> {
     const transaction = await this.paddle.transactions.create({
       items: [{ priceId: input.priceId, quantity: 1 }],
-      customData: { workspaceId: input.workspaceId },
+      customData: { workspaceId: input.workspaceId, checkoutId: input.checkoutId },
       // No per-transaction URL: the dashboard opens the Paddle.js overlay by transaction id,
       // and Paddle falls back to the account's default payment link.
     });
@@ -389,8 +431,13 @@ export class PaddleBillingProvider implements BillingProvider {
     try {
       const subscription = await this.paddle.subscriptions.get(providerSubscriptionId);
       return this.normalizeSubscription(subscription);
-    } catch {
-      return null;
+    } catch (error) {
+      // F-03: only Paddle's own "this entity does not exist" answer means not found. A rotated
+      // key (401/403), a rate limit (429), an outage (5xx) or a network failure is rethrown.
+      if (isPaddleNotFound(error)) {
+        return null;
+      }
+      throw error;
     }
   }
 

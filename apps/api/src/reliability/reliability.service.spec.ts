@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReliabilityService } from './reliability.service';
+import { personalWorkspaceMembership } from '../workspaces/workspace-membership.test-helpers';
 
 function executionRow(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-09-12T20:00:00.000Z');
@@ -92,7 +93,7 @@ describe('ReliabilityService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockImplementation(personalWorkspaceMembership);
     prisma.workflowExecution.count.mockResolvedValue(0);
     prisma.workflowExecution.findMany.mockResolvedValue([]);
     prisma.workflowExecution.updateMany.mockResolvedValue({ count: 1 });
@@ -306,7 +307,10 @@ describe('ReliabilityService', () => {
 
   it('enforces owner + workspace isolation on missing execution (cross-tenant IDOR)', async () => {
     prisma.user.findUnique.mockResolvedValue({ lastWorkspaceId: 'ws_user-2' });
-    prisma.workspaceMembership.findFirst.mockResolvedValue({ workspaceId: 'ws_user-2' });
+    prisma.workspaceMembership.findFirst.mockResolvedValue({
+      workspaceId: 'ws_user-2',
+      role: 'owner',
+    });
     prisma.workflowExecution.findFirst.mockResolvedValue(null);
     await expect(service.getExecution('user-2', 'wex_1')).rejects.toBeInstanceOf(HttpException);
     expect(prisma.workflowExecution.findFirst).toHaveBeenCalledWith(

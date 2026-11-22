@@ -201,8 +201,8 @@ export function runWorkflowStepHandler(
         ok: true,
         needsUserInput: true,
         options: [
+          // APPROVE is not offered (see review-draft-panel): approve on GitHub directly.
           { id: 'COMMENT', label: 'Comment' },
-          { id: 'APPROVE', label: 'Approve' },
           { id: 'REQUEST_CHANGES', label: 'Request changes' },
         ],
         prompt: 'Select the review event — Project X never chooses this for you',

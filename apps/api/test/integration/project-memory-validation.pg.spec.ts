@@ -32,6 +32,7 @@ import { EntitlementService } from '../../src/entitlements/entitlements.service'
 import { FeatureGate } from '../../src/entitlements/feature-gate';
 import { ProjectMemoryService } from '../../src/project-memory/project-memory.service';
 import { WorkspaceAuthorizationService } from '../../src/workspaces/workspace-authorization.service';
+import { repositoryAccessStub } from '../../src/github-app/github-access.test-helpers';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 
@@ -84,7 +85,9 @@ describe.skipIf(!URL_ENV)('Project Memory full validation on PostgreSQL', () => 
     memory = new ProjectMemoryService(
       prisma as never,
       redis as never,
-      { getDecryptedToken: vi.fn(async () => 'ghp_integration_token') } as never,
+      repositoryAccessStub({
+        getDecryptedToken: vi.fn(async () => 'ghp_integration_token'),
+      }) as never,
       {
         fetchRepositoryFileAtRef: vi.fn(
           async (_u, _o, _r, path: string) => learnFiles.get(path) ?? null,

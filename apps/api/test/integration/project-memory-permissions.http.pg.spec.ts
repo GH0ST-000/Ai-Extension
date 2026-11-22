@@ -24,6 +24,7 @@ import { RequestContextService } from '../../src/observability/request-context.s
 import { ProjectMemoryController } from '../../src/project-memory/project-memory.controller';
 import { ProjectMemoryService } from '../../src/project-memory/project-memory.service';
 import { WorkspaceAuthorizationService } from '../../src/workspaces/workspace-authorization.service';
+import { repositoryAccessStub } from '../../src/github-app/github-access.test-helpers';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 const OWNER = 'acme';
@@ -39,6 +40,8 @@ describe.skipIf(!URL_ENV)('Project Memory permissions over HTTP', () => {
   let memory: ProjectMemoryService;
   const realFetch = globalThis.fetch;
   let run = 0;
+  /** Deterministic interleaving point for the F-04 race (no sleeps). */
+  let duringRepositoryAccess: ((userId: string) => Promise<void>) | null = null;
 
   beforeAll(async () => {
     const url = new URL(URL_ENV!);
@@ -56,12 +59,14 @@ describe.skipIf(!URL_ENV)('Project Memory permissions over HTTP', () => {
         set: vi.fn(async (k: string, v: string) => redisStore.set(k, v)),
         del: vi.fn(async (k: string) => redisStore.delete(k)),
       } as never,
-      {
+      repositoryAccessStub({
         // Users whose id contains `_notoken_` have no GitHub token (no PAT, no installation).
-        getDecryptedToken: vi.fn(async (userId: string) =>
-          userId.includes('_notoken_') ? null : 'ghp_integration_token',
-        ),
-      } as never,
+        getDecryptedToken: vi.fn(async (userId: string) => {
+          // Runs between authorize() and the write (the GitHub repository-access check).
+          await duringRepositoryAccess?.(userId);
+          return userId.includes('_notoken_') ? null : 'ghp_integration_token';
+        }),
+      }) as never,
       { fetchRepositoryFileAtRef: vi.fn(async () => null) } as never,
       new FeatureGate(new EntitlementService(prisma as never)),
       new WorkspaceAuthorizationService(prisma as never),
@@ -1343,7 +1348,7 @@ describe.skipIf(!URL_ENV)('Project Memory permissions over HTTP', () => {
       ]) {
         expect(res.status).toBe(403);
         expect(res.body.code).toBe('PROJECT_MEMORY_ACCESS_DENIED');
-        expect(String(res.body.message)).toMatch(/Connect a GitHub token/);
+        expect(String(res.body.message)).toMatch(/Connect your own GitHub token/);
       }
       expect(
         await prisma.projectMemory.count({ where: { userId: { in: [a, users.member] } } }),
@@ -1401,5 +1406,67 @@ describe.skipIf(!URL_ENV)('Project Memory permissions over HTTP', () => {
       } as never);
       expect(ctx).toMatchObject({ status: 'skipped', reason: 'github_not_connected' });
     });
+  });
+  // ── F-04: workspace switch between the permission check and the write ───
+
+  it('[F-04] a member cannot write a shared rule by switching lastWorkspaceId mid-request', async () => {
+    const a = await seed({ attacker: 'owner' });
+    const b = await seed({ owner: 'owner' });
+    const attacker = a.users.attacker!;
+    await prisma.workspaceMembership.create({
+      data: { workspaceId: b.ws, userId: attacker, role: 'member', status: 'active' },
+    });
+    const victimRule = (await createShared(b.users.owner!, 'Refunds require two approvals.')).body
+      .id as string;
+
+    // The attacker sends no X-Workspace-Id (falls back to lastWorkspaceId = A, where they hold
+    // memory:manage). Exactly while the repository-access check runs — after authorize(),
+    // before the write — their lastWorkspaceId becomes B, where they are only a member.
+    let switched = 0;
+    duringRepositoryAccess = async (userId) => {
+      if (userId !== attacker) return;
+      await prisma.user.update({ where: { id: attacker }, data: { lastWorkspaceId: b.ws } });
+      switched += 1;
+    };
+    let res: Awaited<ReturnType<typeof createShared>>;
+    try {
+      res = await createShared(attacker, 'Refunds never need approval.');
+    } finally {
+      duringRepositoryAccess = null;
+    }
+    expect(switched).toBeGreaterThan(0);
+    expect(res.status).toBe(201);
+
+    // Workspace B is untouched: its rule is still the active one, nothing of the attacker's.
+    const victim = await prisma.projectMemory.findUnique({ where: { id: victimRule } });
+    expect(victim!.status).toBe('active');
+    expect((victim!.valueJson as { summary: string }).summary).toBe(
+      'Refunds require two approvals.',
+    );
+    expect(
+      await prisma.projectMemory.count({ where: { workspaceId: b.ws, userId: attacker } }),
+    ).toBe(0);
+    expect(
+      await prisma.projectMemoryAuditEvent.count({
+        where: { workspaceId: b.ws, actorUserId: attacker },
+      }),
+    ).toBe(0);
+    // The rule was written where the permission was checked.
+    const written = await prisma.projectMemory.findUnique({ where: { id: res.body.id as string } });
+    expect(written!.workspaceId).toBe(a.ws);
+  });
+
+  it('[F-04] with the header naming B, the same member is refused (control)', async () => {
+    const a = await seed({ attacker: 'owner' });
+    const b = await seed({ owner: 'owner' });
+    const attacker = a.users.attacker!;
+    await prisma.workspaceMembership.create({
+      data: { workspaceId: b.ws, userId: attacker, role: 'member', status: 'active' },
+    });
+    const res = await createShared(attacker, 'Refunds never need approval.', {
+      'x-workspace-id': b.ws,
+    });
+    expect(res.status).toBe(403);
+    expect(await prisma.projectMemory.count({ where: { workspaceId: b.ws } })).toBe(0);
   });
 });

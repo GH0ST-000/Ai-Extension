@@ -21,7 +21,7 @@ import { PrReviewOrchestrator } from '../../src/ai/pr-review/pr-review-orchestra
 import { PromptRegistry } from '../../src/ai/prompts/prompt.registry';
 import { EntitlementService } from '../../src/entitlements/entitlements.service';
 import { FeatureGate } from '../../src/entitlements/feature-gate';
-import { UsageService } from '../../src/usage/usage.service';
+import { PROVIDER_WORK_REFUNDS_PER_PERIOD, UsageService } from '../../src/usage/usage.service';
 
 const generateTextMock = vi.fn();
 vi.mock('ai', async (importOriginal) => {
@@ -85,7 +85,13 @@ describe.skipIf(!URL_ENV)('AI operation lifecycle on PostgreSQL', () => {
     run += 1;
     const user = `life_user_${run}_${Date.now()}`;
     await prisma.user.create({
-      data: { id: user, email: `${user}@it.test`, passwordHash: 'x', lastWorkspaceId: ws },
+      data: {
+        id: user,
+        email: `${user}@it.test`,
+        passwordHash: 'x',
+        lastWorkspaceId: ws,
+        emailVerifiedAt: new Date(),
+      },
     });
     await prisma.workspaceMembership.create({
       data: { workspaceId: ws, userId: user, role: 'owner', status: 'active' },
@@ -547,6 +553,151 @@ describe.skipIf(!URL_ENV)('AI operation lifecycle on PostgreSQL', () => {
     ).rejects.toThrow('not the structured result');
     expect(await count(ws)).toBe(0);
     expect(await prisma.workspaceUsageEvent.count({ where: { workspaceId: ws } })).toBe(0);
+  });
+
+  // ── F-06 / F-07: provider work already done, nothing usable delivered ────
+
+  const refundBudgetUsed = async (ws: string) =>
+    (
+      await prisma.workspaceUsageCounter.findFirst({
+        where: { workspaceId: ws, metric: { startsWith: 'provider_work_refund:' } },
+      })
+    )?.count ?? 0;
+
+  function fakeResponse() {
+    const written: string[] = [];
+    return {
+      written,
+      statusCode: 0,
+      writableEnded: false,
+      headersSent: false,
+      setHeader: () => undefined,
+      flushHeaders: () => undefined,
+      write(chunk: string) {
+        written.push(String(chunk));
+        return true;
+      },
+      end() {
+        this.writableEnded = true;
+      },
+    };
+  }
+
+  /**
+   * Starts a streamed PR review and hangs up at a chosen point — deterministically: the model
+   * double reports "call started" and then waits until the test has aborted the request.
+   */
+  async function cancelledReview(user: string, pr: number, when: 'before_model' | 'during_model') {
+    let started!: () => void;
+    const modelStarted = new Promise<void>((resolve) => (started = resolve));
+    let release!: () => void;
+    const mayReturn = new Promise<void>((resolve) => (release = resolve));
+    generateTextMock
+      .mockReset()
+      .mockImplementation(async (options: { abortSignal?: AbortSignal }) => {
+        started();
+        await mayReturn;
+        if (options.abortSignal?.aborted) throw new DOMException('aborted', 'AbortError');
+        return answer();
+      });
+    const controller = new AbortController();
+    const response = fakeResponse();
+    if (when === 'before_model') controller.abort();
+    const done = service().pipeActionStream(user, review(pr), response as never, controller.signal);
+    if (when === 'during_model') {
+      await modelStarted;
+      controller.abort();
+    }
+    release();
+    await done;
+    return response;
+  }
+
+  it('[F-06] a review cancelled AFTER model calls started is refunded only within the per-period budget', async () => {
+    const { ws, user } = await seed();
+    for (let i = 1; i <= PROVIDER_WORK_REFUNDS_PER_PERIOD; i += 1) {
+      const response = await cancelledReview(user, 100 + i, 'during_model');
+      expect(modelCalls()).toBeGreaterThan(0);
+      expect(response.written.join('').trim()).toBe(''); // no review text was delivered
+      expect(await count(ws)).toBe(0);
+      expect(await refundBudgetUsed(ws)).toBe(i);
+    }
+    // The budget is spent: hanging up no longer makes the provider work free.
+    await cancelledReview(user, 200, 'during_model');
+    expect(await count(ws)).toBe(1);
+    await cancelledReview(user, 201, 'during_model');
+    expect(await count(ws)).toBe(2);
+    expect(await refundBudgetUsed(ws)).toBe(PROVIDER_WORK_REFUNDS_PER_PERIOD);
+    // Charged operations are final and hold no in-flight slot (the same PR can be reviewed).
+    const events = await prisma.workspaceUsageEvent.findMany({ where: { workspaceId: ws } });
+    expect(events.map((e) => e.status)).toEqual(['committed', 'committed']);
+    expect(events.every((e) => e.inFlightKey === null)).toBe(true);
+  });
+
+  it('[F-06] a review cancelled BEFORE any model call is a plain refund (no budget used, never charged)', async () => {
+    const { ws, user } = await seed();
+    for (let i = 0; i < PROVIDER_WORK_REFUNDS_PER_PERIOD + 3; i += 1) {
+      await cancelledReview(user, 300 + i, 'before_model');
+    }
+    expect(modelCalls()).toBe(0);
+    expect(await count(ws)).toBe(0);
+    expect(await refundBudgetUsed(ws)).toBe(0);
+    expect(await prisma.workspaceUsageEvent.count({ where: { workspaceId: ws } })).toBe(0);
+  });
+
+  it('[F-06] the budget is per user: another member is unaffected', async () => {
+    const { ws, user } = await seed();
+    const other = await seedUser(ws);
+    for (let i = 0; i <= PROVIDER_WORK_REFUNDS_PER_PERIOD; i += 1) {
+      await cancelledReview(user, 400 + i, 'during_model');
+    }
+    expect(await count(ws)).toBe(1);
+    await cancelledReview(other, 500, 'during_model');
+    expect(await count(ws)).toBe(1); // other's first cancellation is within their own budget
+  });
+
+  it('[F-07] unusable model output is refunded within the budget, then charged', async () => {
+    const { ws, user } = await seed();
+    const rejected = (n: number) =>
+      attempt(() =>
+        service().generateActionWithMetadata(user, explain(`bad json ${n}`), {
+          validate: () => {
+            throw new Error('not the structured result');
+          },
+        }),
+      );
+    const total = PROVIDER_WORK_REFUNDS_PER_PERIOD + 4;
+    for (let n = 0; n < total; n += 1) expect(await rejected(n)).toBe('Error');
+    expect(modelCalls()).toBe(total); // every attempt reached the provider
+    expect(await count(ws)).toBe(4); // …and beyond the budget each one cost a unit
+  });
+
+  it('[F-07] concurrent unusable results cannot overspend the refund budget', async () => {
+    const { ws, user } = await seed();
+    const total = PROVIDER_WORK_REFUNDS_PER_PERIOD + 5;
+    await Promise.all(
+      Array.from({ length: total }, (_, n) =>
+        attempt(() =>
+          service().generateActionWithMetadata(user, explain(`parallel ${n}`), {
+            validate: () => {
+              throw new Error('unusable');
+            },
+          }),
+        ),
+      ),
+    );
+    expect(await refundBudgetUsed(ws)).toBe(PROVIDER_WORK_REFUNDS_PER_PERIOD);
+    expect(await count(ws)).toBe(5);
+  });
+
+  it('a provider failure (no usable work) is still a plain refund', async () => {
+    const { ws, user } = await seed();
+    generateTextMock.mockReset().mockRejectedValue(new Error('provider 503'));
+    for (let n = 0; n < PROVIDER_WORK_REFUNDS_PER_PERIOD + 2; n += 1) {
+      await attempt(() => service().generateActionWithMetadata(user, explain(`down ${n}`)));
+    }
+    expect(await count(ws)).toBe(0);
+    expect(await refundBudgetUsed(ws)).toBe(0);
   });
 
   it('the maintenance sweep recovers idle workspaces and erases expired result copies', async () => {

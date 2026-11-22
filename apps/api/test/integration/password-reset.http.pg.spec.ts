@@ -29,6 +29,7 @@ import { RequestContextMiddleware } from '../../src/observability/request-contex
 import { RequestContextService } from '../../src/observability/request-context.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { RedisService } from '../../src/redis/redis.service';
+import { EmailVerificationService } from '../../src/auth/email-verification.service';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 
@@ -102,6 +103,7 @@ describe.skipIf(!URL_ENV)('Password reset (PostgreSQL + HTTP)', () => {
         { provide: MailService, useValue: mail },
         AuthService,
         PasswordResetService,
+        EmailVerificationService,
         RateLimitGuard,
       ],
     }).compile();
@@ -198,8 +200,11 @@ describe.skipIf(!URL_ENV)('Password reset (PostgreSQL + HTTP)', () => {
   }
 
   /** Newest reset email sent to this address (other tests' messages are ignored). */
+  /** Password-reset emails only (registration also sends a verification email, Decision A). */
+  const resetMails = () => sent.filter((m) => m.template === 'password_reset');
+
   function mailTo(email: string, nth = -1): MailMessage {
-    const mine = sent.filter((m) => m.to === email.toLowerCase());
+    const mine = resetMails().filter((m) => m.to === email.toLowerCase());
     const message = mine.at(nth);
     expect(message, `no email to ${email}`).toBeDefined();
     return message!;
@@ -226,12 +231,14 @@ describe.skipIf(!URL_ENV)('Password reset (PostgreSQL + HTTP)', () => {
     expect(known.body).toEqual({ ok: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
     expect(known.outcome).toBe('sent');
     expect(unknown.outcome).toBe('no_account');
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.to).toBe(email);
-    expect(sent[0]!.text).toContain('https://app.example.test/reset-password#token=');
+    expect(resetMails()).toHaveLength(1);
+    expect(resetMails()[0]!.to).toBe(email);
+    expect(resetMails()[0]!.text).toContain('https://app.example.test/reset-password#token=');
     // HTML escapes the user-controlled name.
-    expect(sent[0]!.html).toContain('Reset &lt;User&gt;');
-    expect(sent[0]!.html).not.toContain('Reset <User>');
+    // Adversarial review N2: the registrant-chosen name is never echoed in the mail.
+    expect(resetMails()[0]!.html).not.toContain('Reset &lt;User&gt;');
+    expect(resetMails()[0]!.html).not.toContain('Reset <User>');
+    expect(resetMails()[0]!.text).not.toContain('Reset <User>');
     // Only the hash is stored.
     const token = tokenFrom(mailTo(email));
     const rows = await prisma.passwordResetToken.findMany({ where: { userId: user.id } });
@@ -274,7 +281,7 @@ describe.skipIf(!URL_ENV)('Password reset (PostgreSQL + HTTP)', () => {
     const again = await requestReset(email);
     expect(again.status).toBe(202);
     expect(again.outcome).toBe('throttled');
-    expect(sent).toHaveLength(1);
+    expect(resetMails()).toHaveLength(1);
     // After the cooldown: a new link; the older one stops working.
     await prisma.passwordResetToken.updateMany({
       where: { userId: user.id },
@@ -282,7 +289,7 @@ describe.skipIf(!URL_ENV)('Password reset (PostgreSQL + HTTP)', () => {
     });
     counters.clear();
     await requestReset(email);
-    expect(sent).toHaveLength(2);
+    expect(resetMails()).toHaveLength(2);
     const second = tokenFrom(mailTo(email));
     expect((await confirm(first)).status).toBe(400);
     // Hourly cap: at most 5 tokens per hour (backdate to pass the cooldown each time).

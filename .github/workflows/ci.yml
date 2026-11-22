@@ -65,6 +65,75 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectx?schema=public
           OPENAI_API_KEY: sk-test-ci-placeholder
 
-      - name: Dependency audit (high+)
+      # Blocking: a high or critical advisory in a dependency that SHIPS (production
+      # dependencies of the API, dashboard or extension) fails the build. Fix by upgrading or
+      # by a reviewed `pnpm.overrides` pin in package.json.
+      - name: Dependency audit — production dependencies (blocking, high+)
+        run: pnpm audit --prod --audit-level=high
+
+      # Informational: development-only tooling (never deployed). Reported, not blocking, so a
+      # new advisory in a linter or test runner cannot stop an unrelated security fix.
+      - name: Dependency audit — all dependencies (report only)
         run: pnpm audit --audit-level=high
         continue-on-error: true
+
+  integration:
+    name: PostgreSQL integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # A throwaway database for this job only. The suites refuse any database whose name does
+    # not end in `_it` or whose port is 5432, so they can never run against a real one.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: it
+          POSTGRES_DB: projectx_memory_it
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d projectx_memory_it"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      INTEGRATION_DATABASE_URL: postgresql://postgres:it@127.0.0.1:55432/projectx_memory_it
+      # Placeholders: every AI, GitHub, Paddle and mail call in these suites is a test double.
+      OPENAI_API_KEY: sk-test-ci-placeholder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @project-x/api prisma:generate
+
+      - name: Build workspace packages the API imports
+        run: pnpm turbo run build --filter=@project-x/api^...
+
+      - name: Apply migrations to the throwaway database
+        run: pnpm --filter @project-x/api exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.INTEGRATION_DATABASE_URL }}
+
+      # Fails (does not skip) when the database URL is missing or is not a throwaway database.
+      - name: Integration tests
+        run: pnpm --filter @project-x/api test:integration:ci
+        env:
+          MEMORY_IT_DATABASE_URL: ${{ env.INTEGRATION_DATABASE_URL }}

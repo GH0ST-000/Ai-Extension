@@ -24,12 +24,15 @@ export function workspaceException(
   switch (code) {
     case 'WORKSPACE_NOT_FOUND':
     case 'WORKSPACE_MEMBER_NOT_FOUND':
+    case 'WORKSPACE_INVITATION_NOT_FOUND':
       return new NotFoundException(body);
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
     case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
+    case 'EMAIL_NOT_VERIFIED':
+    case 'EMAIL_VERIFICATION_REQUIRED':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':
     case 'FEATURE_NOT_AVAILABLE':
       return new ForbiddenException(body);
@@ -59,12 +62,15 @@ function statusForCode(code: WorkspaceErrorCode): number {
   switch (code) {
     case 'WORKSPACE_NOT_FOUND':
     case 'WORKSPACE_MEMBER_NOT_FOUND':
+    case 'WORKSPACE_INVITATION_NOT_FOUND':
       return HttpStatus.NOT_FOUND;
     case 'WORKSPACE_ACCESS_DENIED':
     case 'WORKSPACE_INACTIVE':
     case 'WORKSPACE_CONTEXT_UNAVAILABLE':
     case 'WORKSPACE_OWNER_REQUIRED':
     case 'WORKSPACE_LAST_OWNER':
+    case 'EMAIL_NOT_VERIFIED':
+    case 'EMAIL_VERIFICATION_REQUIRED':
     case 'WORKSPACE_RESOURCE_ACCESS_DENIED':
     case 'FEATURE_NOT_AVAILABLE':
       return HttpStatus.FORBIDDEN;
@@ -78,6 +84,7 @@ function statusForCode(code: WorkspaceErrorCode): number {
     case 'BILLING_PROVIDER_UNAVAILABLE':
     case 'BILLING_SUBSCRIPTION_UPDATE_FAILED':
     case 'BILLING_RECONCILIATION_REQUIRED':
+    case 'BILLING_CANCELLATION_FAILED':
       return HttpStatus.BAD_GATEWAY;
     case 'UNKNOWN':
       return HttpStatus.INTERNAL_SERVER_ERROR;

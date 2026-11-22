@@ -1,10 +1,14 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { WorkspacePermission } from '@project-x/types';
+import type { WorkspacePermission, WorkspaceStatus } from '@project-x/types';
 
 import type { AuthRequestUser } from '../auth/jwt.strategy';
 import { WorkspaceAuthorizationService } from './workspace-authorization.service';
-import { WORKSPACE_PERMISSION_KEY, type WorkspaceRequestContext } from './workspace.decorators';
+import {
+  WORKSPACE_ALLOWED_STATUSES_KEY,
+  WORKSPACE_PERMISSION_KEY,
+  type WorkspaceRequestContext,
+} from './workspace.decorators';
 import { workspaceException } from './workspace.errors';
 
 type WorkspaceAwareRequest = {
@@ -38,10 +42,16 @@ export class WorkspaceGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
+    const allowedStatuses = this.reflector.getAllAndOverride<WorkspaceStatus[] | undefined>(
+      WORKSPACE_ALLOWED_STATUSES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     request.workspace = await this.authorization.assertAccess({
       userId: user.id,
       workspaceId,
       permission,
+      ...(allowedStatuses ? { allowedStatuses } : {}),
     });
 
     return true;

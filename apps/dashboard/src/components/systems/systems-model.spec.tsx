@@ -200,3 +200,14 @@ describe('theme compatibility', () => {
     expect(box('i')).not.toMatch(/#[0-9a-f]{6}/i);
   });
 });
+
+describe('N-9: rate-limit guidance', () => {
+  it('a 429 RATE_LIMITED is explained and not offered as an immediate retry', () => {
+    const guidance = describeError(
+      new ApiError('Too many requests. Please wait and try again.', 429, 'RATE_LIMITED'),
+      'Discovery failed',
+    );
+    expect(guidance.title).toBe('Too many analyses in a short time');
+    expect(guidance.retryable).toBe(false);
+  });
+});

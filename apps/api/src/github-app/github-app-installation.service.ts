@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -14,6 +15,14 @@ import type {
 } from '@project-x/types';
 
 import { decryptSecret, encryptSecret } from '../common/crypto/secret-box';
+
+/**
+ * F-29: the encryption context of an installation's metadata (which carries the verified
+ * GitHub ownership proof). Bound to the workspace AND the installation, so a proof cannot be
+ * copied onto another workspace's or another installation's row.
+ */
+const installationMetadataContext = (workspaceId: string, installationId: string): string =>
+  `github_app_installation_metadata:${workspaceId}:${installationId}`;
 import type { ApiConfig } from '../config/configuration';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -86,7 +95,7 @@ export class GithubAppInstallationService {
     if (!row || row.status === 'removed') {
       return { appConfigured, connected: false };
     }
-    const ownershipVerified = Boolean(this.readMetadata(row.metadataCiphertext).ownership);
+    const ownershipVerified = Boolean(this.readMetadata(row).ownership);
 
     return {
       appConfigured,
@@ -242,10 +251,24 @@ export class GithubAppInstallationService {
     }
     const linkedElsewhere = await this.prisma.gitHubAppInstallation.findUnique({
       where: { installationId: pending.installationId },
-      select: { workspaceId: true },
+      select: { workspaceId: true, status: true },
     });
     if (linkedElsewhere && linkedElsewhere.workspaceId !== pending.workspaceId) {
-      throw ownershipDenied('This GitHub App installation is already linked to another workspace.');
+      if (linkedElsewhere.status !== 'removed') {
+        throw ownershipDenied(
+          'This GitHub App installation is already linked to another workspace.',
+        );
+      }
+      // The other workspace DISCONNECTED it (F-18: disconnect unlinks locally, the App stays
+      // installed on GitHub). Its leftover row no longer links anything; drop it so the
+      // installation can be linked here by someone who proves GitHub ownership (just done).
+      await this.prisma.gitHubAppInstallation.deleteMany({
+        where: {
+          installationId: pending.installationId,
+          status: 'removed',
+          workspaceId: { not: pending.workspaceId },
+        },
+      });
     }
 
     return this.writeInstallation({
@@ -284,7 +307,7 @@ export class GithubAppInstallationService {
     });
     const keep =
       existing?.installationId === String(input.installation.id)
-        ? this.readMetadata(existing.metadataCiphertext).ownership
+        ? this.readMetadata({ ...existing, workspaceId: input.workspaceId }).ownership
         : undefined;
     return this.writeInstallation({ ...input, ...(keep ? { ownership: keep } : {}) });
   }
@@ -317,30 +340,47 @@ export class GithubAppInstallationService {
     };
     const metadataCiphertext =
       Object.keys(metadata).length > 0
-        ? encryptSecret(JSON.stringify(metadata), this.encryptionKey())
+        ? encryptSecret(
+            JSON.stringify(metadata),
+            this.encryptionKey(),
+            installationMetadataContext(input.workspaceId, String(input.installation.id)),
+          )
         : null;
 
-    const row = await this.prisma.gitHubAppInstallation.upsert({
-      where: { workspaceId: input.workspaceId },
-      create: {
-        workspaceId: input.workspaceId,
-        installationId: String(input.installation.id),
-        accountLogin: login,
-        accountType,
-        repositorySelection: input.installation.repository_selection ?? null,
-        status,
-        metadataCiphertext,
-        installedByUserId: input.installedByUserId ?? null,
-      },
-      update: {
-        installationId: String(input.installation.id),
-        accountLogin: login,
-        accountType,
-        repositorySelection: input.installation.repository_selection ?? null,
-        status,
-        metadataCiphertext,
-        installedByUserId: input.installedByUserId ?? undefined,
-      },
+    // Deletion race: the workspace must still be ACTIVE when the link is written, checked under
+    // the workspace row lock that deletion finalization also takes (it then unlinks anything
+    // written before it). A pending/deleted workspace never gets an installation linked.
+    const row = await this.prisma.$transaction(async (tx) => {
+      const workspace = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status FROM workspaces WHERE id = ${input.workspaceId} FOR UPDATE`;
+      if (workspace[0]?.status !== 'active') {
+        throw new ForbiddenException({
+          code: 'WORKSPACE_INACTIVE',
+          message: 'Workspace is not active.',
+        });
+      }
+      return tx.gitHubAppInstallation.upsert({
+        where: { workspaceId: input.workspaceId },
+        create: {
+          workspaceId: input.workspaceId,
+          installationId: String(input.installation.id),
+          accountLogin: login,
+          accountType,
+          repositorySelection: input.installation.repository_selection ?? null,
+          status,
+          metadataCiphertext,
+          installedByUserId: input.installedByUserId ?? null,
+        },
+        update: {
+          installationId: String(input.installation.id),
+          accountLogin: login,
+          accountType,
+          repositorySelection: input.installation.repository_selection ?? null,
+          status,
+          metadataCiphertext,
+          installedByUserId: input.installedByUserId ?? undefined,
+        },
+      });
     });
 
     const ownershipVerified = Boolean(input.ownership);
@@ -384,8 +424,10 @@ export class GithubAppInstallationService {
       await this.appTokens.revokeCachedInstallationToken(installationId);
     }
 
-    await this.prisma.gitHubAppInstallation.update({
-      where: { id: row.id },
+    // Adversarial N7: unsuspend only reverses a suspension — a removed/disconnected
+    // installation is never revived by a webhook.
+    await this.prisma.gitHubAppInstallation.updateMany({
+      where: { id: row.id, status: suspended ? { in: ['active', 'suspended'] } : 'suspended' },
       data: { status: suspended ? 'suspended' : 'active' },
     });
   }
@@ -400,10 +442,12 @@ export class GithubAppInstallationService {
 
     await this.appTokens.revokeCachedInstallationToken(row.installationId);
 
-    if (this.appTokens.isAppAuthEnabled()) {
-      await this.requestGitHubUninstall(row.installationId);
-    }
-
+    // F-18: disconnecting is a WORKSPACE action and only unlinks the workspace. It no longer
+    // asks GitHub to delete the installation: that removes the app from the whole GitHub
+    // organization (every repository, every other use of it) on the word of a Project X
+    // admin who may hold no rights in that organization at all — linking needs proof of
+    // GitHub org ownership, unlinking must not grant more than it. Removing the app from
+    // GitHub stays with the organization's owners, in GitHub's settings.
     await this.prisma.gitHubAppInstallation.update({
       where: { id: row.id },
       data: { status: 'removed' },
@@ -433,29 +477,10 @@ export class GithubAppInstallationService {
     if (!row || row.status !== 'active') {
       return null;
     }
-    if (!this.readMetadata(row.metadataCiphertext).ownership) {
+    if (!this.readMetadata({ ...row, workspaceId }).ownership) {
       return null;
     }
     return row.installationId;
-  }
-
-  private async requestGitHubUninstall(installationId: string): Promise<void> {
-    const jwt = this.appTokens.createAppJwt();
-    const url = `https://api.github.com/app/installations/${encodeURIComponent(installationId)}`;
-
-    try {
-      await fetch(url, {
-        method: 'DELETE',
-        headers: {
-          Accept: 'application/vnd.github+json',
-          Authorization: `Bearer ${jwt}`,
-          'User-Agent': 'Project-X',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-      });
-    } catch {
-      // Best-effort — local disconnect still applies.
-    }
   }
 
   private assertAppConfigured(): void {
@@ -569,11 +594,20 @@ export class GithubAppInstallationService {
     return null;
   }
 
-  private readMetadata(ciphertext: string | null | undefined): InstallationMetadata {
+  private readMetadata(row: {
+    workspaceId: string;
+    installationId: string;
+    metadataCiphertext: string | null;
+  }): InstallationMetadata {
+    const ciphertext = row.metadataCiphertext;
     if (!ciphertext) return {};
     try {
       const parsed = JSON.parse(
-        decryptSecret(ciphertext, this.encryptionKey()),
+        decryptSecret(
+          ciphertext,
+          this.encryptionKey(),
+          installationMetadataContext(row.workspaceId, row.installationId),
+        ),
       ) as InstallationMetadata;
       const o = parsed?.ownership;
       const validOwnership =

@@ -1,7 +1,13 @@
 import { createParamDecorator, SetMetadata, type ExecutionContext } from '@nestjs/common';
-import type { WorkspacePermission, WorkspaceRole } from '@project-x/types';
+import type { WorkspacePermission, WorkspaceRole, WorkspaceStatus } from '@project-x/types';
 
 export const WORKSPACE_PERMISSION_KEY = 'workspacePermission';
+export const WORKSPACE_ALLOWED_STATUSES_KEY = 'workspaceAllowedStatuses';
+
+/** Accept these workspace statuses (default: active only). Deletion routes only. */
+export const AllowWorkspaceStatuses = (
+  ...statuses: WorkspaceStatus[]
+): ReturnType<typeof SetMetadata> => SetMetadata(WORKSPACE_ALLOWED_STATUSES_KEY, statuses);
 
 export const RequireWorkspacePermission = (
   permission: WorkspacePermission,

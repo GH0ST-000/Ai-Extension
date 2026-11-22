@@ -7,7 +7,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { GitHubConnectionStatus } from '@project-x/types';
 
-import { decryptSecret, encryptSecret } from '../common/crypto/secret-box';
+import { decryptSecret, encryptSecret, isUnboundCiphertext } from '../common/crypto/secret-box';
+
+/** F-29: where a stored GitHub token lives — the encryption context of that row. */
+export const githubConnectionContext = (userId: string): string => `github_connection:${userId}`;
 import { PrismaService } from '../prisma/prisma.service';
 
 type GitHubUserResponse = {
@@ -47,7 +50,8 @@ export class GithubConnectionService {
 
     const profile = await this.validateToken(trimmed);
     const encryptionKey = this.getEncryptionKey();
-    const tokenCiphertext = encryptSecret(trimmed, encryptionKey);
+    // F-29: bound to this user's row (cannot be decrypted from another user's row).
+    const tokenCiphertext = encryptSecret(trimmed, encryptionKey, githubConnectionContext(userId));
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
@@ -92,7 +96,28 @@ export class GithubConnectionService {
     if (!row) {
       return null;
     }
-    return decryptSecret(row.tokenCiphertext, this.getEncryptionKey());
+    const token = decryptSecret(
+      row.tokenCiphertext,
+      this.getEncryptionKey(),
+      githubConnectionContext(userId),
+    );
+    if (isUnboundCiphertext(row.tokenCiphertext)) {
+      // Legacy value from before contextual binding: re-encrypt it bound to this row. Guarded
+      // on the exact old ciphertext, so a concurrent reconnect is never overwritten.
+      void this.prisma.gitHubConnection
+        .updateMany({
+          where: { userId, tokenCiphertext: row.tokenCiphertext },
+          data: {
+            tokenCiphertext: encryptSecret(
+              token,
+              this.getEncryptionKey(),
+              githubConnectionContext(userId),
+            ),
+          },
+        })
+        .catch(() => undefined);
+    }
+    return token;
   }
 
   /**

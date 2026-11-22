@@ -1,37 +1,17 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger as NestLogger } from '@nestjs/common';
+import { Logger as NestLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { json, urlencoded, type Request, type Response, type NextFunction } from 'express';
-import cookieParser from 'cookie-parser';
+import { apiEnvSchema, collectDeploymentWarnings } from '@project-x/config';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import type { ApiConfig } from './config/configuration';
 import { ERROR_TRACKER, type ErrorTracker } from './observability/error-tracker';
-
-const DEV_DASHBOARD_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:3001',
-] as const;
-
-function applySecurityHeaders(_req: Request, res: Response, next: NextFunction): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader(
-    'Permissions-Policy',
-    'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
-  );
-  // API is consumed cross-origin by the dashboard and extension content scripts.
-  // `same-site` would surface as a CORS failure on third-party pages (e.g. selection toolbar).
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  next();
-}
+import { configureHttpApp } from './common/http/configure-app';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,
     bodyParser: false,
@@ -48,89 +28,26 @@ async function bootstrap(): Promise<void> {
   const service = config.get('service', { infer: true });
   const obs = config.get('observability', { infer: true });
 
-  // Bound JSON bodies — webhooks still receive rawBody via Nest rawBody option + json verify.
-  app.use(
-    json({
-      limit: jsonBodyLimitBytes,
-      verify: (req, _res, buf) => {
-        (req as Request & { rawBody?: Buffer }).rawBody = buf;
-      },
-    }),
-  );
-  app.use(urlencoded({ extended: true, limit: Math.min(jsonBodyLimitBytes, 256_000) }));
-  app.use(cookieParser());
-  app.use(applySecurityHeaders);
-
-  // Honor X-Forwarded-For from a single reverse-proxy hop so auth rate limits
-  // key on the client IP rather than the proxy.
-  if (nodeEnv === 'production') {
-    app.getHttpAdapter().getInstance().set('trust proxy', 1);
-  }
+  // Body parsing, cookie CSRF, security headers, proxy trust, validation, the /api prefix and
+  // CORS: one function, shared with the HTTP security tests (src/common/http/configure-app.ts).
+  configureHttpApp(app, {
+    nodeEnv,
+    configuredOrigins,
+    contentScriptOrigins,
+    jsonBodyLimitBytes,
+    trustProxyHops: config.get('trustProxyHops', { infer: true }),
+  });
 
   app.useLogger(app.get(Logger));
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
-  app.setGlobalPrefix('api');
+  // N-6: non-fatal deployment warnings (key names only, never values).
+  for (const warning of collectDeploymentWarnings(apiEnvSchema.parse(process.env))) {
+    app
+      .get(Logger)
+      .warn({ msg: 'startup.deployment_warning', code: warning.code, detail: warning.message });
+  }
   app.enableShutdownHooks();
 
   const productionAllowlist = new Set([...configuredOrigins, ...contentScriptOrigins]);
-  const developmentAllowlist = new Set([
-    ...DEV_DASHBOARD_ORIGINS,
-    ...configuredOrigins,
-    ...contentScriptOrigins,
-  ]);
-
-  app.enableCors({
-    origin: (origin, callback) => {
-      // Non-browser clients (curl, server-to-server, webhooks) send no Origin.
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (nodeEnv !== 'production') {
-        // Dev: dashboard localhost + configured origins. Still reject obvious wildcards.
-        if (origin === '*' || origin === 'null') {
-          callback(null, false);
-          return;
-        }
-        if (developmentAllowlist.has(origin) || configuredOrigins.length === 0) {
-          // When no AI_CORS_ORIGINS configured in dev, allow any origin so content scripts work.
-          callback(null, true);
-          return;
-        }
-        callback(null, developmentAllowlist.has(origin));
-        return;
-      }
-
-      // Production: exact allowlist only — never substring match, never chrome-extension://*
-      callback(null, productionAllowlist.has(origin));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Workspace-Id',
-      'X-Request-Id',
-      'X-Project-X-Client',
-      'Paddle-Signature',
-    ],
-    exposedHeaders: [
-      'X-Request-Id',
-      'X-PR-Review-Scope',
-      'X-Project-Memory',
-      'X-AI-Operation-Id',
-      'X-AI-Operation-Replayed',
-    ],
-    maxAge: 600,
-  });
 
   const bootstrapLogger = new NestLogger('Bootstrap');
   bootstrapLogger.log({

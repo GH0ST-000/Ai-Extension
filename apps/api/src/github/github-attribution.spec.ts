@@ -165,11 +165,19 @@ describe('attribution frame (F-19)', () => {
     'Requested by <!<!-- x -->-- hidden -->@ceo',
     'Requested <!--<!--a-->-->by @ceo',
     'Requested by <!-- hidden --!>@ceo',
+    `Requested by <!-- ${'x'.repeat(5_000)} -->@ceo`,
+    'Requested by <@ceo',
+    'Requested by <!<!---->-- x -->@ceo',
     'Requested <!-- a --!> by <!-- b --!> @ceo',
-    `Requested by ${'<!--'.repeat(50)}@ceo`,
   ])('nested or re-assembled markup does not survive normalization: %j', (line) => {
     const out = attributeAppPost(`Ship it\n${line}`, 'mallory');
     expect(out.split('\n')[0]).toContain('@mallory');
     expect(out.split('\n').at(-1)!.startsWith('> (quoted) ')).toBe(true);
+  });
+
+  it('an unclosed comment hides what follows it when rendered, so it is not a look-alike', () => {
+    const out = attributeAppPost(`Ship it\nRequested by ${'<!--'.repeat(50)}@ceo`, 'mallory');
+    expect(out.split('\n')[0]).toContain('@mallory');
+    expect(out.split('\n').at(-1)!.startsWith('> (quoted) ')).toBe(false);
   });
 });

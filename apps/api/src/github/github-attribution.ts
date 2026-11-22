@@ -116,23 +116,41 @@ const NAMED_ENTITIES: Record<string, string> = {
  * brackets removed, and common Cyrillic / Greek homoglyphs mapped to Latin.
  */
 /**
- * Remove HTML comments and tags as a renderer would drop them. Repeated until nothing changes:
- * one pass can leave a new comment or tag assembled from what surrounded the removed text
- * (`<!<!-- -->-- x -->`, `<<b>b>`), and any comment opener left over (an unclosed `<!--`)
- * is removed as well, so the result never contains markup that hides or splits a phrase.
+ * Remove HTML comments as a renderer drops them, by scanning (no regular expression): each
+ * `<!--` up to the next `-->` or `--!>` is cut out; an unclosed comment hides everything
+ * after it, so the rest of the text is dropped.
+ */
+function stripComments(text: string): string {
+  let out = '';
+  let cursor = 0;
+  for (;;) {
+    const start = text.indexOf('<!--', cursor);
+    if (start < 0) return out + text.slice(cursor);
+    out += text.slice(cursor, start);
+    const plain = text.indexOf('-->', start + 4);
+    const bang = text.indexOf('--!>', start + 4);
+    if (plain < 0 && bang < 0) return out;
+    const useBang = bang >= 0 && (plain < 0 || bang < plain);
+    cursor = useBang ? bang + 4 : plain + 3;
+  }
+}
+
+/**
+ * Text with comments and tags removed, as a reader would see it. Comment removal repeats
+ * until nothing changes (cutting one comment can join the text around it into another), tags
+ * are dropped, and any angle bracket still left is removed — so the result contains no `<` or
+ * `>` at all and therefore no markup that could hide or split a phrase.
  */
 function stripMarkup(text: string): string {
   let out = text;
   for (let previous = ''; previous !== out;) {
     previous = out;
-    // Comments first (they may contain `>`), then tags, then stray comment delimiters.
-    out = out
-      // A comment ends at `-->` and, per the HTML parser, also at `--!>`.
-      .replace(/<!--[\s\S]{0,2000}?--!?>/g, '')
-      .replace(/<[^>]{0,200}>/g, '')
-      .replace(/<!--|--!?>/g, '');
+    out = stripComments(out);
   }
-  return out;
+  // A comment terminator left without an opener renders as text; for DETECTION it is dropped
+  // too (more look-alikes are caught, never fewer).
+  out = out.split('--!>').join('').split('-->').join('');
+  return out.replace(/<[^>]{0,200}>/g, '').replace(/[<>]/g, '');
 }
 
 function normalizeForDetection(text: string): string {

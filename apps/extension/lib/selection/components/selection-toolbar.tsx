@@ -37,6 +37,7 @@ import { PrReviewMemoryToggle } from './pr-review-memory-toggle';
 import { ContextualHint } from './contextual-hint';
 import { CustomPromptPanel } from './custom-prompt-panel';
 import { ErrorPanel } from './error-panel';
+import { RESUME_AFTER_SIGN_IN_MESSAGE } from '../../popup-view';
 import { FloatingTriggerButton } from './floating-trigger-button';
 import { LoadingPanel } from './loading-panel';
 import { ResultPanel } from './result-panel';
@@ -84,6 +85,23 @@ export function SelectionToolbar() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Back from the sign-in tab (see lib/popup-view): run the action that asked for sign-in
+  // again, exactly as pressing Retry would. Only messages from this extension's background,
+  // and only while an error is showing.
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
+    const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
+      if (sender.id !== chrome.runtime.id || sender.tab) return;
+      if ((message as { type?: unknown } | null)?.type !== RESUME_AFTER_SIGN_IN_MESSAGE) return;
+      const state = useSelectionToolbarStore.getState();
+      if (state.phase === 'assistant' && state.assistant.status === 'error') {
+        void state.retry();
+      }
+    };
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, []);
 
   const phase = useSelectionToolbarStore((s) => s.phase);

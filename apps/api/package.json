@@ -5,7 +5,7 @@
   "description": "Project X NestJS API",
   "scripts": {
     "build": "nest build",
-    "dev": "nest build && nest start --watch",
+    "dev": "node ../../scripts/wait-for-workspace-builds.mjs && nest build && nest start --watch",
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
     "lint": "eslint \"{src,test}/**/*.ts\"",

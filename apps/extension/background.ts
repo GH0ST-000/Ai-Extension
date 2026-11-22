@@ -1,6 +1,15 @@
 import { APP_NAME } from '@project-x/shared';
 
 import {
+  addPendingSignIn,
+  PENDING_SIGN_INS_KEY,
+  RESUME_AFTER_SIGN_IN_MESSAGE,
+  SIGN_IN_COMPLETE_MESSAGE,
+  signInPageUrl,
+  takePendingSignIn,
+  type PendingSignIns,
+} from './lib/popup-view';
+import {
   API_FETCH_MESSAGE,
   API_STREAM_PORT,
   executeApiFetch,
@@ -35,6 +44,7 @@ const ALLOWED_MESSAGE_TYPES = new Set([
   'SYNC_SESSION',
   'CLEAR_SESSION',
   'OPEN_SIGN_IN',
+  SIGN_IN_COMPLETE_MESSAGE,
   API_FETCH_MESSAGE,
   REFRESH_SESSION_MESSAGE,
 ]);
@@ -162,9 +172,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (typed.type === 'OPEN_SIGN_IN') {
-    const popupUrl = chrome.runtime.getURL('popup.html');
-    void chrome.tabs.create({ url: popupUrl });
-    sendResponse({ ok: true });
+    // Opened as a tab (a content script cannot open the toolbar popup): the page variant of
+    // the popup — centered, straight to the sign-in form. The asking tab is remembered so the
+    // user is brought back to it, and the action resumed, once signed in.
+    void (async () => {
+      const created = await chrome.tabs.create({
+        url: signInPageUrl((path) => chrome.runtime.getURL(path)),
+        ...(sender.tab?.index !== undefined ? { index: sender.tab.index + 1 } : {}),
+      });
+      if (created.id !== undefined && sender.tab?.id !== undefined) {
+        await updatePendingSignIns((pending) =>
+          addPendingSignIn(pending, created.id!, sender.tab!.id!, sender.tab!.windowId),
+        );
+      }
+    })()
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (typed.type === SIGN_IN_COMPLETE_MESSAGE) {
+    // Only the extension's own sign-in page (opened in a tab) may report this.
+    const signInTabId = sender.tab?.id;
+    if (signInTabId === undefined || !sender.url?.startsWith(chrome.runtime.getURL('popup.html'))) {
+      return false;
+    }
+    void returnFromSignIn(signInTabId)
+      .then((returned) => sendResponse({ ok: true, returned }))
+      .catch(() => sendResponse({ ok: false, returned: false }));
     return true;
   }
 
@@ -268,3 +303,49 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 export {};
+
+async function updatePendingSignIns(
+  change: (pending: PendingSignIns) => PendingSignIns,
+): Promise<PendingSignIns> {
+  const stored = await chrome.storage.session.get(PENDING_SIGN_INS_KEY);
+  const next = change((stored[PENDING_SIGN_INS_KEY] as PendingSignIns | undefined) ?? {});
+  await chrome.storage.session.set({ [PENDING_SIGN_INS_KEY]: next });
+  return next;
+}
+
+/**
+ * The user signed in on the sign-in tab: bring them back to the tab they came from, ask its
+ * toolbar to run the interrupted action again, and close the sign-in tab. False when the
+ * sign-in page was not opened from a page (then it simply stays open).
+ */
+async function returnFromSignIn(signInTabId: number): Promise<boolean> {
+  let target: PendingSignIns[string] | null = null;
+  await updatePendingSignIns((pending) => {
+    const taken = takePendingSignIn(pending, signInTabId);
+    target = taken.target;
+    return taken.rest;
+  });
+  const destination = target as PendingSignIns[string] | null;
+  if (!destination) return false;
+  try {
+    await chrome.tabs.update(destination.returnTabId, { active: true });
+    if (destination.returnWindowId !== undefined) {
+      await chrome.windows.update(destination.returnWindowId, { focused: true });
+    }
+  } catch {
+    // The original tab was closed meanwhile: keep the sign-in tab.
+    return false;
+  }
+  await chrome.tabs
+    .sendMessage(destination.returnTabId, { type: RESUME_AFTER_SIGN_IN_MESSAGE })
+    .catch(() => undefined);
+  await chrome.tabs.remove(signInTabId).catch(() => undefined);
+  return true;
+}
+
+// A sign-in tab closed without signing in leaves nothing behind.
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  void updatePendingSignIns((pending) => takePendingSignIn(pending, tabId).rest).catch(
+    () => undefined,
+  );
+});

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { apiEnvSchema } from './index';
 
 const base = {
+  NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/projectx?schema=public',
   OPENAI_API_KEY: 'sk-test-not-real',
 };

@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GithubCiService } from './github-ci.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { workspaceException } from '../workspaces/workspace.errors';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
 
 describe('GithubCiService', () => {
   const errors = new GithubErrorNormalizer();
-  const githubConnections = {
+  const githubConnections = repositoryAccessStub({
     getDecryptedToken: vi.fn(),
-  };
+  });
   const aiService = {
     generateAction: vi.fn(),
     generateActionWithMetadata: vi.fn(),

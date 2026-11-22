@@ -8,7 +8,8 @@ function baseEnv(overrides: Partial<ApiEnv> = {}): ApiEnv {
     NODE_ENV: 'production',
     JWT_SECRET: 'production-jwt-secret-with-enough-entropy-32b',
     TOKEN_ENCRYPTION_KEY: 'production-encryption-key-with-entropy-32',
-    AI_CORS_ORIGINS: 'https://app.example.com,chrome-extension://abcdefghijklmnopqrstuvwxyz123456',
+    AI_CORS_ORIGINS:
+      'https://app.projectx-fixture.dev,chrome-extension://abcdefghijklmnopqrstuvwxyz123456',
     METRICS_SCRAPE_TOKEN: 'metrics-token-16chars',
     INTERNAL_OBSERVABILITY_TOKEN: 'internal-token-16c',
     HEALTH_DETAILS_TOKEN: 'health-token-16chars',
@@ -17,7 +18,9 @@ function baseEnv(overrides: Partial<ApiEnv> = {}): ApiEnv {
     PADDLE_WEBHOOK_SECRET: 'paddle-webhook-secret-safe',
     PADDLE_PRICE_PRO_MONTHLY: 'pri_pro_m',
     PADDLE_PRICE_TEAM_MONTHLY: 'pri_team_m',
-    APP_BASE_URL: 'https://app.example.com',
+    APP_BASE_URL: 'https://app.projectx-fixture.dev',
+    RESEND_API_KEY: 're_FixtureKey0123456789abcdef',
+    MAIL_FROM: 'Project X <no-reply@mail.projectx-fixture.dev>',
     ...overrides,
   });
 }

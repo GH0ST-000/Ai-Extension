@@ -274,6 +274,13 @@ export function describeError(err: unknown, fallbackTitle: string): ErrorGuidanc
         action: { label: 'GitHub settings', href: '/app/settings' },
         retryable: false,
       };
+    case 'RATE_LIMITED':
+      return {
+        title: 'Too many analyses in a short time',
+        message:
+          'To protect the workspace’s shared analysis quota, Refresh and Discover are limited per person and per workspace each hour. Try again later.',
+        retryable: false,
+      };
     case 'AI_OPERATION_IN_PROGRESS':
       return {
         title: 'An analysis is already running',

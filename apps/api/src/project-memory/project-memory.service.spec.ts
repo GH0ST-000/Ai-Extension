@@ -3,6 +3,8 @@ import { ProjectMemoryCategory } from '@project-x/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectMemoryService } from './project-memory.service';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
+import { personalWorkspaceMembership } from '../workspaces/workspace-membership.test-helpers';
 
 function memoryRow(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-09-12T12:00:00.000Z');
@@ -68,9 +70,9 @@ describe('ProjectMemoryService', () => {
     set: vi.fn(),
     del: vi.fn(),
   };
-  const githubConnections = {
+  const githubConnections = repositoryAccessStub({
     getDecryptedToken: vi.fn(),
-  };
+  });
   const githubContent = {
     fetchRepositoryFileAtRef: vi.fn(),
   };
@@ -106,7 +108,7 @@ describe('ProjectMemoryService', () => {
     redis.get.mockResolvedValue(null);
     redis.del.mockResolvedValue(1);
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockImplementation(personalWorkspaceMembership);
     const featureGate = { require: vi.fn(async () => undefined) };
     const workspaceAuthorization = { assertAccess: vi.fn(async () => ({ role: 'owner' })) };
     service = new ProjectMemoryService(
@@ -341,7 +343,8 @@ describe('ProjectMemoryService', () => {
     const item = await service.confirmCandidate('user-1', 'acme', 'app', 'cand-1');
     expect(item.key).toBe('architecture.pattern.cqrs');
     expect(prisma.projectMemory.create).toHaveBeenCalled();
-    expect(redis.del).toHaveBeenCalledWith('pm:cand:user-1:acme:app:cand-1');
+    // The candidate key is scoped to the workspace it was learned in.
+    expect(redis.del).toHaveBeenCalledWith('pm:cand:ws_user-1:user-1:acme:app:cand-1');
   });
 
   it('GitHub-dependent operations are denied when GitHub returns 404 for the repository', async () => {

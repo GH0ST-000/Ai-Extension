@@ -67,6 +67,14 @@ export class PasswordResetRequestDto {
   email!: string;
 }
 
+/** Decision A: the verification token from the link fragment. */
+export class EmailVerificationConfirmDto {
+  @IsString()
+  @MinLength(20)
+  @MaxLength(200)
+  token!: string;
+}
+
 /** Same password rules as registration. */
 export class PasswordResetConfirmDto {
   @IsString()

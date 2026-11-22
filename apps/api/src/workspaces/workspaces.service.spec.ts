@@ -22,6 +22,8 @@ describe('WorkspacesService', () => {
       findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
+    // Decision B: the per-account lock; this account owns no workspace yet.
+    $executeRaw: vi.fn(async () => 0),
   };
 
   const authorization = {
@@ -43,6 +45,10 @@ describe('WorkspacesService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.workspace.findUnique.mockResolvedValue(null);
+    prisma.workspaceMembership.findMany.mockResolvedValue([]);
+    (prisma.workspace as unknown as { count: ReturnType<typeof vi.fn> }).count = vi.fn(
+      async () => 0,
+    );
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) =>
       fn(prisma),
     );

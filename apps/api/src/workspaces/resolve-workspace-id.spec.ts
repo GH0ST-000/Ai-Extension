@@ -22,7 +22,7 @@ function prismaWith(memberships: Membership[], lastWorkspaceId: string | null = 
           (args.where.workspaceId === undefined || m.workspaceId === args.where.workspaceId) &&
           (args.where.role === undefined || m.role === args.where.role),
       );
-      return hit ? { workspaceId: hit.workspaceId } : null;
+      return hit ? { workspaceId: hit.workspaceId, role: hit.role } : null;
     },
   );
   return {
@@ -118,9 +118,38 @@ describe('resolveWorkspaceIdForUser — header absent (documented fallback prese
     );
   });
 
-  it('falls back to the personal workspace id convention as a last resort', async () => {
-    const { prisma } = prismaWith([], null);
+  it('falls back to the personal workspace only while the user is still its active member', async () => {
+    const { prisma } = prismaWith(
+      [{ workspaceId: 'ws_u9', userId: 'u9', role: 'admin', active: true }],
+      null,
+    );
     await expect(resolveWorkspaceIdForUser(prisma, 'u9')).resolves.toBe('ws_u9');
+  });
+
+  it('N-1: never returns a predicted workspace id — no membership anywhere → 403', async () => {
+    // Previously this resolved to `ws_u9` unchecked (a transferred personal workspace of a
+    // removed former owner was reachable that way).
+    const { prisma } = prismaWith([], null);
+    const err = await errorOf(resolveWorkspaceIdForUser(prisma, 'u9'));
+    expect(err.code).toBe('WORKSPACE_CONTEXT_UNAVAILABLE');
+    const removed = prismaWith(
+      [{ workspaceId: 'ws_u9', userId: 'u9', role: 'owner', active: false }],
+      'ws_u9',
+    );
+    expect((await errorOf(resolveWorkspaceIdForUser(removed.prisma, 'u9'))).code).toBe(
+      'WORKSPACE_CONTEXT_UNAVAILABLE',
+    );
+  });
+
+  it('N-1: the permission is checked against the resolved membership role', async () => {
+    const { prisma } = prismaWith(MEMBER_OF_A, 'ws_b'); // member in ws_b
+    await expect(
+      inRequest({}, () => resolveWorkspaceIdForUser(prisma, 'u1', undefined, 'workflow:execute')),
+    ).resolves.toBe('ws_b');
+    const err = await errorOf(
+      inRequest({}, () => resolveWorkspaceIdForUser(prisma, 'u1', undefined, 'members:manage')),
+    );
+    expect(err.code).toBe('WORKSPACE_ACCESS_DENIED');
   });
 
   it('treats a blank explicit argument as absent', async () => {

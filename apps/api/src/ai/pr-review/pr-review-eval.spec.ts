@@ -20,6 +20,7 @@ import { rawFinding } from './pr-review-fixtures';
 import { PrReviewOrchestrator } from './pr-review-orchestrator.service';
 import { PR_REVIEW_VERIFY_INSTRUCTIONS } from './pr-review-verify';
 import { usageStub } from './pr-review-fixtures';
+import { personalWorkspaceMembership } from '../../workspaces/workspace-membership.test-helpers';
 
 const generateTextMock = vi.fn();
 vi.mock('ai', async (importOriginal) => {
@@ -380,7 +381,7 @@ function build(files: { path: string; patch: string }[]) {
     } as never,
     {
       user: { findUnique: vi.fn(async () => null) },
-      workspaceMembership: { findFirst: vi.fn(async () => null) },
+      workspaceMembership: { findFirst: vi.fn(personalWorkspaceMembership) },
     } as never,
     { require: vi.fn() } as never,
     usageStub() as never,

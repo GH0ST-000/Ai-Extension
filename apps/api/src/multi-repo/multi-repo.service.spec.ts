@@ -9,7 +9,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MultiRepoService } from './multi-repo.service';
+import { roleHasPermission } from '@project-x/shared';
+import type { WorkspacePermission, WorkspaceRole } from '@project-x/types';
+import { workspaceException } from '../workspaces/workspace.errors';
 import { usageStub } from '../ai/pr-review/pr-review-fixtures';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
+import { personalWorkspaceMembership } from '../workspaces/workspace-membership.test-helpers';
 
 function systemRow(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-09-12T12:00:00.000Z');
@@ -52,6 +57,21 @@ function systemRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Authorization double backed by the REAL shared permission matrix. */
+let actingRole: WorkspaceRole = 'owner';
+const authorization = {
+  assertAccess: vi.fn(async ({ permission }: { permission?: WorkspacePermission }) => {
+    if (permission && !roleHasPermission(actingRole, permission)) {
+      throw workspaceException(
+        'WORKSPACE_ACCESS_DENIED',
+        'You do not have permission to perform this action.',
+      );
+    }
+    return { workspaceId: 'ws', membershipId: 'm', role: actingRole, permissions: [] };
+  }),
+};
+const audit = { record: vi.fn() };
+
 describe('MultiRepoService', () => {
   const prisma = {
     user: {
@@ -90,9 +110,9 @@ describe('MultiRepoService', () => {
     $transaction: vi.fn(),
   };
 
-  const githubConnections = {
+  const githubConnections = repositoryAccessStub({
     getDecryptedToken: vi.fn(),
-  };
+  });
 
   const githubContent = {
     fetchRepositoryFileAtRef: vi.fn(),
@@ -113,7 +133,7 @@ describe('MultiRepoService', () => {
     ) as typeof fetch;
 
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockImplementation(personalWorkspaceMembership);
     prisma.projectSystem.findFirst.mockResolvedValue(systemRow());
     prisma.projectSystem.findMany.mockResolvedValue([systemRow()]);
     prisma.projectSystem.create.mockImplementation(
@@ -158,7 +178,7 @@ describe('MultiRepoService', () => {
     projectMemory.getProfile.mockRejectedValue(new Error('no memory'));
     githubContent.fetchRepositoryFileAtRef.mockResolvedValue(null);
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockImplementation(personalWorkspaceMembership);
     prisma.projectSystem.count.mockResolvedValue(0);
     prisma.workspaceSubscription.findUnique.mockResolvedValue({ planId: 'team', status: 'active' });
 
@@ -180,7 +200,139 @@ describe('MultiRepoService', () => {
       featureGate as never,
       entitlements as never,
       usage as never,
+      authorization as never,
+      audit as never,
     );
+    actingRole = 'owner';
+    authorization.assertAccess.mockClear();
+    audit.record.mockClear();
+  });
+
+  describe('M4 — Systems permissions', () => {
+    const system = () => ({
+      id: 'sys-1',
+      workspaceId: 'ws_user-1',
+      userId: 'user-1',
+      name: 'S',
+      primaryProvider: 'github',
+      primaryOwner: 'acme',
+      primaryRepository: 'api',
+      createdByUserId: 'user-1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      repositories: [
+        {
+          id: 'r1',
+          systemId: 'sys-1',
+          provider: 'github',
+          owner: 'acme',
+          repository: 'api',
+          role: 'unknown',
+          enabled: true,
+          source: 'user_selected',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'r2',
+          systemId: 'sys-1',
+          provider: 'github',
+          owner: 'acme',
+          repository: 'web',
+          role: 'frontend',
+          enabled: true,
+          source: 'user_selected',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    const mutations: Array<[string, () => Promise<unknown>]> = [
+      [
+        'createSystem',
+        () =>
+          service.createSystem('user-1', { name: 'X', primaryOwner: 'a', primaryRepository: 'b' }),
+      ],
+      ['updateSystem', () => service.updateSystem('user-1', 'sys-1', { name: 'Y' })],
+      ['deleteSystem', () => service.deleteSystem('user-1', 'sys-1')],
+      [
+        'addRepository',
+        () => service.addRepository('user-1', 'sys-1', { owner: 'a', repository: 'c' }),
+      ],
+      [
+        'updateRepository',
+        () => service.updateRepository('user-1', 'sys-1', 'acme', 'web', { enabled: false }),
+      ],
+      ['removeRepository', () => service.removeRepository('user-1', 'sys-1', 'acme', 'web')],
+    ];
+
+    it.each(mutations)(
+      '%s: a Member (no systems:manage) is refused before any read or write',
+      async (_n, run) => {
+        actingRole = 'member';
+        prisma.projectSystem.findFirst.mockResolvedValue(system());
+        await expect(run()).rejects.toMatchObject({
+          response: expect.objectContaining({ code: 'WORKSPACE_ACCESS_DENIED' }),
+        });
+        expect(authorization.assertAccess).toHaveBeenCalledWith(
+          expect.objectContaining({ permission: 'systems:manage' }),
+        );
+        expect(prisma.projectSystem.findFirst).not.toHaveBeenCalled();
+        expect(prisma.projectSystem.create).not.toHaveBeenCalled();
+        expect(prisma.projectSystem.update).not.toHaveBeenCalled();
+        expect(prisma.projectSystem.delete).not.toHaveBeenCalled();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ type: 'systems.access.denied', outcome: 'blocked' }),
+        );
+      },
+    );
+
+    it.each(['owner', 'admin'] as const)('%s may delete a system (audited)', async (role) => {
+      actingRole = role;
+      prisma.projectSystem.findFirst.mockResolvedValue(system());
+      await expect(service.deleteSystem('user-1', 'sys-1')).resolves.toEqual({
+        deleted: true,
+        id: 'sys-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'systems.system.deleted', outcome: 'success' }),
+      );
+    });
+
+    it('reads require systems:read, which every role has (Member included)', async () => {
+      actingRole = 'member';
+      prisma.projectSystem.findFirst.mockResolvedValue(system());
+      await service.getSystem('user-1', 'sys-1');
+      await service.listSystems('user-1');
+      await service.listRelationships('user-1', 'sys-1');
+      const permissions = authorization.assertAccess.mock.calls.map((c) => c[0].permission);
+      expect(permissions.length).toBeGreaterThanOrEqual(3);
+      expect(new Set(permissions)).toEqual(new Set(['systems:read']));
+    });
+
+    it('no permission check is skipped: an unauthorized reader gets nothing from the database', async () => {
+      authorization.assertAccess.mockRejectedValueOnce(
+        workspaceException('WORKSPACE_ACCESS_DENIED', 'denied'),
+      );
+      await expect(service.listSystems('user-1')).rejects.toBeInstanceOf(HttpException);
+      expect(prisma.projectSystem.findMany).not.toHaveBeenCalled();
+    });
+
+    it('internal downstream-impact entry point is permission-checked too', async () => {
+      authorization.assertAccess.mockRejectedValueOnce(
+        workspaceException('WORKSPACE_ACCESS_DENIED', 'denied'),
+      );
+      await expect(
+        service.computeContractDownstreamImpact('user-1', {
+          owner: 'acme',
+          repository: 'api',
+          changes: [],
+        }),
+      ).rejects.toBeInstanceOf(HttpException);
+      expect(authorization.assertAccess).toHaveBeenCalledWith(
+        expect.objectContaining({ permission: 'systems:read' }),
+      );
+    });
   });
 
   afterEach(() => {

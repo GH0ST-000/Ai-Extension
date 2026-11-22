@@ -59,7 +59,8 @@ export type FileAtRefResult =
       reason: 'not_found' | 'no_access' | 'rate_limited' | 'too_large' | 'unavailable' | 'invalid';
     };
 
-type FetchFailureReason = 'not_connected' | 'no_access' | 'token_rejected' | 'unavailable';
+type FetchFailureReason =
+  'not_connected' | 'identity_required' | 'no_access' | 'token_rejected' | 'unavailable';
 
 class GitHubDiffFetchError extends Error {
   constructor(readonly reason: FetchFailureReason) {
@@ -71,6 +72,8 @@ const FAILURE_MESSAGES: Record<FetchFailureReason | 'not_a_pr', string> = {
   not_a_pr: 'Open a GitHub pull request page (owner/repo/pull/<number>) to review the entire PR.',
   not_connected:
     'Could not load the PR diff: connect GitHub in dashboard Settings (or install the GitHub App), or open the Files changed tab and try again.',
+  identity_required:
+    'Could not load the PR diff: this workspace uses the Project X GitHub App — connect your own GitHub token in dashboard Settings so Project X can confirm your access, or open the Files changed tab and try again.',
   no_access:
     'Could not load the PR diff: the connected GitHub account cannot access this repository.',
   token_rejected:
@@ -159,9 +162,17 @@ export class PullRequestDiffService {
     workspaceId: string,
     pr: { owner: string; repository: string; number: number },
   ): Promise<PullRequestDiffResult> {
-    const resolved = await this.githubAccess.resolveApiToken(userId, workspaceId);
-    if (!resolved) {
-      throw new GitHubDiffFetchError('not_connected');
+    // H1: the acting user's own read access is verified before an App token is used.
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner: pr.owner,
+      repository: pr.repository,
+      access: 'read',
+      workspaceId,
+    });
+    if (!resolved.ok) {
+      throw new GitHubDiffFetchError(
+        resolved.reason === 'insufficient_permission' ? 'no_access' : resolved.reason,
+      );
     }
 
     const base = `https://api.github.com/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repository)}/pulls/${pr.number}`;
@@ -229,12 +240,22 @@ export class PullRequestDiffService {
     }
     let token: string | null;
     try {
-      token =
-        (await this.githubAccess.resolveApiToken(input.userId, input.workspaceId))?.token ?? null;
+      const resolved = await this.githubAccess.resolveRepositoryAccess(input.userId, {
+        owner: input.owner,
+        repository: input.repository,
+        access: 'read',
+        workspaceId: input.workspaceId,
+      });
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          reason: resolved.reason === 'unavailable' ? 'unavailable' : 'no_access',
+        };
+      }
+      token = resolved.token;
     } catch {
       return { ok: false, reason: 'unavailable' };
     }
-    if (!token) return { ok: false, reason: 'no_access' };
     const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/contents/${path
       .split('/')
       .map(encodeURIComponent)
@@ -305,8 +326,13 @@ export class PullRequestDiffService {
     let token: Promise<string | null> | undefined;
     const getToken = () =>
       (token ??= this.githubAccess
-        .resolveApiToken(input.userId, input.workspaceId)
-        .then((r) => r?.token ?? null)
+        .resolveRepositoryAccess(input.userId, {
+          owner: input.owner,
+          repository: input.repository,
+          access: 'read',
+          workspaceId: input.workspaceId,
+        })
+        .then((r) => (r.ok ? r.token : null))
         .catch(() => null));
 
     return (pathRaw: string, signal?: AbortSignal) => {

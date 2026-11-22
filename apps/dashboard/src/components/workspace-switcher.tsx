@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError } from '../lib/api';
 import { useWorkspace } from '../lib/workspace-context';
+import { type FreeWorkspaceUsage, getWorkspaceLimits } from '../lib/workspace-api';
 
 function apiMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -23,6 +24,19 @@ export function WorkspaceSwitcher({ compact = false }: WorkspaceSwitcherProps) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Decision B: free-workspace usage, loaded when the menu opens. */
+  const [limits, setLimits] = useState<FreeWorkspaceUsage | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getWorkspaceLimits()
+      .then((value) => !cancelled && setLimits(value))
+      .catch(() => !cancelled && setLimits(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -77,6 +91,7 @@ export function WorkspaceSwitcher({ compact = false }: WorkspaceSwitcherProps) {
     setError(null);
     try {
       await createWorkspace(name);
+      setLimits(null);
       setName('');
       setCreating(false);
       setOpen(false);
@@ -207,13 +222,31 @@ export function WorkspaceSwitcher({ compact = false }: WorkspaceSwitcherProps) {
             ) : (
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || limits?.canCreate === false}
                 onClick={() => setCreating(true)}
-                className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-ink transition hover:bg-mist"
+                className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-ink transition hover:bg-mist disabled:opacity-50"
               >
                 Create workspace
               </button>
             )}
+            {limits ? (
+              <p className="mt-1 px-1 text-[11px] text-muted-foreground">
+                Free workspaces: {limits.used} of {limits.limit}
+                {limits.canCreate ? null : (
+                  <>
+                    {' '}
+                    — limit reached. A workspace deleted this month still counts until the month
+                    ends.{' '}
+                    <a
+                      href="/app/billing"
+                      className="font-semibold text-accent underline-offset-2 hover:underline"
+                    >
+                      Upgrade a workspace
+                    </a>
+                  </>
+                )}
+              </p>
+            ) : null}
             {error ? (
               <p className="mt-2 px-1 text-xs text-red-600 dark:text-red-400">{error}</p>
             ) : null}

@@ -1,3 +1,4 @@
+import { redactSecretsForAi } from '@project-x/shared';
 import { Injectable, Logger } from '@nestjs/common';
 import { APICallError, generateText, NoObjectGeneratedError, Output, zodSchema } from 'ai';
 import type { PRReviewBatchOutcome, PRReviewCoverage } from '@project-x/types';
@@ -898,7 +899,8 @@ export class PrReviewOrchestrator {
           const response = await generateText({
             model: this.modelFactory.getDefaultModel(),
             instructions: PR_REVIEW_VERIFY_INSTRUCTIONS,
-            messages: [{ role: 'user', content }],
+            // M6 defense in depth: redacted again right before the provider call.
+            messages: [{ role: 'user', content: redactSecretsForAi(content) }],
             maxOutputTokens: limits.verifyOutputTokens,
             timeout: limits.batchTimeoutMs,
             abortSignal: signal,
@@ -1052,7 +1054,8 @@ export class PrReviewOrchestrator {
         const response = await generateText({
           model: this.modelFactory.getDefaultModel(),
           instructions: PR_REVIEW_BATCH_INSTRUCTIONS,
-          messages: [{ role: 'user', content }],
+          // M6 defense in depth: redacted again right before the provider call.
+          messages: [{ role: 'user', content: redactSecretsForAi(content) }],
           maxOutputTokens: limits.maxOutputTokensPerBatch,
           timeout: limits.batchTimeoutMs,
           abortSignal: signal,

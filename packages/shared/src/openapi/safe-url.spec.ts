@@ -147,3 +147,59 @@ describe('browser-safe module', () => {
     expect(source).not.toMatch(/require\(['"]node:net/);
   });
 });
+
+/** F-33: IPv6 literals are classified by address bits in every textual form. */
+describe('IPv6 forms that carry or hide an internal address (F-33)', () => {
+  const blocked = [
+    '::ffff:127.0.0.1',
+    '::ffff:7f00:1', // what `new URL` serializes the line above to
+    '::ffff:a9fe:a9fe', // 169.254.169.254
+    '::ffff:0a00:0005', // 10.0.0.5
+    '0:0:0:0:0:ffff:c0a8:0101', // 192.168.1.1, uncompressed
+    '::ffff:0:7f00:1', // IPv4-translated
+    '::7f00:1', // IPv4-compatible
+    '::127.0.0.1',
+    '64:ff9b::7f00:1', // NAT64 of 127.0.0.1
+    '64:ff9b::10.0.0.1',
+    '64:ff9b:1::1',
+    '2002:7f00:1::1', // 6to4 of 127.0.0.1
+    '2002:c0a8:101::', // 6to4 of 192.168.1.1
+    '2001:0:1::1', // Teredo
+    'fe90::1', // inside fe80::/10
+    'febf::1',
+    'fec0::1',
+    'fc00::1',
+    'fdff::1',
+    'ff02::1',
+    '::',
+    '::1',
+    '0:0:0:0:0:0:0:1',
+    '2001:db8::1',
+  ];
+  const allowed = [
+    '2606:4700:4700::1111',
+    '2a00:1450:4001:81b::200e',
+    '::ffff:8.8.8.8',
+    '::ffff:808:808',
+    '64:ff9b::808:808',
+    '2002:808:808::1',
+  ];
+
+  it.each(blocked)('blocks %s', (ip) => {
+    expect(isPrivateOrReservedIp(ip)).toBe(true);
+    expect(validateOpenApiFetchUrl(`https://[${ip}]/openapi.json`).ok).toBe(false);
+  });
+
+  it.each(allowed)('allows public %s', (ip) => {
+    expect(isPrivateOrReservedIp(ip)).toBe(false);
+  });
+
+  it('the URL parser form of a mapped loopback is refused end to end', () => {
+    const viaParser = new URL('https://[::ffff:127.0.0.1]:8443/').hostname;
+    expect(viaParser).toBe('[::ffff:7f00:1]');
+    expect(validateOpenApiFetchUrl('https://[::ffff:127.0.0.1]:8443/')).toEqual({
+      ok: false,
+      reason: 'private-ip',
+    });
+  });
+});

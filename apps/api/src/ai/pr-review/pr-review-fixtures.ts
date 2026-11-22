@@ -131,5 +131,17 @@ export function usageStub() {
     findReplay: async () => null,
     releaseReservation: async () => true,
     release: async () => true,
+    /**
+     * F-06 / F-07: provider work already ran. Like UsageService within the daily refund
+     * budget: the reservation is released through `releaseReservation`.
+     */
+    async settleAfterProviderWork(
+      this: { releaseReservation: (reservation: unknown) => Promise<boolean> },
+      reservation: unknown,
+      _userId: string,
+    ): Promise<'refunded' | 'charged' | 'missing'> {
+      await this.releaseReservation(reservation);
+      return 'refunded';
+    },
   };
 }

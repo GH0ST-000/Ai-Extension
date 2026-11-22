@@ -1,6 +1,11 @@
 /** Day 25 — Workspace tenancy types */
 
-export type WorkspaceStatus = 'active' | 'suspended' | 'deleted';
+/**
+ * `deletion_pending`: an owner asked to delete the workspace and it is no longer usable, but
+ * the billing provider has not yet confirmed the subscription cancellation (retrying the
+ * deletion completes it). `deleted`: deletion completed; data is retained (soft delete).
+ */
+export type WorkspaceStatus = 'active' | 'suspended' | 'deletion_pending' | 'deleted';
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
 
@@ -62,6 +67,15 @@ export interface WorkspaceInvitation {
   createdAt: string;
   /** Present only when creating — plaintext token for invite URL. Never stored. */
   token?: string;
+}
+
+/**
+ * M3: result of accepting an invitation. `alreadyMember: true` means the user already had an
+ * active membership: nothing was changed (an invitation never changes an existing role) and
+ * the invitation was retired.
+ */
+export interface AcceptWorkspaceInvitationResponse extends WorkspaceMembership {
+  alreadyMember: boolean;
 }
 
 export interface WorkspaceMemberView {
@@ -274,6 +288,10 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_INVITATION_INVALID'
   | 'WORKSPACE_INVITATION_EXPIRED'
   | 'WORKSPACE_INVITATION_ALREADY_USED'
+  | 'WORKSPACE_INVITATION_NOT_FOUND'
+  | 'EMAIL_NOT_VERIFIED'
+  /** Decision 1: free AI quota needs a verified email (actor and workspace owner). */
+  | 'EMAIL_VERIFICATION_REQUIRED'
   | 'WORKSPACE_MEMBER_LIMIT_REACHED'
   | 'WORKSPACE_RESOURCE_ACCESS_DENIED'
   | 'FEATURE_NOT_AVAILABLE'
@@ -285,6 +303,7 @@ export type WorkspaceErrorCode =
   | 'BILLING_PROVIDER_UNAVAILABLE'
   | 'BILLING_CONFIGURATION_INVALID'
   | 'BILLING_CHECKOUT_FAILED'
+  | 'BILLING_CANCELLATION_FAILED'
   | 'BILLING_SUBSCRIPTION_UPDATE_FAILED'
   | 'BILLING_WEBHOOK_INVALID'
   | 'BILLING_WEBHOOK_DUPLICATE'

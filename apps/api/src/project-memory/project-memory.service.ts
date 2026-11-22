@@ -101,6 +101,13 @@ const HIGH_SIGNAL_PATHS: readonly string[] = [
 const ENV_PATH_RE = /(?:^|\/)\.env(?:\..+)?$/i;
 
 type PersistInput = {
+  /**
+   * F-04: the workspace `authorize()` resolved AND checked for this operation. Persisting
+   * never resolves the workspace again — the header-less fallback reads the caller's mutable
+   * `lastWorkspaceId`, so a second resolution could name a workspace the permission was never
+   * checked against.
+   */
+  workspaceId: string;
   userId: string;
   owner: string;
   repository: string;
@@ -355,7 +362,7 @@ export class ProjectMemoryService {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
     // Personal preferences are visible only to their author; anything else becomes part
     // of every member's AI context, so it needs memory:manage.
-    await this.authorize(
+    const workspaceId = await this.authorize(
       userId,
       body.category === ProjectMemoryCategory.USER_PREFERENCE ? 'memory:read' : 'memory:manage',
     );
@@ -387,6 +394,7 @@ export class ProjectMemoryService {
 
     const result = await this.persistMemory({
       explicitRule: true,
+      workspaceId,
       userId,
       owner,
       repository,
@@ -715,8 +723,8 @@ export class ProjectMemoryService {
     repositoryRaw: string,
   ): Promise<LearnProjectMemoryResponse> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    // Learned facts are stored workspace-wide.
-    await this.authorize(userId, 'memory:manage');
+    // Learned facts are stored workspace-wide. F-04: this one resolution is used throughout.
+    const workspaceId = await this.authorize(userId, 'memory:manage');
     await this.assertRepositoryAccess(userId, owner, repository);
 
     const files = await this.fetchHighSignalFiles(userId, owner, repository);
@@ -735,7 +743,6 @@ export class ProjectMemoryService {
     const supersededIds: string[] = [];
     /** Keys of facts not re-added because the workspace disputed exactly that fact. */
     const disputedSkipped: string[] = [];
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
 
     for (const candidate of candidates) {
       if (candidate.recommendation === 'do_not_store') {
@@ -763,7 +770,7 @@ export class ProjectMemoryService {
           }
           throw err;
         }
-        const stored = await this.storeCandidate(userId, owner, repository, candidate);
+        const stored = await this.storeCandidate(workspaceId, userId, owner, repository, candidate);
         askUser.push(stored);
         continue;
       }
@@ -784,6 +791,7 @@ export class ProjectMemoryService {
 
       try {
         const row = await this.persistMemory({
+          workspaceId,
           userId,
           owner,
           repository,
@@ -818,7 +826,7 @@ export class ProjectMemoryService {
             // The repository now shows a different value in a disputed slot: ask, never
             // auto-activate. Confirming uses the existing candidate approval flow.
             askUser.push(
-              await this.storeCandidate(userId, owner, repository, {
+              await this.storeCandidate(workspaceId, userId, owner, repository, {
                 ...candidate,
                 recommendation: 'ask_user',
                 reason:
@@ -855,10 +863,10 @@ export class ProjectMemoryService {
     candidateId: string,
   ): Promise<ProjectMemoryItem> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    await this.authorize(userId, 'memory:manage');
+    const workspaceId = await this.authorize(userId, 'memory:manage');
     await this.assertRepositoryAccess(userId, owner, repository);
 
-    const candidate = await this.loadCandidate(userId, owner, repository, candidateId);
+    const candidate = await this.loadCandidate(workspaceId, userId, owner, repository, candidateId);
     if (!candidate) {
       throw projectMemoryException(
         'PROJECT_MEMORY_CANDIDATE_INVALID',
@@ -878,6 +886,7 @@ export class ProjectMemoryService {
     ];
 
     const row = await this.persistMemory({
+      workspaceId,
       userId,
       owner,
       repository,
@@ -892,7 +901,7 @@ export class ProjectMemoryService {
       audit: { actorType: 'user', reason: 'candidate_confirmed' },
     });
 
-    await this.deleteCandidate(userId, owner, repository, candidateId);
+    await this.deleteCandidate(workspaceId, userId, owner, repository, candidateId);
     return toProjectMemoryItem(row);
   }
 
@@ -903,10 +912,10 @@ export class ProjectMemoryService {
     candidateId: string,
   ): Promise<{ rejected: true; candidateId: string }> {
     const { owner, repository } = this.normalizeRepo(ownerRaw, repositoryRaw);
-    await this.authorize(userId, 'memory:read');
+    const workspaceId = await this.authorize(userId, 'memory:read');
     await this.assertRepositoryAccess(userId, owner, repository);
 
-    const candidate = await this.loadCandidate(userId, owner, repository, candidateId);
+    const candidate = await this.loadCandidate(workspaceId, userId, owner, repository, candidateId);
     if (!candidate) {
       throw projectMemoryException(
         'PROJECT_MEMORY_CANDIDATE_INVALID',
@@ -914,7 +923,7 @@ export class ProjectMemoryService {
       );
     }
 
-    await this.deleteCandidate(userId, owner, repository, candidateId);
+    await this.deleteCandidate(workspaceId, userId, owner, repository, candidateId);
     return { rejected: true, candidateId };
   }
 
@@ -941,7 +950,7 @@ export class ProjectMemoryService {
       case 'github_not_connected':
         throw projectMemoryException(
           'PROJECT_MEMORY_ACCESS_DENIED',
-          'This action needs GitHub access to the repository. Connect a GitHub token in dashboard Settings before using project memory, or ask a workspace Owner to install the Project X GitHub App with access to this repository.',
+          'This action needs GitHub access to the repository. Connect your own GitHub token in dashboard Settings — Project X uses it to confirm your access to this repository, also when the workspace uses the Project X GitHub App.',
         );
       case 'repository_access_denied':
         throw projectMemoryException(
@@ -984,10 +993,23 @@ export class ProjectMemoryService {
           | 'github_unavailable';
       }
   > {
-    const token = await this.githubAccess.getDecryptedToken(userId);
-    if (!token) {
-      return { ok: false, reason: 'github_not_connected' };
+    // H1: the acting user's own read access is verified before an App token is used.
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner,
+      repository,
+      access: 'read',
+    });
+    if (!resolved.ok) {
+      if (resolved.reason === 'not_connected' || resolved.reason === 'identity_required') {
+        return { ok: false, reason: 'github_not_connected' };
+      }
+      return {
+        ok: false,
+        reason:
+          resolved.reason === 'unavailable' ? 'github_unavailable' : 'repository_access_denied',
+      };
     }
+    const token = resolved.token;
 
     const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
     let response: Response;
@@ -1188,12 +1210,19 @@ export class ProjectMemoryService {
     }
 
     const version = computeMemoryVersion(items);
+    // Removing `<<` / `>>` can create a new pair from what surrounded it
+    // (`<>></PROJECT_MEMORY><<>` → `<</PROJECT_MEMORY>>`), so repeat until none is left: rule
+    // text can never contain the block's own delimiters.
+    const stripDelimiters = (text: string) => {
+      let out = text;
+      for (let previous = ''; previous !== out;) {
+        previous = out;
+        out = out.replace(/<<|>>/g, '');
+      }
+      return out;
+    };
     const clean = (text: string) =>
-      text
-        .replace(/<<|>>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, PROJECT_MEMORY_MAX_SUMMARY_CHARS);
+      stripDelimiters(text).replace(/\s+/g, ' ').trim().slice(0, PROJECT_MEMORY_MAX_SUMMARY_CHARS);
     const lines = [
       `<<PROJECT_MEMORY source="server" version="${version}">>`,
       'Rules saved by this workspace for this repository. Apply them as project context.',
@@ -1392,7 +1421,7 @@ export class ProjectMemoryService {
   private async persistMemory(input: PersistInput): Promise<ProjectMemoryRow> {
     const fp = scopeFingerprint(input.scope);
     const valueSummary = input.value.summary.trim();
-    const workspaceId = await resolveWorkspaceIdForUser(this.prisma, input.userId);
+    const workspaceId = input.workspaceId;
     const visibility = input.category === 'USER_PREFERENCE' ? 'user' : 'workspace';
     const actor = this.auditActor(input.userId, input.audit.actorType);
 
@@ -1609,16 +1638,22 @@ export class ProjectMemoryService {
     return entries.slice(0, PROJECT_MEMORY_MAX_PROVENANCE_ENTRIES);
   }
 
+  /**
+   * Candidates are scoped to the workspace they were learned in: one learned under workspace
+   * A cannot be confirmed (or rejected) while acting in workspace B.
+   */
   private candidateRedisKey(
+    workspaceId: string,
     userId: string,
     owner: string,
     repository: string,
     candidateId: string,
   ): string {
-    return `pm:cand:${userId}:${owner}:${repository}:${candidateId}`;
+    return `pm:cand:${workspaceId}:${userId}:${owner}:${repository}:${candidateId}`;
   }
 
   private async storeCandidate(
+    workspaceId: string,
     userId: string,
     owner: string,
     repository: string,
@@ -1627,7 +1662,7 @@ export class ProjectMemoryService {
     const id = candidate.id?.trim() || randomUUID();
     const stored: ProjectMemoryCandidate = { ...candidate, id };
     await this.redis.set(
-      this.candidateRedisKey(userId, owner, repository, id),
+      this.candidateRedisKey(workspaceId, userId, owner, repository, id),
       JSON.stringify(stored),
       'EX',
       CANDIDATE_TTL_SECONDS,
@@ -1636,13 +1671,14 @@ export class ProjectMemoryService {
   }
 
   private async loadCandidate(
+    workspaceId: string,
     userId: string,
     owner: string,
     repository: string,
     candidateId: string,
   ): Promise<ProjectMemoryCandidate | null> {
     const raw = await this.redis.get(
-      this.candidateRedisKey(userId, owner, repository, candidateId),
+      this.candidateRedisKey(workspaceId, userId, owner, repository, candidateId),
     );
     if (!raw) return null;
     try {
@@ -1655,12 +1691,15 @@ export class ProjectMemoryService {
   }
 
   private async deleteCandidate(
+    workspaceId: string,
     userId: string,
     owner: string,
     repository: string,
     candidateId: string,
   ): Promise<void> {
-    await this.redis.del(this.candidateRedisKey(userId, owner, repository, candidateId));
+    await this.redis.del(
+      this.candidateRedisKey(workspaceId, userId, owner, repository, candidateId),
+    );
   }
 
   private async fetchHighSignalFiles(

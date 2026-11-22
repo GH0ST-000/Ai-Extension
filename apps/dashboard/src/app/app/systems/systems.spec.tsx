@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type RefreshSystemResponse } from '../../../lib/api';
 
 // ── dependencies ─────────────────────────────────────────────────────────────
+/** Granted permissions (M4); Owners/Admins by default. */
+let workspacePermissions = new Set<string>(['systems:read', 'systems:manage']);
 const { workspace, toast, api } = vi.hoisted(() => ({
   workspace: {
     ready: true,
@@ -12,6 +14,7 @@ const { workspace, toast, api } = vi.hoisted(() => ({
     workspaceRevision: 1,
     current: null as unknown,
     refresh: vi.fn(),
+    hasPermission: (permission: string) => workspacePermissions.has(permission),
   },
   toast: { success: vi.fn(), apiError: vi.fn() },
   api: {
@@ -99,6 +102,7 @@ function deferred<T>() {
 beforeEach(() => {
   workspace.workspaceRevision = 1;
   workspace.current = null;
+  workspacePermissions = new Set(['systems:read', 'systems:manage']);
   workspace.refresh.mockReset().mockResolvedValue(undefined);
   Object.values(api).forEach((fn) => fn.mockReset());
   toast.success.mockReset();
@@ -660,5 +664,48 @@ describe('review fixes', () => {
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
+  });
+});
+
+describe('M4 — Members (systems:read without systems:manage)', () => {
+  beforeEach(() => {
+    workspacePermissions = new Set(['systems:read']);
+    api.listSystems.mockResolvedValue([system('sys_a', 'Checkout', ['payments-api'])]);
+  });
+
+  it('read-only: no create, settings, add, role change or remove; analysis stays available', async () => {
+    await renderLoaded();
+    expect(screen.queryByRole('button', { name: 'Create system' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'System settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add repository' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remove .* from system/ })).toBeNull();
+    expect(screen.queryByLabelText('Role')).toBeNull();
+    for (const toggle of screen.getAllByRole('switch')) {
+      expect((toggle as HTMLInputElement).disabled).toBe(true);
+    }
+    // Discover / Refresh remain (product decision: systems:read).
+    expect((cardButton('Discover relationships') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText('payments-api', { exact: false })).toBeTruthy();
+  });
+
+  it('suggestions cannot be added to the system', async () => {
+    api.discoverRelationships.mockResolvedValue({
+      systemId: 'sys_a',
+      relationships: [],
+      candidates: [candidate('ledger')],
+      truncated: false,
+    });
+    await renderLoaded();
+    fireEvent.click(cardButton('Discover relationships'));
+    expect(await screen.findByText('acme/ledger', { exact: false })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Add acme\/ledger to system/ })).toBeNull();
+  });
+
+  it('no systems: explains who can create one instead of offering the action', async () => {
+    api.listSystems.mockResolvedValue([]);
+    render(<SystemsPage />);
+    expect(await screen.findByRole('heading', { name: 'No systems yet' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Create system' })).toBeNull();
+    expect(screen.getByText(/created by workspace Owners and Admins/)).toBeTruthy();
   });
 });

@@ -2,13 +2,16 @@ import { UnprocessableEntityException } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PR_DIFF_MAX_PAGES, PullRequestDiffService } from './pull-request-diff.service';
+import { repositoryAccessStub } from '../../github-app/github-access.test-helpers';
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers });
 
 describe('PullRequestDiffService', () => {
   const resolveApiToken = vi.fn();
-  const service = new PullRequestDiffService({ resolveApiToken } as never);
+  const service = new PullRequestDiffService(
+    repositoryAccessStub({}, () => resolveApiToken()) as never,
+  );
   const fetchMock = vi.fn();
   const originalFetch = global.fetch;
   const base = { userId: 'u1', workspaceId: 'ws1', owner: 'GH0ST-000', repository: 'Ai-Extension' };

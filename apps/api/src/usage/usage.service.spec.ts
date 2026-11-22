@@ -18,9 +18,12 @@ describe('UsageService', () => {
       create: vi.fn(),
       updateMany: vi.fn(),
     },
+    user: { findUnique: vi.fn() },
+    workspaceMembership: { findMany: vi.fn() },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
   };
+  const VERIFIED = { emailVerifiedAt: new Date('2026-11-01T00:00:00Z') };
 
   const entitlements = {
     getEntitlements: vi.fn(),
@@ -41,7 +44,81 @@ describe('UsageService', () => {
       fn(prisma),
     );
     prisma.workspaceUsageEvent.findMany.mockResolvedValue([]);
+    // Decision 1: verified actor and owner unless a test says otherwise.
+    prisma.user.findUnique.mockResolvedValue(VERIFIED);
+    prisma.workspaceMembership.findMany.mockResolvedValue([{ user: VERIFIED }]);
     service = new UsageService(prisma as never, entitlements as never);
+  });
+
+  describe('Decision 1: free AI requires verified email', () => {
+    const reserveAi = (
+      metric: 'ai_action' | 'workflow_run' | 'multi_repo_analysis' = 'ai_action',
+    ) => service.reserve({ workspaceId: 'ws_1', userId: 'u1', metric, operationId: 'op-1' });
+    const errorOf = async (p: Promise<unknown>) => {
+      const error = (await p.catch((e: unknown) => e)) as HttpException;
+      return { status: error.getStatus(), body: error.getResponse() as Record<string, unknown> };
+    };
+
+    it('unverified actor on the free plan: 403 before any quota write', async () => {
+      prisma.user.findUnique.mockResolvedValue({ emailVerifiedAt: null });
+      for (const metric of ['ai_action', 'workflow_run'] as const) {
+        const { status, body } = await errorOf(reserveAi(metric));
+        expect(status).toBe(403);
+        expect(body).toMatchObject({
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+          details: { reason: 'account' },
+        });
+      }
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.workspaceUsageCounter.updateMany).not.toHaveBeenCalled();
+      expect(prisma.workspaceUsageEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('unverified (or missing) workspace owner: refused without naming the owner', async () => {
+      prisma.workspaceMembership.findMany.mockResolvedValue([{ user: { emailVerifiedAt: null } }]);
+      const { body } = await errorOf(reserveAi());
+      expect(body).toMatchObject({
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+        details: { reason: 'workspace_owner' },
+      });
+      expect(JSON.stringify(body)).not.toMatch(/@/);
+      prisma.workspaceMembership.findMany.mockResolvedValue([]);
+      expect((await errorOf(reserveAi())).body).toMatchObject({
+        details: { reason: 'workspace_owner' },
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('paid plans are unchanged (no verification lookup); deterministic metrics are not gated', async () => {
+      prisma.user.findUnique.mockResolvedValue({ emailVerifiedAt: null });
+      prisma.workspaceUsageCounter.updateMany.mockResolvedValue({ count: 1 });
+      prisma.workspaceUsageCounter.findUnique.mockResolvedValue({ count: 1 });
+      prisma.workspaceUsageEvent.create.mockResolvedValue({});
+      for (const plan of ['pro', 'team'] as const) {
+        entitlements.getPlanId.mockResolvedValue(plan);
+        await expect(reserveAi()).resolves.toMatchObject({ workspaceId: 'ws_1' });
+      }
+      entitlements.getPlanId.mockResolvedValue('free');
+      entitlements.getEntitlements.mockResolvedValue({
+        monthlyAiActions: 2,
+        monthlyWorkflowRuns: 10,
+        monthlyMultiRepoAnalyses: 5,
+      });
+      await expect(reserveAi('multi_repo_analysis')).resolves.toMatchObject({
+        workspaceId: 'ws_1',
+      });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('verification status is read fresh on every reservation (verifying unlocks at once)', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ emailVerifiedAt: null });
+      expect((await errorOf(reserveAi())).status).toBe(403);
+      prisma.workspaceUsageCounter.updateMany.mockResolvedValue({ count: 1 });
+      prisma.workspaceUsageCounter.findUnique.mockResolvedValue({ count: 1 });
+      prisma.workspaceUsageEvent.create.mockResolvedValue({});
+      await expect(reserveAi()).resolves.toMatchObject({ workspaceId: 'ws_1' });
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('atomically consumes usage and increments the counter', async () => {

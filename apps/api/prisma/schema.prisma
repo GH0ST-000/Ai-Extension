@@ -28,6 +28,8 @@ model User {
   name           String?
   /** Incremented on logout to invalidate previously issued JWTs. */
   sessionVersion Int           @default(0) @map("session_version")
+  /// Decision A: when the user proved control of `email` (verification link). Null = unverified.
+  emailVerifiedAt DateTime?    @map("email_verified_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
   settings       UserSettings?
@@ -50,6 +52,7 @@ model User {
   prReviewReports  PrReviewReport[]
   projectMemoryAuditEvents ProjectMemoryAuditEvent[]
   passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
   marketingConsentEvents MarketingConsentEvent[]
   acquisition      UserAcquisition?
 
@@ -153,6 +156,9 @@ model Workspace {
   name             String
   slug             String   @unique
   status           String   @default("active")
+  /// Decision B: whether the workspace was on the FREE plan when its deletion started (a
+  /// deleted free workspace keeps its creator's free slot until the usage period ends).
+  deletedOnFreePlan Boolean? @map("deleted_on_free_plan")
   createdByUserId  String?  @map("created_by_user_id")
   createdByUser    User?    @relation("WorkspaceCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now()) @map("created_at")
@@ -174,9 +180,87 @@ model Workspace {
   githubAppInstallation GitHubAppInstallation?
   prReviewReports  PrReviewReport[]
   projectMemoryAuditEvents ProjectMemoryAuditEvent[]
+  billingCancellationRequests BillingCancellationRequest[]
+  billingCheckouts BillingCheckout[]
 
   @@index([status])
   @@map("workspaces")
+}
+
+/// F-02 / F-23: a checkout this server started for a workspace. Its id is an unguessable value
+/// sent to the provider as custom_data.checkoutId; a subscription webhook is applied to a
+/// workspace only when it carries the id of one of that workspace's checkouts (or concerns the
+/// subscription the workspace already has). `providerSubscriptionId` records the subscription
+/// that came out of the checkout — also one that could NOT become the workspace's subscription
+/// because another one was still billable (status `conflict`), so it is never lost track of.
+model BillingCheckout {
+  /// chk_<32 hex> — the binding secret (never returned to clients, never logged).
+  id                     String    @id
+  workspaceId            String    @map("workspace_id")
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  planId                 String    @map("plan_id")
+  billingCycle           String    @map("billing_cycle")
+  providerTransactionId  String?   @map("provider_transaction_id")
+  checkoutUrl            String?   @map("checkout_url") @db.Text
+  providerSubscriptionId String?   @unique @map("provider_subscription_id")
+  /// pending | completed | conflict
+  status                 String    @default("pending")
+  /// Last provider status seen for `providerSubscriptionId` (conflict tracking).
+  subscriptionStatus     String?   @map("subscription_status")
+  createdByUserId        String?   @map("created_by_user_id")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status, createdAt])
+  @@map("billing_checkouts")
+}
+
+/// N-2/N-3/N-12: durable record of a provider subscription that MUST be cancelled because its
+/// workspace is being (or has been) deleted. Written in the same transaction that decides it
+/// (deletion start, or a webhook for a pending/deleted workspace); processed outside any
+/// transaction and retried with backoff until the provider confirms a non-billable state.
+model BillingCancellationRequest {
+  id                     String    @id @default(cuid())
+  workspaceId            String    @map("workspace_id")
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  providerSubscriptionId String    @unique @map("provider_subscription_id")
+  /// workspace_deletion | late_webhook
+  reason                 String
+  /// pending | processing (claimed; lease end in nextAttemptAt) | done
+  status                 String    @default("pending")
+  attempts               Int       @default(0)
+  /// F-03: consecutive attempts in which the provider CONFIRMED the subscription does not
+  /// exist. Reset by any other outcome; only this streak can close a request as not found.
+  notFoundCount          Int       @default(0) @map("not_found_count")
+  lastErrorCode          String?   @map("last_error_code")
+  nextAttemptAt          DateTime  @default(now()) @map("next_attempt_at")
+  completedAt            DateTime? @map("completed_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, status])
+  @@map("billing_cancellation_requests")
+}
+
+/// N-18: durable security audit trail (safe metadata only — never tokens, diffs, patch or
+/// file contents, prompts). Mirrors SecurityAuditEvent from @project-x/types.
+model SecurityAuditEventRecord {
+  id              String   @id
+  type            String
+  outcome         String
+  workspaceId     String?  @map("workspace_id")
+  actorUserIdHash String?  @map("actor_user_id_hash")
+  requestId       String?  @map("request_id")
+  detail          String?
+  service         String
+  release         String
+  environment     String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@index([type, createdAt])
+  @@map("security_audit_events")
 }
 
 /**
@@ -714,6 +798,23 @@ model ProjectMemoryAuditEvent {
  * stored (never the token). Valid for 30 minutes; consumed atomically (used_at) together with
  * the password change and session revocation. Rows are removed with the user.
  */
+/// Decision A: single-use email verification links (only the SHA-256 of the token is stored).
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The address the link was sent to; verification only succeeds while it is the user's email.
+  email     String
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
+}
+
 model PasswordResetToken {
   id        String    @id @default(cuid())
   userId    String    @map("user_id")

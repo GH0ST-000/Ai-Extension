@@ -11,6 +11,7 @@ import {
   type DiffLine,
 } from './diff-hunks';
 import type { PlannedBatch } from './pr-review-plan';
+import { pathAsShownInPrompt } from './pr-review-prompt-path';
 
 export const FINDING_CATEGORIES = [
   'security',
@@ -339,10 +340,17 @@ export function validateBatchFindings(
   promptTransform: (text: string) => string = (t) => t,
 ): BatchValidation {
   const linesByPath = new Map<string, DiffLine[]>();
+  // The prompt shows each path as `promptTransform` + delimiter neutralization rendered it
+  // (F-20), so the model may cite that form. Both spellings resolve to the real path: a file
+  // whose NAME contains prompt delimiters or control characters must not have every finding
+  // on it rejected as "not in this batch" (that would be a way to exempt a file from review).
+  const promptPathToPath = new Map<string, string>();
   for (const unit of batch.units) {
     const list = linesByPath.get(unit.path) ?? [];
     list.push(...unit.chunk.lines.map((line) => ({ ...line, text: promptTransform(line.text) })));
     linesByPath.set(unit.path, list);
+    const shown = normalizePath(pathAsShownInPrompt(unit.path));
+    if (shown !== unit.path && !promptPathToPath.has(shown)) promptPathToPath.set(shown, unit.path);
   }
 
   const rejectedByReason: Partial<Record<RejectionReason, number>> = {};
@@ -359,7 +367,8 @@ export function validateBatchFindings(
       reject('over_limit');
       return;
     }
-    const path = normalizePath(raw.path);
+    const cited = normalizePath(raw.path);
+    const path = linesByPath.has(cited) ? cited : (promptPathToPath.get(cited) ?? cited);
     const lines = linesByPath.get(path);
     if (!lines) {
       reject('path_not_in_batch');

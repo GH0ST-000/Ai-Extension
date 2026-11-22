@@ -33,7 +33,7 @@ Document and review the allowlist on every new integration or region change.
 
 For **remote** Postgres and Redis (non-localhost):
 
-- **Postgres:** set `DATABASE_SSL=true` or include `sslmode=require` (or `verify-full`) in `DATABASE_URL`.
+- **Postgres:** set `DATABASE_SSL=true` (applied to the connection the API opens) or include `sslmode=require` in `DATABASE_URL`; `prefer`, `allow` and `disable` are refused for remote hosts. Add `sslaccept=strict` to verify the server certificate.
 - **Redis:** set `REDIS_TLS=true` for managed Redis endpoints.
 
 Production startup **fail-closed** checks (`collectProductionSecurityIssues`) reject remote database/Redis hosts without TLS configuration. Local development may omit TLS for Docker Compose services.

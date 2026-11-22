@@ -69,7 +69,10 @@ export default function SystemsPage() {
     workspaceRevision,
     current: workspaceContext,
     refresh: refreshWorkspace,
+    hasPermission,
   } = useWorkspace();
+  /** M4: management UI only with systems:manage (Owners/Admins). The API enforces it too. */
+  const canManage = hasPermission('systems:manage');
   const usage = analysisUsage(workspaceContext?.usage);
   /** Plan without Systems (known from the workspace bootstrap; the API still enforces it). */
   const featureMissing = workspaceContext?.entitlements.multiRepoIntelligence === false;
@@ -434,7 +437,7 @@ export default function SystemsPage() {
             services.
           </p>
         </div>
-        {systems && systems.length > 0 ? (
+        {systems && systems.length > 0 && canManage ? (
           <button
             type="button"
             disabled={operation !== null || featureMissing}
@@ -485,17 +488,23 @@ export default function SystemsPage() {
   } else if (systems.length === 0 || !selected) {
     body = (
       <EmptyState
-        title="Create your first system"
-        description="Pick a primary repository — usually the main app or service — then add the repositories it depends on. Project X can then find dependencies between them. Nothing changes in GitHub."
+        title={canManage ? 'Create your first system' : 'No systems yet'}
+        description={
+          canManage
+            ? 'Pick a primary repository — usually the main app or service — then add the repositories it depends on. Project X can then find dependencies between them. Nothing changes in GitHub.'
+            : 'Systems are created by workspace Owners and Admins. Once one exists, you can explore it and discover dependencies here.'
+        }
         action={
-          <button
-            type="button"
-            disabled={featureMissing}
-            onClick={() => setDialog('create')}
-            className={BUTTON_PRIMARY}
-          >
-            Create system
-          </button>
+          canManage ? (
+            <button
+              type="button"
+              disabled={featureMissing}
+              onClick={() => setDialog('create')}
+              className={BUTTON_PRIMARY}
+            >
+              Create system
+            </button>
+          ) : undefined
         }
       />
     );
@@ -513,6 +522,7 @@ export default function SystemsPage() {
           onRefresh={() => void onRefresh()}
           onDiscover={() => void onDiscover()}
           onOpenSettings={() => setDialog('settings')}
+          canManage={canManage}
         />
         <AnalysisResult
           state={analysis}
@@ -521,7 +531,7 @@ export default function SystemsPage() {
               ? onDiscover()
               : onRefresh())
           }
-          onAddRepository={() => setDialog('add')}
+          {...(canManage ? { onAddRepository: () => setDialog('add') } : {})}
           onDismiss={() => setAnalysis({ status: 'idle' })}
         />
         <SystemOverview
@@ -534,6 +544,7 @@ export default function SystemsPage() {
         <RepositoryList
           system={selected}
           operation={operation}
+          canManage={canManage}
           onAdd={() => setDialog('add')}
           onToggleEnabled={(ref) =>
             void onUpdateRepository(
@@ -569,6 +580,7 @@ export default function SystemsPage() {
             candidates={visibleCandidates ?? []}
             analyzed={visibleCandidates !== null}
             operation={operation}
+            canManage={canManage}
             onAccept={(c) => void onAcceptCandidate(c)}
             onDismiss={onDismissCandidate}
             onRefresh={() => void onRefresh()}

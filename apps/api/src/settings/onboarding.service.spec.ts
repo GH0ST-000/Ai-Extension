@@ -131,7 +131,9 @@ describe('OnboardingService', () => {
           findFirst: vi.fn(
             async ({ where }: { where: { userId: string; workspaceId?: string } }) => {
               const ws = where.workspaceId;
-              return ws && memberships[ws]?.includes(where.userId) ? { workspaceId: ws } : null;
+              return ws && memberships[ws]?.includes(where.userId)
+                ? { workspaceId: ws, role: 'member' }
+                : null;
             },
           ),
         },

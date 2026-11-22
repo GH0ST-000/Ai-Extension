@@ -176,9 +176,25 @@ describe.skipIf(!URL_ENV)('GitHub App installation linking with ownership verifi
       { get: () => ({ workspaceId: ws }) } as never,
       appTokens as never,
       installations,
-      { getDecryptedToken: async () => pat } as never,
+      {
+        getDecryptedToken: async () => pat,
+      } as never,
     );
-  const tokenFor = (w: { ws: string; user: string }) => access(w.ws).resolveApiToken(w.user, w.ws);
+  /**
+   * Whether this workspace's link yields an installation token at all (active + ownership
+   * verified). Per-user repository authorization on top of it (H1) is covered by
+   * github-repository-authorization.pg.spec.ts.
+   */
+  const tokenFor = async (w: { ws: string; user: string }) => {
+    if (!appTokens.isAppAuthEnabled()) return null;
+    const installationId = await installations.getActiveInstallationId(w.ws);
+    return installationId
+      ? {
+          token: await appTokens.mintInstallationAccessToken(installationId),
+          source: 'installation' as const,
+        }
+      : null;
+  };
   const rowFor = (installationId: string) =>
     prisma.gitHubAppInstallation.findUnique({ where: { installationId } });
   const verifyStateFrom = (authorizeUrl: string) =>
@@ -481,10 +497,14 @@ describe.skipIf(!URL_ENV)('GitHub App installation linking with ownership verifi
     });
     expect(await tokenFor(w)).toBeNull();
     // A user's own personal token still works as before.
-    expect(await access(w.ws, 'ghp_personal').resolveApiToken(w.user, w.ws)).toEqual({
-      token: 'ghp_personal',
-      source: 'pat',
-    });
+    expect(
+      await access(w.ws, 'ghp_personal').resolveRepositoryAccess(w.user, {
+        owner: 'acme',
+        repository: 'app',
+        access: 'read',
+        workspaceId: w.ws,
+      }),
+    ).toMatchObject({ ok: true, token: 'ghp_personal', source: 'pat' });
   });
 
   it('webhook refresh keeps verified ownership; suspend, remove and disable revoke access', async () => {
@@ -510,5 +530,70 @@ describe.skipIf(!URL_ENV)('GitHub App installation linking with ownership verifi
 
     await installations.markInstallationRemoved(id);
     expect(await tokenFor(w)).toBeNull();
+    // Adversarial N7: a (late or replayed) "unsuspend" never revives a removed installation.
+    await installations.markInstallationSuspended(id, false);
+    expect((await rowFor(id))?.status).toBe('removed');
+    expect(await tokenFor(w)).toBeNull();
+  });
+  // F-18: a workspace role must not trigger an organization-wide uninstall on GitHub.
+  it('[F-18] disconnecting unlinks the workspace only: no GitHub request, token revoked, access gone', async () => {
+    const me = ghUser('me');
+    const id = personalInstallation(me);
+    const w = await workspaceWith('owner');
+    await link(w, id, me);
+    expect(await tokenFor(w)).toMatchObject({ source: 'installation' });
+
+    const calls = vi.mocked(globalThis.fetch).mock.calls.length;
+    await installations.disconnectWorkspace(w.ws);
+
+    const after = vi.mocked(globalThis.fetch).mock.calls.slice(calls);
+    // Nothing was sent to GitHub at all — in particular no DELETE /app/installations/{id}.
+    expect(after.filter((c) => String(c[0]).includes('api.github.com'))).toEqual([]);
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === 'DELETE'),
+    ).toBe(false);
+    expect((await rowFor(id))?.status).toBe('removed');
+    expect(revoked).toContain(id);
+    expect(await tokenFor(w)).toBeNull();
+  });
+
+  it('[F-18] the same holds for a link without a verified ownership proof and for a repeated disconnect', async () => {
+    const w = await workspaceWith('owner');
+    const installationId = `9${Date.now()}`;
+    await prisma.gitHubAppInstallation.create({
+      data: {
+        workspaceId: w.ws,
+        installationId,
+        accountLogin: 'someone-elses-org',
+        accountType: 'Organization',
+        status: 'active',
+      },
+    });
+    await installations.disconnectWorkspace(w.ws);
+    await installations.disconnectWorkspace(w.ws);
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter((c) => String(c[0]).includes('/app/installations/')),
+    ).toEqual([]);
+    expect((await rowFor(installationId))?.status).toBe('removed');
+  });
+
+  it('[F-18] after a disconnect the installation can be linked to another workspace (by a verified owner), not while it is still linked', async () => {
+    const me = ghUser('me');
+    const id = personalInstallation(me);
+    const first = await workspaceWith('owner');
+    const second = await workspaceWith('owner');
+    await link(first, id, me);
+    // Still linked to the first workspace: refused.
+    await expect(link(second, id, me)).rejects.toThrow(/already|linked|another workspace/i);
+
+    await installations.disconnectWorkspace(first.ws);
+    await link(second, id, me);
+    expect(await tokenFor(second)).toMatchObject({ source: 'installation' });
+    expect(await tokenFor(first)).toBeNull();
+    expect(await prisma.gitHubAppInstallation.count({ where: { installationId: id } })).toBe(1);
   });
 });

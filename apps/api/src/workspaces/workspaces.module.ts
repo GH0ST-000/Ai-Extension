@@ -7,20 +7,31 @@ import { UsageModule } from '../usage/usage.module';
 import { WorkspaceInvitationsService } from './invitations.service';
 import { WorkspaceMembersService } from './members.service';
 import { WorkspaceAuthorizationService } from './workspace-authorization.service';
+import { ResolvedWorkspacePermissionGuard } from './resolved-workspace-permission.guard';
 import { WorkspaceGuard } from './workspace.guard';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspacesService } from './workspaces.service';
+import { WorkspaceDeletionService } from './workspace-deletion.service';
+import { DeletionReconcilerService } from './deletion-reconciler.service';
 
 @Module({
   imports: [AuthModule, EntitlementsModule, UsageModule, BillingModule],
   controllers: [WorkspacesController],
   providers: [
     WorkspacesService,
+    WorkspaceDeletionService,
+    DeletionReconcilerService,
     WorkspaceAuthorizationService,
     WorkspaceGuard,
+    ResolvedWorkspacePermissionGuard,
     WorkspaceMembersService,
     WorkspaceInvitationsService,
   ],
-  exports: [WorkspacesService, WorkspaceAuthorizationService, WorkspaceGuard],
+  exports: [
+    WorkspacesService,
+    WorkspaceAuthorizationService,
+    WorkspaceGuard,
+    ResolvedWorkspacePermissionGuard,
+  ],
 })
 export class WorkspacesModule {}

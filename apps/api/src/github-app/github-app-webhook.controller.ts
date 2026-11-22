@@ -72,10 +72,19 @@ export class GithubAppWebhookController {
         const remote = await this.appApi.fetchInstallation(id);
         const existing = await this.installations.getWorkspaceIdForInstallation(id);
         if (existing) {
-          await this.installations.upsertFromGitHubInstallation({
-            workspaceId: existing,
-            installation: remote,
-          });
+          try {
+            await this.installations.upsertFromGitHubInstallation({
+              workspaceId: existing,
+              installation: remote,
+            });
+          } catch (error) {
+            // A workspace being deleted no longer accepts installation updates; acknowledge
+            // the delivery (no retry storm) — deletion unlinks the installation.
+            if ((error as { getStatus?: () => number }).getStatus?.() === 403) {
+              return { ok: true, ignored: true };
+            }
+            throw error;
+          }
         }
         return { ok: true };
       }

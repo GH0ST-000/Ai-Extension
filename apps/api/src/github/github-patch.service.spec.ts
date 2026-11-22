@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { GithubPatchService } from './github-patch.service';
 import { normalizeRepositoryPath } from './patch-path';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
 
 describe('normalizeRepositoryPath', () => {
   it('accepts relative paths', () => {
@@ -17,7 +18,7 @@ describe('normalizeRepositoryPath', () => {
 });
 
 describe('GithubPatchService', () => {
-  const githubConnections = { getDecryptedToken: vi.fn() };
+  const githubConnections = repositoryAccessStub({ getDecryptedToken: vi.fn() });
   const redis = {
     status: 'ready' as string,
     connect: vi.fn(),

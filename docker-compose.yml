@@ -3,8 +3,10 @@ services:
     image: postgres:16-alpine
     container_name: projectx-postgres
     restart: unless-stopped
+    # Local development only. Published on loopback: with the default credentials below this
+    # database must never be reachable from other machines on the network.
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,8 +23,9 @@ services:
     image: redis:7-alpine
     container_name: projectx-redis
     restart: unless-stopped
+    # Loopback only (this Redis has no password).
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:

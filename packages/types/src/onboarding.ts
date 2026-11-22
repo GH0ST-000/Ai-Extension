@@ -80,6 +80,8 @@ export type UserFacingErrorActionKind =
   | 'open_github'
   | 'open_settings'
   | 'copy_reference'
+  /** Decision 1: re-send the email-verification link (free AI requires a verified email). */
+  | 'resend_verification'
   | 'none';
 
 export interface UserFacingError {

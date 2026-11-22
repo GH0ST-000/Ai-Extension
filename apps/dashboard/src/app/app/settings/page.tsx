@@ -249,7 +249,9 @@ export default function SettingsPage() {
         appConfigured: githubApp?.appConfigured ?? false,
         connected: false,
       });
-      setGithubAppMessage('GitHub App disconnected from this workspace.');
+      setGithubAppMessage(
+        'GitHub App disconnected from this workspace. It stays installed on GitHub — an organization owner can uninstall it there.',
+      );
     } catch (err) {
       setGithubAppError(err instanceof ApiError ? err.message : 'Unable to disconnect GitHub App.');
     } finally {

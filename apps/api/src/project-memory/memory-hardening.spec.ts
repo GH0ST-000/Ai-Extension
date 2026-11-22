@@ -21,6 +21,7 @@ import { PromptRegistry } from '../ai/prompts/prompt.registry';
 import { WorkspaceAuthorizationService } from '../workspaces/workspace-authorization.service';
 import { ProjectMemoryService } from './project-memory.service';
 import { usageStub } from '../ai/pr-review/pr-review-fixtures';
+import { repositoryAccessStub } from '../github-app/github-access.test-helpers';
 
 const generateTextMock = vi.fn();
 vi.mock('ai', () => ({
@@ -171,7 +172,7 @@ function setup() {
   const memory = new ProjectMemoryService(
     db.prisma as never,
     { get: vi.fn(async () => null), set: vi.fn(), del: vi.fn() } as never,
-    { getDecryptedToken: vi.fn(async () => 'ghp_test') } as never,
+    repositoryAccessStub({ getDecryptedToken: vi.fn(async () => 'ghp_test') }) as never,
     { fetchRepositoryFileAtRef: vi.fn(async () => null) } as never,
     { require: vi.fn(async () => undefined) } as never,
     authorization,
@@ -900,7 +901,9 @@ describe('memory observability: applied rules and skip reasons', () => {
   });
 
   it('reports no_repository when the request names no repository', async () => {
-    const { ai } = setup();
+    const { ai, db } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner'); // N-1: a real active membership
+    db.actAs('owner-1', 'ws_a');
     generateTextMock.mockResolvedValueOnce({ text: 'ok', usage: {} });
     const result = await ai.generateActionWithMetadata('owner-1', {
       action: AIAction.REVIEW_ENTIRE_PR,
@@ -916,7 +919,9 @@ describe('memory observability: applied rules and skip reasons', () => {
   });
 
   it('attaches no memory metadata to actions that do not use memory', async () => {
-    const { ai } = setup();
+    const { ai, db } = setup();
+    db.addMember('owner-1', 'ws_a', 'owner'); // N-1: a real active membership
+    db.actAs('owner-1', 'ws_a');
     generateTextMock.mockResolvedValueOnce({ text: 'ok', usage: {} });
     const result = await ai.generateActionWithMetadata('owner-1', {
       action: AIAction.TRANSLATE,

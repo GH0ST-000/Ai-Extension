@@ -118,6 +118,87 @@ function ipVersion(ip: string): 0 | 4 | 6 {
   return 0;
 }
 
+/**
+ * Expand an IPv6 literal (compressed, with or without an embedded dotted IPv4 tail) into its
+ * eight 16-bit groups. Returns null when it is not a valid address.
+ */
+export function expandIPv6(ip: string): number[] | null {
+  let v = ip.toLowerCase().split('%')[0]!;
+  if (v.startsWith('[') && v.endsWith(']')) {
+    v = v.slice(1, -1);
+  }
+  if (!isIPv6(v)) {
+    return null;
+  }
+  let tail: number[] = [];
+  if (v.includes('.')) {
+    const lastColon = v.lastIndexOf(':');
+    const octets = v
+      .slice(lastColon + 1)
+      .split('.')
+      .map((o) => Number(o));
+    tail = [(octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!];
+    v = v.slice(0, lastColon);
+    // "::1.2.3.4" leaves ":" — restore the compression marker.
+    if (v.endsWith(':')) v = `${v}:`;
+    if (v === '') return null;
+  }
+  const parse = (side: string): number[] =>
+    side ? side.split(':').map((g) => Number.parseInt(g, 16)) : [];
+  const sides = v.split('::');
+  if (sides.length > 2) return null;
+  const head = parse(sides[0] ?? '');
+  const rest = sides.length === 2 ? parse(sides[1] ?? '') : [];
+  const fixed = head.length + rest.length + tail.length;
+  if (sides.length === 1 ? fixed !== 8 : fixed > 8) return null;
+  const groups = [...head, ...new Array<number>(8 - fixed).fill(0), ...rest, ...tail];
+  if (groups.length !== 8 || groups.some((g) => !Number.isInteger(g) || g < 0 || g > 0xffff)) {
+    return null;
+  }
+  return groups;
+}
+
+function embeddedIPv4(high: number, low: number): string {
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
+/**
+ * F-33: classify by address bits, not by string prefix — the URL parser serializes
+ * `[::ffff:127.0.0.1]` as `[::ffff:7f00:1]`, which has no dot and no `fc`/`fe80` prefix.
+ * Every form that carries an IPv4 address is judged by that IPv4 address.
+ */
+function isPrivateOrReservedIPv6(g: number[]): boolean {
+  const g0 = g[0]!;
+  const leadingZero = (count: number) => g.slice(0, count).every((x) => x === 0);
+  // ::/96 — unspecified, loopback, IPv4-compatible.
+  if (leadingZero(6)) {
+    if (g[6] === 0 && g[7]! <= 1) return true; // :: and ::1
+    return isPrivateOrReservedIp(embeddedIPv4(g[6]!, g[7]!));
+  }
+  // ::ffff:0:0/96 IPv4-mapped, ::ffff:0:0:0/96 IPv4-translated.
+  if (leadingZero(5) && g[5] === 0xffff) return isPrivateOrReservedIp(embeddedIPv4(g[6]!, g[7]!));
+  if (leadingZero(4) && g[4] === 0xffff && g[5] === 0) {
+    return isPrivateOrReservedIp(embeddedIPv4(g[6]!, g[7]!));
+  }
+  // 64:ff9b::/96 NAT64 (well-known prefix); 64:ff9b:1::/48 local-use NAT64.
+  if (g0 === 0x64 && g[1] === 0xff9b) {
+    if (g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) {
+      return isPrivateOrReservedIp(embeddedIPv4(g[6]!, g[7]!));
+    }
+    return true;
+  }
+  // 2002::/16 6to4 embeds the IPv4 address in the next 32 bits.
+  if (g0 === 0x2002) return isPrivateOrReservedIp(embeddedIPv4(g[1]!, g[2]!));
+  if (g0 === 0x2001 && g[1] === 0) return true; // 2001::/32 Teredo (embeds IPv4 endpoints)
+  if (g0 === 0x2001 && g[1] === 0xdb8) return true; // documentation
+  if (g0 === 0x100 && g[1] === 0 && g[2] === 0 && g[3] === 0) return true; // discard-only
+  if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
+  if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((g0 & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local (deprecated)
+  if ((g0 & 0xff00) === 0xff00) return true; // multicast
+  return false;
+}
+
 export function isPrivateOrReservedIp(ip: string): boolean {
   const bare = ip.startsWith('[') && ip.endsWith(']') ? ip.slice(1, -1) : ip;
   const v = ipVersion(bare);
@@ -139,19 +220,9 @@ export function isPrivateOrReservedIp(ip: string): boolean {
     return false;
   }
   if (v === 6) {
-    const normalized = bare.toLowerCase().split('%')[0]!;
-    if (normalized === '::1' || normalized === '::') return true;
-    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // ULA
-    if (normalized.startsWith('fe80')) return true; // link-local
-    if (normalized.startsWith('ff')) return true; // multicast
-    // IPv4-mapped
-    if (normalized.includes('.')) {
-      const mapped = normalized.split(':').pop();
-      if (mapped && isIPv4(mapped)) {
-        return isPrivateOrReservedIp(mapped);
-      }
-    }
-    return false;
+    const groups = expandIPv6(bare);
+    // Unparseable: fail closed.
+    return groups ? isPrivateOrReservedIPv6(groups) : true;
   }
   return true;
 }

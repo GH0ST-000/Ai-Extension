@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type {
+  AcceptWorkspaceInvitationResponse,
   BillingCheckoutResponse,
   BillingPortalResponse,
   Workspace,
@@ -37,9 +38,22 @@ import {
 } from './dto/workspaces.dto';
 import { WorkspaceInvitationsService } from './invitations.service';
 import { WorkspaceMembersService } from './members.service';
-import { RequireWorkspacePermission } from './workspace.decorators';
+import { AllowWorkspaceStatuses, RequireWorkspacePermission } from './workspace.decorators';
 import { WorkspaceGuard } from './workspace.guard';
 import { WorkspacesService } from './workspaces.service';
+import type { FreeWorkspaceUsage } from './workspace-limits';
+import {
+  DELETION_ALLOWED_STATUSES,
+  type PendingWorkspaceDeletion,
+  WorkspaceDeletionService,
+} from './workspace-deletion.service';
+
+/** N-10: new workspaces per user per day (atomic Redis counter, bounded local fallback). */
+export const WORKSPACE_CREATE_LIMIT = {
+  bucket: 'workspace_create',
+  limit: 3,
+  windowSeconds: 24 * 60 * 60,
+};
 
 @Controller()
 @UseGuards(JwtAuthGuard, RateLimitGuard)
@@ -50,6 +64,7 @@ export class WorkspacesController {
     private readonly invitations: WorkspaceInvitationsService,
     private readonly usage: UsageService,
     private readonly billing: BillingService,
+    private readonly deletion: WorkspaceDeletionService,
   ) {}
 
   @Get('workspaces/bootstrap')
@@ -60,13 +75,33 @@ export class WorkspacesController {
     return this.workspaces.bootstrap(user.id, workspaceHeader?.trim() || undefined);
   }
 
+  /**
+   * N-2: workspaces the caller owns that are pending deletion (not shown as normal workspaces
+   * anywhere else), with their billing-cancellation state. Retry with DELETE /workspaces/:id.
+   */
+  @Get('workspaces/pending-deletions')
+  pendingDeletions(@CurrentUser() user: AuthRequestUser): Promise<PendingWorkspaceDeletion[]> {
+    return this.deletion.listPendingDeletions(user.id);
+  }
+
+  /** Decision B: free-workspace usage of the caller (limit, used, can create). */
+  @Get('workspaces/limits')
+  limits(@CurrentUser() user: AuthRequestUser): Promise<FreeWorkspaceUsage> {
+    return this.workspaces.freeWorkspaceUsage(user.id);
+  }
+
   @Get('workspaces')
   list(@CurrentUser() user: AuthRequestUser): Promise<Workspace[]> {
     return this.workspaces.listForUser(user.id);
   }
 
+  /**
+   * N-10: workspace creation is rate limited per user (each new workspace starts with its own
+   * free AI quota). A hard cap on workspaces per user is a product decision (not set here).
+   */
   @Post('workspaces')
   @HttpCode(201)
+  @RateLimit(WORKSPACE_CREATE_LIMIT)
   create(
     @CurrentUser() user: AuthRequestUser,
     @Body() body: CreateWorkspaceDto,
@@ -95,15 +130,21 @@ export class WorkspacesController {
     return this.workspaces.update(workspaceId, user.id, body);
   }
 
+  /**
+   * 204 when the workspace is deleted (also when it already was: idempotent). 502
+   * BILLING_CANCELLATION_FAILED when the billing provider could not confirm the cancellation:
+   * the workspace then stays `deletion_pending` (unusable) and the owner retries.
+   */
   @Delete('workspaces/:workspaceId')
   @HttpCode(204)
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('workspace:delete')
+  @AllowWorkspaceStatuses(...DELETION_ALLOWED_STATUSES)
   async remove(
     @CurrentUser() user: AuthRequestUser,
     @Param('workspaceId') workspaceId: string,
   ): Promise<void> {
-    await this.workspaces.softDelete(workspaceId, user.id);
+    await this.deletion.deleteWorkspace(workspaceId, user.id);
   }
 
   @Post('workspaces/:workspaceId/transfer-ownership')
@@ -141,6 +182,31 @@ export class WorkspacesController {
     return this.invitations.createInvitation(workspaceId, user.id, body);
   }
 
+  /** Pending invitations (Owners/Admins). No tokens or token hashes are ever returned. */
+  @Get('workspaces/:workspaceId/invitations')
+  @UseGuards(WorkspaceGuard)
+  @RequireWorkspacePermission('members:invite')
+  listInvitations(
+    @CurrentUser() user: AuthRequestUser,
+    @Param('workspaceId') workspaceId: string,
+  ): Promise<WorkspaceInvitation[]> {
+    return this.invitations.listInvitations(workspaceId, user.id);
+  }
+
+  /** Revokes a pending invitation of this workspace. Idempotent (204 when already revoked). */
+  @Delete('workspaces/:workspaceId/invitations/:invitationId')
+  @HttpCode(204)
+  @UseGuards(WorkspaceGuard)
+  @RequireWorkspacePermission('members:invite')
+  @RateLimit({ bucket: 'invite', limit: 20, windowSeconds: 60 })
+  async revokeInvitation(
+    @CurrentUser() user: AuthRequestUser,
+    @Param('workspaceId') workspaceId: string,
+    @Param('invitationId') invitationId: string,
+  ): Promise<void> {
+    await this.invitations.revokeInvitation(workspaceId, user.id, invitationId);
+  }
+
   @Patch('workspaces/:workspaceId/members/:membershipId')
   @UseGuards(WorkspaceGuard)
   @RequireWorkspacePermission('members:manage')
@@ -165,11 +231,15 @@ export class WorkspacesController {
     await this.members.removeMember(workspaceId, user.id, membershipId);
   }
 
+  /**
+   * 200 with `alreadyMember: true` (and the unchanged membership) when the user already belongs
+   * to the workspace: an invitation never changes an existing role.
+   */
   @Post('workspace-invitations/:token/accept')
   acceptInvitation(
     @CurrentUser() user: AuthRequestUser,
     @Param('token') token: string,
-  ): Promise<WorkspaceMembership> {
+  ): Promise<AcceptWorkspaceInvitationResponse> {
     return this.invitations.acceptInvitation(token, user.id);
   }
 

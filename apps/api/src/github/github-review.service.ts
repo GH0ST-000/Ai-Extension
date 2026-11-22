@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type {
+  GitHubWriteErrorCode,
   GitHubReviewEvent,
   SubmitPullRequestReviewRequest,
   SubmitPullRequestReviewResponse,
@@ -11,17 +14,43 @@ import {
 } from '@project-x/types';
 
 import { RedisService } from '../redis/redis.service';
-import { GithubAccessService } from '../github-app/github-access.service';
+import {
+  GithubAccessService,
+  repositoryAccessError,
+  type GitHubApiTokenSource,
+} from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { reviewRequestFingerprint } from './review-fingerprint';
+import { SecurityAuditService } from '../observability/security-audit.service';
+import { attributeAppPost, isValidGithubLogin } from './github-attribution';
+import { recordGithubWrite } from './github-write-audit';
 
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24; // 24h
 const LOCK_TTL_SECONDS = 30;
+/** GitHub POST deadline — below the lock TTL, so the lock never expires under a live write. */
+const REVIEW_POST_TIMEOUT_MS = 20_000;
+/** Upper bound for one Redis command of the idempotency protocol (a hang counts as down). */
+const REDIS_COMMAND_TIMEOUT_MS = 1_500;
+/** Delete the lock only if this request still owns it (never another request's lock). */
+/** Extend the lock only if this request still owns it; 1 = extended. */
+const EXTEND_OWN_LOCK = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0`;
+/** How long an "outcome unknown" marker blocks a blind retry of the same request id. */
+const UNKNOWN_OUTCOME_TTL_SECONDS = 10 * 60;
+const RELEASE_OWN_LOCK = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0`;
 
 type GitHubPullResponse = {
   number?: number;
   state?: string;
   merged?: boolean;
+  locked?: boolean;
   html_url?: string;
   head?: { sha?: string };
   user?: { login?: string };
@@ -42,14 +71,18 @@ type CachedReviewResult = Omit<SubmitPullRequestReviewResponse, 'deduplicated'>;
 
 type IdempotencyRecord =
   | { kind: 'success'; fingerprint: string; result: CachedReviewResult }
-  | { kind: 'lock'; fingerprint: string };
+  | { kind: 'lock'; fingerprint: string }
+  /** The POST was sent and its outcome is not known (timeout / connection lost). */
+  | { kind: 'unknown'; fingerprint: string };
 
 @Injectable()
 export class GithubReviewService {
+  private readonly logger = new Logger(GithubReviewService.name);
   constructor(
     private readonly githubAccess: GithubAccessService,
     private readonly redis: RedisService,
     private readonly errors: GithubErrorNormalizer,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   async submitPullRequestReview(
@@ -88,6 +121,7 @@ export class GithubReviewService {
     const lockKey = `${cacheKey}:lock`;
 
     const existing = await this.readIdempotentRecord(cacheKey);
+    this.assertOutcomeKnown(existing);
     if (existing?.kind === 'success') {
       if (existing.fingerprint !== fingerprint) {
         throw this.errors.toHttpException(
@@ -98,8 +132,8 @@ export class GithubReviewService {
       return { ...existing.result, deduplicated: true };
     }
 
-    const lockAcquired = await this.acquireLock(lockKey, fingerprint);
-    if (!lockAcquired) {
+    const lockToken = await this.acquireLock(lockKey, fingerprint);
+    if (!lockToken) {
       // Another in-flight request — wait briefly for success record
       const raced = await this.waitForSuccess(cacheKey, fingerprint);
       if (raced) {
@@ -113,6 +147,7 @@ export class GithubReviewService {
 
     try {
       const afterLock = await this.readIdempotentRecord(cacheKey);
+      this.assertOutcomeKnown(afterLock);
       if (afterLock?.kind === 'success') {
         if (afterLock.fingerprint !== fingerprint) {
           throw this.errors.toHttpException(
@@ -123,13 +158,43 @@ export class GithubReviewService {
         return { ...afterLock.result, deduplicated: true };
       }
 
-      const token = await this.githubAccess.getDecryptedToken(userId);
-      if (!token) {
-        throw this.errors.toHttpException(
-          'NOT_CONNECTED',
-          'Connect a GitHub token in dashboard Settings before submitting a review.',
+      // H1: COMMENT reviews need the user's read access; REQUEST_CHANGES and APPROVE need
+      // write. APPROVE through the shared workspace App bot is never allowed (below).
+      const access = await this.githubAccess.resolveRepositoryAccess(userId, {
+        owner,
+        repository,
+        access: event === 'COMMENT' ? 'comment' : 'write',
+      });
+      const deny = (
+        code: GitHubWriteErrorCode,
+        message: string,
+        credential?: GitHubApiTokenSource,
+      ) => {
+        recordGithubWrite(this.audit, this.logger, {
+          operation: 'review',
+          outcome: 'blocked',
+          userId,
+          workspaceId: access.workspaceId,
+          owner,
+          repository,
+          pullRequestNumber,
+          ...(credential ? { credential } : {}),
+          detail: `${event}:${code}`,
+        });
+        return this.errors.toHttpException(code, message);
+      };
+      if (!access.ok) {
+        const denied = repositoryAccessError(access.reason);
+        throw deny(denied.code, denied.message);
+      }
+      if (event === 'APPROVE' && access.source === 'installation') {
+        throw deny(
+          'REVIEW_ACTION_NOT_ALLOWED',
+          'Approving through the shared Project X GitHub App is disabled. Approve on GitHub with your own account, or submit the review as a comment.',
+          access.source,
         );
       }
+      const token = access.token;
 
       const pull = await this.fetchPullRequest({ token, owner, repository, pullRequestNumber });
       if (pull.state !== 'open' || pull.merged) {
@@ -137,6 +202,23 @@ export class GithubReviewService {
           'PULL_REQUEST_NOT_FOUND',
           'This pull request is closed or merged. Refresh the PR page and start a new review draft.',
         );
+      }
+
+      // N-17: a locked conversation accepts reviews only from collaborators with write; the
+      // App could still post, so the App path requires the user's own write access.
+      if (pull.locked && access.source === 'installation' && event === 'COMMENT') {
+        const writer = await this.githubAccess.resolveRepositoryAccess(userId, {
+          owner,
+          repository,
+          access: 'write',
+        });
+        if (!writer.ok) {
+          throw deny(
+            'INSUFFICIENT_PERMISSION',
+            'This pull request conversation is locked on GitHub. Only collaborators with write access can review.',
+            access.source,
+          );
+        }
       }
 
       const headSha = pull.head?.sha;
@@ -148,25 +230,77 @@ export class GithubReviewService {
       }
 
       const { inlineComments, aggregatedBody } = this.partitionComments(body, comments);
+      // Decision C: App-posted reviews (COMMENT / REQUEST_CHANGES; APPROVE is refused above)
+      // name the requesting user's verified GitHub login in the review body.
+      let reviewBody = aggregatedBody;
+      if (access.source === 'installation') {
+        if (!isValidGithubLogin(access.actorGithubLogin)) {
+          throw deny(
+            'NOT_CONNECTED',
+            'Project X could not confirm your GitHub username. Reconnect your GitHub token in dashboard Settings.',
+            access.source,
+          );
+        }
+        reviewBody = attributeAppPost(aggregatedBody, access.actorGithubLogin);
+      }
 
-      const result = await this.createPullRequestReview({
-        token,
-        owner,
-        repository,
-        pullRequestNumber,
-        event,
-        body: aggregatedBody,
-        commitId: headSha,
-        comments: inlineComments,
-      });
+      // The steps above (permission checks, token mint, PR lookup) are not all bounded: make
+      // sure the lock is still OURS and give the POST its full window before writing. If it
+      // expired meanwhile, another request may be writing — stop, nothing was posted.
+      if (!(await this.extendLock(lockKey, lockToken))) {
+        throw this.errors.toHttpException(
+          'GITHUB_UNAVAILABLE',
+          'The request took too long to prepare. Nothing was posted to GitHub. Please try again.',
+        );
+      }
+      let result: CachedReviewResult;
+      try {
+        result = await this.createPullRequestReview({
+          token,
+          owner,
+          repository,
+          pullRequestNumber,
+          event,
+          body: reviewBody,
+          commitId: headSha,
+          // Decision C: each inline comment is attributed too (shown on its own in Files changed).
+          comments:
+            access.source === 'installation' && isValidGithubLogin(access.actorGithubLogin)
+              ? inlineComments.map((comment) => ({
+                  ...comment,
+                  body: attributeAppPost(comment.body, access.actorGithubLogin as string),
+                }))
+              : inlineComments,
+        });
+      } catch (error) {
+        if (isOutcomeUnknown(error)) {
+          // GitHub may have created the review. A blind retry with the same request id would
+          // post it twice, so this id is parked: retries get the same "check GitHub" answer
+          // (never a second POST) until the marker expires or the user submits a new request.
+          await this.storeUnknownOutcome(cacheKey, fingerprint);
+        }
+        throw error;
+      }
 
       await this.storeIdempotentSuccess(cacheKey, fingerprint, {
         ...result,
         commentCount: comments.length,
       });
+      recordGithubWrite(this.audit, this.logger, {
+        operation: 'review',
+        outcome: 'success',
+        userId,
+        workspaceId: access.workspaceId,
+        owner,
+        repository,
+        pullRequestNumber,
+        credential: access.source,
+        detail: event,
+        resultId: result.reviewId,
+      });
       return { ...result, commentCount: comments.length, deduplicated: false };
     } finally {
-      await this.releaseLock(lockKey);
+      await this.releaseLock(lockKey, lockToken);
     }
   }
 
@@ -376,6 +510,9 @@ export class GithubReviewService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        // F-17: bounded below the lock TTL (a slow GitHub can no longer outlive the lock and
+        // let a retry post a second review).
+        signal: AbortSignal.timeout(REVIEW_POST_TIMEOUT_MS),
       });
     } catch {
       throw this.errors.toHttpException(
@@ -442,15 +579,44 @@ export class GithubReviewService {
     }
   }
 
-  private async readIdempotentRecord(cacheKey: string): Promise<IdempotencyRecord | null> {
+  /**
+   * F-17 — the idempotency protocol FAILS CLOSED. A review has no natural compare-and-swap on
+   * GitHub: the only thing that stops a retry (double click, lost response) from posting a
+   * second review is this record and lock. If Redis cannot answer, we cannot know whether the
+   * review was already posted, so nothing is written to GitHub and the caller is told to retry
+   * (the same posture as PR comments). Every Redis command is bounded by a deadline.
+   */
+  private async redisCommand<T>(command: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await this.ensureRedis();
-      const raw = await this.redis.get(cacheKey);
-      if (!raw) {
-        return null;
-      }
+      return await Promise.race([
+        command(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('redis timeout')), REDIS_COMMAND_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      throw this.errors.toHttpException(
+        'GITHUB_UNAVAILABLE',
+        'Unable to coordinate write safety. Nothing was posted to GitHub. Please try again shortly.',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async readIdempotentRecord(cacheKey: string): Promise<IdempotencyRecord | null> {
+    const raw = await this.redisCommand(() => this.redis.get(cacheKey));
+    if (!raw) {
+      return null;
+    }
+    try {
       const parsed = JSON.parse(raw) as IdempotencyRecord;
       if (parsed.kind === 'success' && parsed.result?.success === true) {
+        return parsed;
+      }
+      if (parsed.kind === 'unknown') {
         return parsed;
       }
       return null;
@@ -459,37 +625,73 @@ export class GithubReviewService {
     }
   }
 
+  /**
+   * The review IS on GitHub at this point. Recording it is what makes a retry safe, so the
+   * write is retried; if it still fails the response is returned (the client got its result
+   * and has no reason to retry) and the gap is logged for follow-up.
+   */
   private async storeIdempotentSuccess(
     cacheKey: string,
     fingerprint: string,
     result: CachedReviewResult,
   ): Promise<void> {
-    try {
-      await this.ensureRedis();
-      const record: IdempotencyRecord = { kind: 'success', fingerprint, result };
-      await this.redis.set(cacheKey, JSON.stringify(record), 'EX', IDEMPOTENCY_TTL_SECONDS);
-    } catch {
-      // Best-effort only.
+    const record: IdempotencyRecord = { kind: 'success', fingerprint, result };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.redisCommand(() =>
+          this.redis.set(cacheKey, JSON.stringify(record), 'EX', IDEMPOTENCY_TTL_SECONDS),
+        );
+        return;
+      } catch {
+        // retried below
+      }
+    }
+    this.logger.error({ msg: 'github.review.idempotency_record_not_stored' });
+  }
+
+  /** A parked request id (see storeUnknownOutcome): never POST again for it. */
+  private assertOutcomeKnown(record: IdempotencyRecord | null): void {
+    if (record?.kind === 'unknown') {
+      throw this.errors.toHttpException(
+        'WRITE_OUTCOME_UNKNOWN',
+        'An earlier submission of this review may already be on GitHub. Check the pull request; to submit again, start a new review submission.',
+      );
     }
   }
 
-  private async acquireLock(lockKey: string, fingerprint: string): Promise<boolean> {
+  private async storeUnknownOutcome(cacheKey: string, fingerprint: string): Promise<void> {
+    const record: IdempotencyRecord = { kind: 'unknown', fingerprint };
     try {
-      await this.ensureRedis();
-      const result = await this.redis.set(lockKey, fingerprint, 'EX', LOCK_TTL_SECONDS, 'NX');
-      return result === 'OK';
+      await this.redisCommand(() =>
+        this.redis.set(cacheKey, JSON.stringify(record), 'EX', UNKNOWN_OUTCOME_TTL_SECONDS),
+      );
     } catch {
-      // If Redis is down, proceed without lock (same best-effort posture as Day 12).
-      return true;
+      this.logger.error({ msg: 'github.review.unknown_outcome_marker_not_stored' });
     }
   }
 
-  private async releaseLock(lockKey: string): Promise<void> {
+  /** True when this request still owns the lock (its TTL is then reset to the full window). */
+  private async extendLock(lockKey: string, token: string): Promise<boolean> {
+    const extended = await this.redisCommand(() =>
+      this.redis.eval(EXTEND_OWN_LOCK, 1, lockKey, token, LOCK_TTL_SECONDS),
+    );
+    return Number(extended) === 1;
+  }
+
+  /** Returns this request's lock token, or null when another request holds the lock. */
+  private async acquireLock(lockKey: string, fingerprint: string): Promise<string | null> {
+    const token = `${fingerprint}:${randomUUID()}`;
+    const result = await this.redisCommand(() =>
+      this.redis.set(lockKey, token, 'EX', LOCK_TTL_SECONDS, 'NX'),
+    );
+    return result === 'OK' ? token : null;
+  }
+
+  private async releaseLock(lockKey: string, token: string): Promise<void> {
     try {
-      await this.ensureRedis();
-      await this.redis.del(lockKey);
+      await this.redisCommand(() => this.redis.eval(RELEASE_OWN_LOCK, 1, lockKey, token));
     } catch {
-      // ignore
+      // The TTL expires the lock.
     }
   }
 
@@ -512,4 +714,13 @@ export class GithubReviewService {
     }
     return null;
   }
+}
+
+function isOutcomeUnknown(error: unknown): boolean {
+  const response = (error as { getResponse?: () => unknown } | null)?.getResponse?.();
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    (response as { code?: unknown }).code === 'WRITE_OUTCOME_UNKNOWN'
+  );
 }

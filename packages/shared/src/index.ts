@@ -458,6 +458,11 @@ export {
   sanitizeExternalHttpsUrl,
   PROMPT_INJECTION_GUARD,
   PROMPT_INJECTION_FIXTURES,
+  AI_PRIVATE_KEY_PLACEHOLDER,
+  AI_SECRET_PLACEHOLDER,
+  containsRedactableSecret,
+  redactSecretLines,
+  redactSecretsForAi,
 } from './security';
 
 export * from './notifications';

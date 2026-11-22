@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { permissionsForRole, roleHasPermission } from '@project-x/shared';
 import type { WorkspacePermission, WorkspaceRole, WorkspaceStatus } from '@project-x/types';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { lockWorkspaceMembership } from './workspace-membership-lock';
 import { workspaceException } from './workspace.errors';
 import type { WorkspaceRequestContext } from './workspace.decorators';
 
@@ -17,8 +19,23 @@ export class WorkspaceAuthorizationService {
     userId: string;
     workspaceId: string;
     permission?: WorkspacePermission;
+    /**
+     * Workspace statuses accepted besides `active`. Only workspace deletion uses this (to
+     * retry or confirm a deletion); every other operation requires an active workspace.
+     */
+    allowedStatuses?: readonly WorkspaceStatus[];
+    /**
+     * M3: inside a membership-changing transaction. Takes the workspace membership lock first
+     * and re-validates the actor under it, so a concurrent demotion/removal of the actor (or
+     * the start of a deletion) is seen before anything is changed.
+     */
+    tx?: Prisma.TransactionClient;
   }): Promise<WorkspaceRequestContext> {
-    const workspace = await this.prisma.workspace.findUnique({
+    const client = input.tx ?? this.prisma;
+    if (input.tx) {
+      await lockWorkspaceMembership(input.tx, input.workspaceId);
+    }
+    const workspace = await client.workspace.findUnique({
       where: { id: input.workspaceId },
       select: {
         id: true,
@@ -35,7 +52,8 @@ export class WorkspaceAuthorizationService {
       throw workspaceException('WORKSPACE_NOT_FOUND', 'Workspace not found.');
     }
 
-    if (workspace.status !== ACTIVE_WORKSPACE) {
+    const allowed = input.allowedStatuses ?? [ACTIVE_WORKSPACE];
+    if (!allowed.includes(workspace.status as WorkspaceStatus)) {
       throw workspaceException('WORKSPACE_INACTIVE', 'Workspace is not active.');
     }
 
@@ -64,8 +82,11 @@ export class WorkspaceAuthorizationService {
     };
   }
 
-  async countActiveOwners(workspaceId: string): Promise<number> {
-    return this.prisma.workspaceMembership.count({
+  async countActiveOwners(
+    workspaceId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    return client.workspaceMembership.count({
       where: {
         workspaceId,
         status: ACTIVE_MEMBERSHIP,
@@ -74,8 +95,17 @@ export class WorkspaceAuthorizationService {
     });
   }
 
-  async assertNotSoleOwner(workspaceId: string, membershipId: string): Promise<void> {
-    const membership = await this.prisma.workspaceMembership.findFirst({
+  /**
+   * Refuses to remove or demote the last active owner. M3: called with the transaction that
+   * holds the workspace membership lock, so the count is exact even under concurrent owner
+   * removals/demotions (each waits for the previous one and counts what it committed).
+   */
+  async assertNotSoleOwner(
+    workspaceId: string,
+    membershipId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const membership = await client.workspaceMembership.findFirst({
       where: { id: membershipId, workspaceId, status: ACTIVE_MEMBERSHIP },
       select: { id: true, role: true },
     });
@@ -88,7 +118,7 @@ export class WorkspaceAuthorizationService {
       return;
     }
 
-    const owners = await this.countActiveOwners(workspaceId);
+    const owners = await this.countActiveOwners(workspaceId, client);
     if (owners <= 1) {
       throw workspaceException(
         'WORKSPACE_LAST_OWNER',

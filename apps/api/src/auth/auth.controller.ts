@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   Body,
   Controller,
@@ -15,6 +17,8 @@ import type { AuthTokenResponse } from '@project-x/types';
 
 import type { ApiConfig } from '../config/configuration';
 import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
+import { RateLimiter, rateLimitAddressKey } from '../common/security/rate-limiter';
+import { RedisService } from '../redis/redis.service';
 import {
   clearAuthCookies,
   durationToMs,
@@ -26,28 +30,48 @@ import { AuthService, RefreshTokenRotatedException } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import {
   LoginDto,
+  EmailVerificationConfirmDto,
   PasswordResetConfirmDto,
   PasswordResetRequestDto,
   RefreshDto,
   RegisterDto,
 } from './dto/auth.dto';
 import { PASSWORD_RESET_REQUEST_MESSAGE, PasswordResetService } from './password-reset.service';
+import { EmailVerificationService } from './email-verification.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import type { AuthRequestUser } from './jwt.strategy';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 import { Public } from './public.decorator';
+import { AuthRequestGuard } from './auth-request.guard';
 
-/** Extension must opt in to receive JWTs in the JSON body; dashboard uses cookies only. */
+/**
+ * Sent by the extension. Labels the signup client only (attribution); it is caller-supplied
+ * and grants nothing — see wantsBodyTokens (F-13).
+ */
 const EXTENSION_CLIENT_HEADER = 'x-project-x-client';
 
+/** N-15 / F-15: login attempts per account FROM ONE CLIENT ADDRESS per window. */
+export const LOGIN_ATTEMPTS_PER_ACCOUNT = 10;
+/** F-15: ceiling per account across all client addresses (distributed guessing). */
+export const LOGIN_ATTEMPTS_PER_ACCOUNT_ALL_CLIENTS = 50;
+const LOGIN_ACCOUNT_WINDOW_SECONDS = 15 * 60;
+
 @Controller('auth')
-@UseGuards(RateLimitGuard)
+// AuthRequestGuard first: CSRF rejections (wrong Content-Type / untrusted Origin) are cheap and
+// must not consume a legitimate user's rate-limit bucket.
+@UseGuards(AuthRequestGuard, RateLimitGuard)
 export class AuthController {
+  private readonly accountLimiter: RateLimiter;
+
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService<ApiConfig, true>,
     private readonly passwordReset: PasswordResetService,
-  ) {}
+    redis: RedisService,
+    private readonly emailVerification: EmailVerificationService,
+  ) {
+    this.accountLimiter = new RateLimiter(redis);
+  }
 
   /**
    * Always 202 with the same body: whether the email belongs to an account, was throttled, or
@@ -71,10 +95,53 @@ export class AuthController {
     return this.passwordReset.confirmReset(body.token, body.newPassword, requestContext(req));
   }
 
+  /** Decision A: the caller's own verification state (for the dashboard). */
+  @Get('email-verification')
+  @UseGuards(JwtAuthGuard)
+  emailVerificationStatus(@CurrentUser() user: AuthRequestUser) {
+    return this.emailVerification.status(user.id);
+  }
+
+  /**
+   * Decision A: send a new verification link to the caller's own address. Rate limited here
+   * and in the service (cooldown + hourly cap). The outcome concerns the caller's own account
+   * only, so it is returned (no enumeration of other addresses is possible).
+   */
+  @Post('email-verification/resend')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ bucket: 'email_verification', limit: 5, windowSeconds: 3600 })
+  async resendEmailVerification(@CurrentUser() user: AuthRequestUser) {
+    return { status: await this.emailVerification.issue(user.id) };
+  }
+
+  /**
+   * Decision A + F-05: confirm with the token from the link, signed in as the account the link
+   * was issued for (any device: sign in there first). Not public — a mailbox click alone must
+   * not verify an account whose credentials belong to someone else.
+   */
+  @Post('email-verification/confirm')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ bucket: 'email_verification_confirm', limit: 10, windowSeconds: 900 })
+  confirmEmailVerification(
+    @CurrentUser() user: AuthRequestUser,
+    @Body() body: EmailVerificationConfirmDto,
+  ) {
+    return this.emailVerification.confirm(body.token, user.id);
+  }
+
   @Public()
   @Post('register')
   @HttpCode(201)
-  @RateLimit({ bucket: 'auth', limit: 10, windowSeconds: 60 })
+  // Decision 1 (account multiplication): besides the burst limit, at most 20 registrations
+  // (and so 20 verification emails) per client IP per 24 h. Expires; not a ban.
+  @RateLimit({
+    bucket: 'auth',
+    limit: 10,
+    windowSeconds: 60,
+    sustained: { bucket: 'register_daily', limit: 20, windowSeconds: 86_400 },
+  })
   async register(
     @Body() body: RegisterDto,
     @Req() req: Request,
@@ -85,6 +152,8 @@ export class AuthController {
       client: isExtensionClient(req) ? 'extension' : 'dashboard',
     });
     this.writeSessionCookies(res, result.accessToken!, result.refreshToken!);
+    // Decision A: verification link sent after the response (never fails registration).
+    this.emailVerification.issueInBackground(result.user.id);
     return this.shapeAuthResponse(req, result);
   }
 
@@ -97,6 +166,31 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // N-15: per-account throttling on top of the per-IP bucket (credential stuffing from many
+    // IPs). Keyed by a hash of the normalized email; applied identically to every email —
+    // existing or not — with the same 429, so it reveals nothing about accounts.
+    //
+    // F-15: the tight budget is per account AND client address. Keyed on the account alone, it
+    // let anyone lock a known email out indefinitely with ten wrong passwords every window —
+    // from one machine. Now those attempts only exhaust the attacker's own (account, address)
+    // budget; the owner signing in from elsewhere is unaffected. A much higher per-account
+    // ceiling across all addresses still bounds distributed guessing.
+    const accountKey = createHash('sha256').update(body.email.trim().toLowerCase()).digest('hex');
+    const clientKey = createHash('sha256')
+      // IPv6 clients are keyed on their /64 (see rateLimitAddressKey).
+      .update(rateLimitAddressKey(req.ip))
+      .digest('hex')
+      .slice(0, 32);
+    await this.accountLimiter.consume(
+      `rl:auth_account_ip:${accountKey}:${clientKey}`,
+      LOGIN_ATTEMPTS_PER_ACCOUNT,
+      LOGIN_ACCOUNT_WINDOW_SECONDS,
+    );
+    await this.accountLimiter.consume(
+      `rl:auth_account:${accountKey}`,
+      LOGIN_ATTEMPTS_PER_ACCOUNT_ALL_CLIENTS,
+      LOGIN_ACCOUNT_WINDOW_SECONDS,
+    );
     const result = await this.authService.login(body, requestContext(req));
     this.writeSessionCookies(res, result.accessToken!, result.refreshToken!);
     return this.shapeAuthResponse(req, result);
@@ -111,7 +205,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const raw = body.refreshToken?.trim() || readCookie(req, REFRESH_COOKIE);
+    const fromBody = body.refreshToken?.trim();
+    const raw = fromBody || readCookie(req, REFRESH_COOKIE);
     if (!raw) {
       clearAuthCookies(res, this.cookieSecure());
       throw new UnauthorizedException('Refresh token required.');
@@ -119,7 +214,7 @@ export class AuthController {
     try {
       const result = await this.authService.refresh(raw, requestContext(req));
       this.writeSessionCookies(res, result.accessToken!, result.refreshToken!);
-      return this.shapeAuthResponse(req, result);
+      return this.shapeAuthResponse(req, result, { credentialFromCookie: !fromBody });
     } catch (error) {
       // A lost rotation race must not wipe the cookies the winning client just set.
       if (!(error instanceof RefreshTokenRotatedException)) {
@@ -166,8 +261,12 @@ export class AuthController {
     return { user };
   }
 
-  private shapeAuthResponse(req: Request, result: AuthTokenResponse): AuthTokenResponse {
-    if (wantsBodyTokens(req)) {
+  private shapeAuthResponse(
+    req: Request,
+    result: AuthTokenResponse,
+    options: { credentialFromCookie?: boolean } = {},
+  ): AuthTokenResponse {
+    if (wantsBodyTokens(req, options)) {
       return result;
     }
     return {
@@ -204,21 +303,30 @@ function isExtensionClient(req: Request): boolean {
   return typeof origin === 'string' && origin.startsWith('chrome-extension://');
 }
 
-function wantsBodyTokens(req: Request): boolean {
-  const header = req.headers[EXTENSION_CLIENT_HEADER];
-  const value = Array.isArray(header) ? header[0] : header;
-  if (typeof value === 'string' && value.trim().toLowerCase() === 'extension') {
-    return true;
+/**
+ * F-13: tokens are returned in the JSON body only to clients that cannot use the HttpOnly
+ * session cookie (the extension, non-browser clients) — never to a web page:
+ *
+ * - A request authenticated by the session COOKIE never gets body tokens (the caller is a
+ *   browser that already holds the cookie; handing the tokens to its JavaScript would defeat
+ *   HttpOnly). The extension always presents its refresh token in the body.
+ * - A request with a web `Origin` (http/https — browsers set it on every cross-origin and
+ *   every POST request, and page scripts cannot forge it) never gets body tokens, whatever
+ *   `X-Project-X-Client` says: that header is caller-supplied and proves nothing.
+ * - Extension origins and requests without an Origin (service workers, CLI) do.
+ */
+export function wantsBodyTokens(
+  req: Pick<Request, 'headers'>,
+  options: { credentialFromCookie?: boolean } = {},
+): boolean {
+  if (options.credentialFromCookie) {
+    return false;
   }
   const origin = req.headers.origin;
-  // Extension pages send chrome-extension:// Origin; service-worker fetch often omits Origin.
-  if (typeof origin === 'string' && origin.startsWith('chrome-extension://')) {
-    return true;
+  if (typeof origin === 'string' && origin.length > 0) {
+    return /^(?:chrome|moz)-extension:\/\//.test(origin);
   }
-  if (!origin) {
-    return true;
-  }
-  return false;
+  return true;
 }
 
 function requestContext(req: Request): { userAgent?: string; ip?: string } {

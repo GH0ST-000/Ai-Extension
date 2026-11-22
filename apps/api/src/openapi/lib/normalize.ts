@@ -14,6 +14,7 @@ import {
   OPENAPI_MAX_OPERATIONS,
   OPENAPI_MAX_PROPERTIES,
   OPENAPI_MAX_SCHEMA_DEPTH,
+  OPENAPI_MAX_SCHEMA_NODES,
   OPENAPI_MAX_SCHEMAS,
 } from '@project-x/types';
 
@@ -61,6 +62,7 @@ function resolveLocalRef(
   if (stack.includes(ref) || stack.length >= maxDepth) {
     return { __circular: ref };
   }
+  // Callers refuse refs longer than MAX_REF_CHARS before this point (bounded split).
   const parts = ref
     .slice(2)
     .split('/')
@@ -76,13 +78,122 @@ function resolveLocalRef(
   return current;
 }
 
+/**
+ * F-01: one budget for the whole document. Depth and per-node property caps alone leave the
+ * work exponential (`properties ^ depth`) because a `$ref` is re-expanded at every use; the
+ * budget bounds the total number of schema nodes visited, so normalization is linear in the
+ * budget no matter how references fan out. Past the budget every further node is a constant-
+ * time `truncated` stub and the contract is reported as partial.
+ */
+type NormalizeContext = {
+  warnings: string[];
+  remainingNodes: number;
+  budgetExhausted: boolean;
+  /** JSON size of `default` / `example` values, measured once per distinct object. */
+  valueSizes: WeakMap<object, number>;
+};
+
+const BUDGET_WARNING = 'Schema expansion budget reached; remaining schemas are truncated.';
+
+/**
+ * Per-node bounds. The node budget alone is not enough: a node is re-visited at every `$ref`
+ * that reaches it, so anything proportional to the SIZE of a node (a 400k-item `enum`, a
+ * megabyte-long `$ref` or `example`, a 100k-key `properties` or security object) would be
+ * multiplied by the budget. Every such input is cut to a constant here BEFORE it is copied,
+ * and what is retained is charged to the same budget, so both the work and the size of the
+ * normalized contract are linear in OPENAPI_MAX_SCHEMA_NODES.
+ */
+const MAX_REF_CHARS = 512;
+const MAX_ENUM_ITEMS = 200;
+const MAX_ENUM_ITEM_CHARS = 200;
+const MAX_REQUIRED_ITEMS = 100;
+const MAX_KEY_CHARS = 200;
+const MAX_VALUE_JSON_CHARS = 2_000;
+const MAX_SECURITY_SCHEMES = 20;
+const MAX_WARNINGS = 200;
+/** Retained characters that cost one budget unit. */
+const CHARS_PER_UNIT = 64;
+
+function warn(ctx: NormalizeContext, message: string): void {
+  if (ctx.warnings.length < MAX_WARNINGS) ctx.warnings.push(message);
+}
+
+/** Charge retained text to the budget; false when it no longer fits (the text is dropped). */
+function chargeChars(ctx: NormalizeContext, chars: number): boolean {
+  const units = Math.ceil(chars / CHARS_PER_UNIT);
+  if (units === 0) return true;
+  if (ctx.remainingNodes < units) {
+    ctx.remainingNodes = 0;
+    return false;
+  }
+  ctx.remainingNodes -= units;
+  return true;
+}
+
+/** `description`, bounded and charged. */
+function boundedText(ctx: NormalizeContext, value: unknown): string | undefined {
+  const text = truncateText(value);
+  return text !== undefined && chargeChars(ctx, text.length) ? text : undefined;
+}
+
+/**
+ * `default` / `example`: kept only when small. The size of an object is measured once per
+ * distinct object (not once per expansion) and anything above the cap is dropped.
+ */
+function boundedValue(ctx: NormalizeContext, value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    return value.length <= MAX_VALUE_JSON_CHARS && chargeChars(ctx, value.length)
+      ? value
+      : undefined;
+  }
+  if (typeof value !== 'object') return undefined;
+  let size = ctx.valueSizes.get(value);
+  if (size === undefined) {
+    try {
+      size = JSON.stringify(value)?.length ?? Number.POSITIVE_INFINITY;
+    } catch {
+      size = Number.POSITIVE_INFINITY;
+    }
+    ctx.valueSizes.set(value, size);
+  }
+  return size <= MAX_VALUE_JSON_CHARS && chargeChars(ctx, size) ? value : undefined;
+}
+
+/** At most `max` own keys of `record`, without materializing all of them. */
+function firstKeys(
+  record: Record<string, unknown>,
+  max: number,
+): { keys: string[]; more: boolean } {
+  const keys: string[] = [];
+  for (const key in record) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+    if (keys.length >= max) return { keys, more: true };
+    keys.push(key);
+  }
+  return { keys, more: false };
+}
+
+function shortRef(ref: string): string {
+  return ref.length > 120 ? `${ref.slice(0, 120)}…` : ref;
+}
+
 function normalizeSchema(
   root: Record<string, unknown>,
   value: unknown,
   depth: number,
   stack: string[],
-  warnings: string[],
+  ctx: NormalizeContext,
 ): NormalizedApiSchema {
+  if (ctx.remainingNodes <= 0) {
+    if (!ctx.budgetExhausted) {
+      ctx.budgetExhausted = true;
+      ctx.warnings.push(BUDGET_WARNING);
+    }
+    return { truncated: true, description: 'Schema expansion budget reached' };
+  }
+  ctx.remainingNodes -= 1;
   if (depth > OPENAPI_MAX_SCHEMA_DEPTH) {
     return { truncated: true, description: 'Schema depth limit reached' };
   }
@@ -94,34 +205,33 @@ function normalizeSchema(
 
   if (typeof rec.$ref === 'string') {
     const ref = rec.$ref;
+    if (ref.length > MAX_REF_CHARS) {
+      warn(ctx, 'Reference too long; not resolved');
+      return { unresolvedRef: shortRef(ref), truncated: true };
+    }
     if (!ref.startsWith('#/')) {
-      warnings.push(`External $ref not resolved: ${ref}`);
+      warn(ctx, `External $ref not resolved: ${shortRef(ref)}`);
       return { unresolvedRef: ref, truncated: true };
     }
     const resolved = resolveLocalRef(root, ref, stack, OPENAPI_MAX_SCHEMA_DEPTH);
     const resolvedRec = asRecord(resolved);
     if (resolvedRec?.__circular || resolvedRec?.__unresolved || resolvedRec?.__externalRef) {
-      warnings.push(`Reference limit/unresolved: ${ref}`);
+      warn(ctx, `Reference limit/unresolved: ${shortRef(ref)}`);
       return { unresolvedRef: ref, truncated: true };
     }
     const name = ref.split('/').pop();
-    const nested = normalizeSchema(root, resolved, depth + 1, [...stack, ref], warnings);
+    const nested = normalizeSchema(root, resolved, depth + 1, [...stack, ref], ctx);
     return { ...nested, name: nested.name ?? name };
   }
 
   const schema: NormalizedApiSchema = {
     type: typeof rec.type === 'string' ? rec.type : undefined,
     format: typeof rec.format === 'string' ? rec.format : undefined,
-    description: truncateText(rec.description),
+    description: boundedText(ctx, rec.description),
     nullable: typeof rec.nullable === 'boolean' ? rec.nullable : undefined,
-    enum: Array.isArray(rec.enum)
-      ? (rec.enum.filter(
-          (v) =>
-            v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
-        ) as Array<string | number | boolean | null>)
-      : undefined,
-    default: rec.default,
-    example: rec.example,
+    enum: normalizeEnum(ctx, rec.enum),
+    default: boundedValue(ctx, rec.default),
+    example: boundedValue(ctx, rec.example),
     minimum: typeof rec.minimum === 'number' ? rec.minimum : undefined,
     maximum: typeof rec.maximum === 'number' ? rec.maximum : undefined,
     minLength: typeof rec.minLength === 'number' ? rec.minLength : undefined,
@@ -129,24 +239,39 @@ function normalizeSchema(
   };
 
   if (Array.isArray(rec.required)) {
-    schema.required = rec.required.filter((v): v is string => typeof v === 'string').slice(0, 100);
+    // Slice BEFORE filtering: the input array may be huge and this node is visited many times.
+    const required = rec.required
+      .slice(0, MAX_REQUIRED_ITEMS)
+      .filter((v): v is string => typeof v === 'string' && v.length <= MAX_KEY_CHARS);
+    if (
+      chargeChars(
+        ctx,
+        required.reduce((n, v) => n + v.length, 0),
+      )
+    ) {
+      schema.required = required;
+    }
   }
 
   const props = asRecord(rec.properties);
   if (props) {
-    const entries = Object.entries(props).slice(0, OPENAPI_MAX_PROPERTIES);
+    const { keys, more } = firstKeys(props, OPENAPI_MAX_PROPERTIES);
     schema.properties = {};
-    for (const [key, prop] of entries) {
-      schema.properties[key] = normalizeSchema(root, prop, depth + 1, stack, warnings);
+    for (const key of keys) {
+      if (key.length > MAX_KEY_CHARS || !chargeChars(ctx, key.length)) {
+        schema.truncated = true;
+        continue;
+      }
+      schema.properties[key] = normalizeSchema(root, props[key], depth + 1, stack, ctx);
     }
-    if (Object.keys(props).length > OPENAPI_MAX_PROPERTIES) {
+    if (more) {
       schema.truncated = true;
-      warnings.push('Schema property count truncated');
+      warn(ctx, 'Schema property count truncated');
     }
   }
 
   if (rec.items) {
-    schema.items = normalizeSchema(root, rec.items, depth + 1, stack, warnings);
+    schema.items = normalizeSchema(root, rec.items, depth + 1, stack, ctx);
   }
 
   for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
@@ -154,7 +279,7 @@ function normalizeSchema(
     if (Array.isArray(list)) {
       schema[key] = list
         .slice(0, 8)
-        .map((item) => normalizeSchema(root, item, depth + 1, stack, warnings));
+        .map((item) => normalizeSchema(root, item, depth + 1, stack, ctx));
     }
   }
 
@@ -166,7 +291,7 @@ function normalizeSchema(
       rec.additionalProperties,
       depth + 1,
       stack,
-      warnings,
+      ctx,
     );
   }
 
@@ -176,7 +301,7 @@ function normalizeSchema(
 function normalizeParameters(
   root: Record<string, unknown>,
   value: unknown,
-  warnings: string[],
+  ctx: NormalizeContext,
 ): NormalizedApiParameter[] {
   if (!Array.isArray(value)) {
     return [];
@@ -197,7 +322,7 @@ function normalizeParameters(
       required: Boolean(rec.required) || location === 'path',
       description: truncateText(rec.description),
       deprecated: Boolean(rec.deprecated),
-      schema: rec.schema ? normalizeSchema(root, rec.schema, 0, [], warnings) : undefined,
+      schema: rec.schema ? normalizeSchema(root, rec.schema, 0, [], ctx) : undefined,
     });
   }
   return out;
@@ -206,7 +331,7 @@ function normalizeParameters(
 function normalizeRequestBody(
   root: Record<string, unknown>,
   value: unknown,
-  warnings: string[],
+  ctx: NormalizeContext,
 ): NormalizedRequestBody | undefined {
   const rec = asRecord(value);
   if (!rec) {
@@ -225,7 +350,7 @@ function normalizeRequestBody(
           : undefined;
     const media = asRecord(preferred);
     if (media?.schema) {
-      schema = normalizeSchema(root, media.schema, 0, [], warnings);
+      schema = normalizeSchema(root, media.schema, 0, [], ctx);
     }
   }
   return {
@@ -239,14 +364,15 @@ function normalizeRequestBody(
 function normalizeResponses(
   root: Record<string, unknown>,
   value: unknown,
-  warnings: string[],
+  ctx: NormalizeContext,
 ): NormalizedApiResponse[] {
   const rec = asRecord(value);
   if (!rec) {
     return [];
   }
   const out: NormalizedApiResponse[] = [];
-  for (const [statusCode, responseValue] of Object.entries(rec).slice(0, 30)) {
+  for (const statusCode of firstKeys(rec, 30).keys) {
+    const responseValue = rec[statusCode];
     const response = asRecord(responseValue);
     if (!response) {
       continue;
@@ -260,7 +386,7 @@ function normalizeResponses(
         content['application/json'] != null ? 'application/json' : Object.keys(content)[0];
       const media = asRecord(preferred);
       if (media?.schema) {
-        schema = normalizeSchema(root, media.schema, 0, [], warnings);
+        schema = normalizeSchema(root, media.schema, 0, [], ctx);
       }
     }
     out.push({
@@ -273,6 +399,26 @@ function normalizeResponses(
   return out;
 }
 
+function normalizeEnum(
+  ctx: NormalizeContext,
+  value: unknown,
+): Array<string | number | boolean | null> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  // Slice BEFORE filtering (see the per-node bounds above).
+  const items = value
+    .slice(0, MAX_ENUM_ITEMS)
+    .filter(
+      (v): v is string | number | boolean | null =>
+        v === null ||
+        typeof v === 'number' ||
+        typeof v === 'boolean' ||
+        (typeof v === 'string' && v.length <= MAX_ENUM_ITEM_CHARS),
+    );
+  const chars = items.reduce<number>((n, v) => n + (typeof v === 'string' ? v.length : 4), 0);
+  return chargeChars(ctx, chars) ? items : undefined;
+}
+
+/** Bounded per requirement object and per scope list; computed once per distinct input. */
 function normalizeSecurity(value: unknown): NormalizedSecurityRequirement[] | undefined {
   if (!Array.isArray(value) || value.length === 0) {
     return undefined;
@@ -281,11 +427,15 @@ function normalizeSecurity(value: unknown): NormalizedSecurityRequirement[] | un
   for (const item of value.slice(0, 10)) {
     const rec = asRecord(item);
     if (!rec) continue;
-    for (const [name, scopes] of Object.entries(rec)) {
+    for (const name of firstKeys(rec, MAX_SECURITY_SCHEMES).keys) {
+      if (name.length > MAX_KEY_CHARS) continue;
+      const scopes = rec[name];
       out.push({
         name,
         scopes: Array.isArray(scopes)
-          ? scopes.filter((s): s is string => typeof s === 'string').slice(0, 20)
+          ? scopes
+              .slice(0, 20)
+              .filter((s): s is string => typeof s === 'string' && s.length <= MAX_KEY_CHARS)
           : undefined,
       });
     }
@@ -307,6 +457,15 @@ export function normalizeOpenApiDocument(
 
   const root = document;
   const warnings: string[] = [];
+  const ctx: NormalizeContext = {
+    warnings,
+    remainingNodes: OPENAPI_MAX_SCHEMA_NODES,
+    budgetExhausted: false,
+    valueSizes: new WeakMap(),
+  };
+  // The document-level security requirement applies to every operation without its own:
+  // normalized once and shared, not once per operation.
+  const rootSecurity = normalizeSecurity(root.security);
   const openapiVersion =
     typeof root.openapi === 'string'
       ? root.openapi
@@ -336,7 +495,7 @@ export function normalizeOpenApiDocument(
     }
     // Seed stack with this schema's own $ref so self-references truncate immediately.
     schemas[name] = {
-      ...normalizeSchema(root, schema, 0, [`${schemaRefPrefix}${name}`], warnings),
+      ...normalizeSchema(root, schema, 0, [`${schemaRefPrefix}${name}`], ctx),
       name,
     };
     schemaCount += 1;
@@ -358,8 +517,8 @@ export function normalizeOpenApiDocument(
       if (!op) continue;
 
       // Swagger 2.0 request body often uses body parameter
-      let requestBody = normalizeRequestBody(root, op.requestBody, warnings);
-      const parameters = normalizeParameters(root, op.parameters, warnings);
+      let requestBody = normalizeRequestBody(root, op.requestBody, ctx);
+      const parameters = normalizeParameters(root, op.parameters, ctx);
       if (!requestBody) {
         const bodyParam = parameters.find((p) => p.in === 'path' && false);
         void bodyParam;
@@ -371,7 +530,7 @@ export function normalizeOpenApiDocument(
             required: Boolean(swaggerBody.required),
             description: truncateText(swaggerBody.description),
             contentType: 'application/json',
-            schema: normalizeSchema(root, swaggerBody.schema, 0, [], warnings),
+            schema: normalizeSchema(root, swaggerBody.schema, 0, [], ctx),
           };
         }
       }
@@ -390,8 +549,8 @@ export function normalizeOpenApiDocument(
         deprecated: Boolean(op.deprecated),
         parameters: parameters.filter((p) => p.in !== 'path' || true),
         requestBody,
-        responses: normalizeResponses(root, op.responses, warnings),
-        security: normalizeSecurity(op.security ?? root.security),
+        responses: normalizeResponses(root, op.responses, ctx),
+        security: op.security !== undefined ? normalizeSecurity(op.security) : rootSecurity,
       });
     }
   }
@@ -444,7 +603,11 @@ export function normalizeOpenApiDocument(
     schemas,
     source,
     documentHash: hashOpenApiDocument(rawForHash),
-    partial: totalOps > OPENAPI_MAX_OPERATIONS || schemaCount >= OPENAPI_MAX_SCHEMAS || undefined,
+    partial:
+      totalOps > OPENAPI_MAX_OPERATIONS ||
+      schemaCount >= OPENAPI_MAX_SCHEMAS ||
+      ctx.budgetExhausted ||
+      undefined,
     warnings: warnings.length ? [...new Set(warnings)].slice(0, 40) : undefined,
     operationCountTotal: totalOps,
     operationCountIncluded: operations.length,

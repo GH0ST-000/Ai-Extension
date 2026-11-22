@@ -11,6 +11,7 @@ import { ThemeToggle } from '../../../components/theme-toggle';
 import { ApiError } from '../../../lib/api';
 import { getStoredUser } from '../../../lib/auth-storage';
 import { acceptInvitation } from '../../../lib/workspace-api';
+import { EmailVerificationNotice } from '../../../components/account/email-verification-notice';
 
 const WORKSPACE_STORAGE_KEY = 'project-x.dashboard.workspaceId';
 
@@ -33,6 +34,8 @@ export default function AcceptInvitePage() {
 
   const [status, setStatus] = useState<'checking' | 'accepting' | 'success' | 'error'>('checking');
   const [error, setError] = useState<string | null>(null);
+  /** Decision A: the account must confirm its email before accepting. */
+  const [needsVerification, setNeedsVerification] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +66,7 @@ export default function AcceptInvitePage() {
       } catch (err) {
         if (!cancelled) {
           setStatus('error');
+          setNeedsVerification(err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED');
           setError(apiMessage(err, 'Unable to accept this invitation.'));
         }
       }
@@ -109,6 +113,15 @@ export default function AcceptInvitePage() {
                 ? 'Redirecting to your workspace members.'
                 : (error ?? 'This invitation could not be accepted.')}
           </p>
+
+          {status === 'error' && needsVerification ? (
+            <div className="mt-6 space-y-3">
+              <EmailVerificationNotice force />
+              <p className="text-center text-xs text-muted-foreground">
+                After confirming, open this invitation link again — it stays valid until it expires.
+              </p>
+            </div>
+          ) : null}
 
           {status === 'error' ? (
             <div className="mt-8 flex flex-col items-center gap-3">

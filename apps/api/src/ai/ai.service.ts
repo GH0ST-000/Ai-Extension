@@ -76,6 +76,13 @@ import {
   type PrReviewImpactInput,
 } from './pr-review/pr-review-impact.service';
 import { PullRequestDiffService } from './pr-review/pull-request-diff.service';
+import {
+  redactDiffFilesForAi,
+  redactErrorMessageForLog,
+  redactFileProviderForAi,
+  redactPlanForAi,
+  sanitizeProviderPrompt,
+} from './ai-redaction';
 
 export interface AiTextStreamHandle {
   pipeTextStreamToResponse: (response: ServerResponse) => Promise<void>;
@@ -103,6 +110,21 @@ export const PR_REVIEW_FAILED_TEXT = [
   'Not reviewed.',
   `${PR_REVIEW_INCOMPLETE_MARKER} reason=error]]`,
 ].join('\n');
+
+/**
+ * Same body when the unit WAS charged (F-06: the review ran model calls and this user's daily
+ * refund budget for such failures is spent) — it must not claim otherwise.
+ */
+export const PR_REVIEW_FAILED_CHARGED_TEXT = PR_REVIEW_FAILED_TEXT.replace(
+  ' No usage was charged.',
+  '',
+);
+
+/**
+ * F-07: structured JSON actions need room to finish their object. The per-user response-length
+ * setting (down to 150 tokens) would truncate it — an unparsable, refunded result every time.
+ */
+const STRUCTURED_OUTPUT_MIN_TOKENS = 1_500;
 
 /** Used when config predates the PR review overrides (e.g. hand-built test config). */
 const DEFAULT_PR_REVIEW_MAX_OUTPUT_TOKENS = 4_096;
@@ -344,7 +366,8 @@ export class AiService {
           });
           const out = result.text.trim();
           if (!out) {
-            throw new ServiceUnavailableException('Unable to generate a response.');
+            // The provider call completed (and was billed) but returned nothing usable.
+            throw new EmptyProviderOutput();
           }
           const incomplete =
             run.request.action === AIAction.REVIEW_ENTIRE_PR &&
@@ -439,12 +462,21 @@ export class AiService {
       };
     } catch (error) {
       if (error instanceof OutputRejected) {
-        // The caller could not use the output: no usable result, no charge. Not a provider fault.
-        await this.settleUsage(run.reservation, 'release');
+        // The caller could not use the output. The provider call COMPLETED (tokens were
+        // spent), so this is a budgeted refund, not an unconditional one (F-07): repeated
+        // unusable outputs stop being free. Not a provider fault.
+        await this.settleAfterProviderWork(run.reservation, userId, 'output_rejected');
         throw error.cause;
       }
       this.providerHealth.recordSignal('ai', false);
-      await this.settleUsage(run.reservation, 'release');
+      if (error instanceof EmptyProviderOutput) {
+        // Completed provider work with an empty answer (which a prompt can ask for): a
+        // budgeted refund, like any other unusable output — not an unconditional one.
+        await this.settleAfterProviderWork(run.reservation, userId, 'empty_output');
+      } else {
+        // The provider itself failed (error / timeout): a plain refund.
+        await this.settleUsage(run.reservation, 'release');
+      }
       this.logFailure('ai.generate.failure', run.request, startedAt, error);
       await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
         status: 'failed',
@@ -500,6 +532,19 @@ export class AiService {
         charge && text ? { text, meta: {} } : undefined,
       );
     };
+    /**
+     * F-06: the model call was started and the client went away before the first chunk. The
+     * provider has been sent (and bills for) the prompt, so the refund is budgeted.
+     */
+    const settleAborted = () => {
+      if (settled) return;
+      if (delivered) {
+        settle(true);
+        return;
+      }
+      settled = true;
+      void this.settleAfterProviderWork(run.reservation, userId, 'stream_aborted');
+    };
 
     this.requestContext.patch({
       capability,
@@ -537,10 +582,16 @@ export class AiService {
           }
         },
         onAbort: () => {
-          settle(delivered);
+          settleAborted();
         },
         onFinish: ({ text, usage }) => {
-          settle(text.trim().length > 0 || delivered, text);
+          if (text.trim().length > 0 || delivered) {
+            settle(true, text);
+          } else if (!settled) {
+            // The stream completed without any text: provider work with nothing usable.
+            settled = true;
+            void this.settleAfterProviderWork(run.reservation, userId, 'empty_stream');
+          }
           const observation = this.aiObservability.recordStreamSuccess({
             provider,
             model,
@@ -781,10 +832,13 @@ export class AiService {
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
 
+    // N-1: active membership in an active workspace + workflow:execute, re-checked per run
+    // (including lost-response replays) — never a predicted workspace id.
     const workspaceId = await resolveWorkspaceIdForUser(
       this.prisma,
       userId,
       this.requestContext.get()?.workspaceId,
+      'workflow:execute',
     );
     await this.featureGate.require(workspaceId, featureForAiAction(request.action));
 
@@ -800,7 +854,12 @@ export class AiService {
       input,
       request.context?.github?.changedFiles,
     );
-    const prompt = { ...built, messages: this.withTrustedMemory(built.messages, memory?.block) };
+    // M6: what reaches the provider (and the audit snapshot) is the redacted prompt —
+    // selection, page context, PR metadata and Project Memory alike.
+    const prompt = sanitizeProviderPrompt({
+      ...built,
+      messages: this.withTrustedMemory(built.messages, memory?.block),
+    });
 
     let contextVersions: ResolvedAiRun['contextVersions'] = memory?.version
       ? { memoryVersion: memory.version }
@@ -897,10 +956,13 @@ export class AiService {
   ): Promise<PrReviewRun> {
     const settings = await this.settingsService.getForUser(userId);
     const request = this.toRequest(input, settings.includePageContext);
+    // N-1: active membership in an active workspace + workflow:execute, re-checked per run
+    // (including lost-response replays) — never a predicted workspace id.
     const workspaceId = await resolveWorkspaceIdForUser(
       this.prisma,
       userId,
       this.requestContext.get()?.workspaceId,
+      'workflow:execute',
     );
     await this.featureGate.require(workspaceId, featureForAiAction(request.action));
 
@@ -963,41 +1025,50 @@ export class AiService {
       allPaths,
       batchCount: 0,
     };
-    const plan = planPrReview({
-      files: diff.files,
-      totalFiles: diff.totalFiles,
-      source: diff.source,
-      overheadChars: batchPromptOverheadChars(context, memory?.block),
-      limits,
-    });
+    // M6: batches carry redacted diff chunks (prompt, validation and verification all read
+    // them); the GitHub diff itself (`diff.files`, used by non-AI analysis) is untouched.
+    const plan = redactPlanForAi(
+      planPrReview({
+        // N1: whole-file redaction before chunking (keys split across chunks).
+        files: redactDiffFilesForAi(diff.files),
+        totalFiles: diff.totalFiles,
+        source: diff.source,
+        overheadChars: batchPromptOverheadChars(context, memory?.block),
+        limits,
+      }),
+    );
     context.batchCount = plan.batches.length;
 
     // Same workspace-scoped credentials as the diff; only for the authoritative API diff.
     const fileProvider =
       diff.source === 'github_api' && diff.headSha && limits.maxContextFiles > 0
-        ? this.pullRequestDiff!.createFileProvider({
-            userId,
-            workspaceId,
-            owner,
-            repository,
-            ref: diff.headSha,
-            maxFiles: limits.maxContextFiles,
-          })
+        ? redactFileProviderForAi(
+            this.pullRequestDiff!.createFileProvider({
+              userId,
+              workspaceId,
+              owner,
+              repository,
+              ref: diff.headSha,
+              maxFiles: limits.maxContextFiles,
+            }),
+          )
         : undefined;
 
     // Dependency sources: same authorized access layer, same pinned head SHA, own budget.
     const dependencyProvider =
       diff.source === 'github_api' && diff.headSha
-        ? this.pullRequestDiff!.createFileProvider({
-            userId,
-            workspaceId,
-            owner,
-            repository,
-            ref: diff.headSha,
-            // Network cap; the resolver charges only existing source files to the 16-file
-            // budget, with separate caps for config reads and missing-file probes.
-            maxFiles: DEP_MAX_REQUESTS_PER_REVIEW,
-          })
+        ? redactFileProviderForAi(
+            this.pullRequestDiff!.createFileProvider({
+              userId,
+              workspaceId,
+              owner,
+              repository,
+              ref: diff.headSha,
+              // Network cap; the resolver charges only existing source files to the 16-file
+              // budget, with separate caps for config reads and missing-file probes.
+              maxFiles: DEP_MAX_REQUESTS_PER_REVIEW,
+            }),
+          )
         : undefined;
 
     // One review = one unit, whatever the number of batches or retries. Reserved last (after
@@ -1159,7 +1230,14 @@ export class AiService {
     const cancelled = result.cancelled || abortSignal?.aborted === true;
     if (run.plan.batches.length > 0 && (!anySucceeded || cancelled)) {
       impact?.cancel();
-      await this.releaseCharge(run, cancelled ? 'cancelled' : 'all_batches_failed');
+      // F-06: model calls already ran (and were billed by the provider) when the client hung
+      // up or every batch failed — a budgeted refund. Nothing ran: a plain refund.
+      const providerWorked = result.tokens.calls + result.verificationTokens.calls > 0;
+      const settlement = await this.releaseCharge(
+        run,
+        cancelled ? 'cancelled' : 'all_batches_failed',
+        providerWorked ? { providerWorkedFor: userId } : {},
+      );
       this.logPrReview(run, result, null, startedAt);
       await this.reliability?.recordAiRequestBestEffort(userId, run.executionId, {
         status: 'failed',
@@ -1181,7 +1259,9 @@ export class AiService {
         startedAt,
       });
       throw new ServiceUnavailableException(
-        'Unable to complete the PR review right now. No usage was charged; try again.',
+        settlement === 'charged'
+          ? 'Unable to complete the PR review right now. Try again in a moment.'
+          : 'Unable to complete the PR review right now. No usage was charged; try again.',
       );
     }
 
@@ -1300,7 +1380,9 @@ export class AiService {
         msg: 'pr_review.stream.failed',
         errorName: error instanceof Error ? error.name : 'unknown',
       });
-      response.write(PR_REVIEW_FAILED_TEXT);
+      response.write(
+        run.settled === 'committed' ? PR_REVIEW_FAILED_CHARGED_TEXT : PR_REVIEW_FAILED_TEXT,
+      );
       response.end();
       return;
     }
@@ -1415,12 +1497,32 @@ export class AiService {
     });
   }
 
-  /** Refund the review's unit when nothing was delivered. Once only; never after a commit. */
-  private async releaseCharge(run: PrReviewRun, reason: string): Promise<void> {
-    if (!run.reservation || run.settled) return;
+  /**
+   * Settle a review that delivered nothing. Once only; never after a commit. A plain refund
+   * unless `providerWorkedFor` names the user whose review already ran model calls — then the
+   * refund comes out of that user's daily budget and the unit is charged once it is spent
+   * (F-06). Returns what happened to the unit.
+   */
+  private async releaseCharge(
+    run: PrReviewRun,
+    reason: string,
+    options: { providerWorkedFor?: string } = {},
+  ): Promise<'refunded' | 'charged' | 'none'> {
+    if (!run.reservation || run.settled) return 'none';
+    if (options.providerWorkedFor) {
+      const outcome = await this.settleAfterProviderWork(
+        run.reservation,
+        options.providerWorkedFor,
+        reason,
+      );
+      run.settled = outcome === 'charged' ? 'committed' : 'released';
+      this.logger.log({ msg: 'pr_review.usage.settled_after_provider_work', reason, outcome });
+      return outcome === 'charged' ? 'charged' : 'refunded';
+    }
     run.settled = 'released';
     const released = await this.settleUsage(run.reservation, 'release');
     this.logger.log({ msg: 'pr_review.usage.released', reason, released });
+    return 'refunded';
   }
 
   /** Charge the review's unit (output is being delivered), keeping a replay copy. Once only. */
@@ -1470,6 +1572,42 @@ export class AiService {
     if (!found) return null;
     this.logger.log({ msg: 'usage.replay', operationId });
     return { operationId, text: found.text, meta: (found.meta ?? {}) as StoredMeta };
+  }
+
+  /**
+   * Settle a reservation whose provider work was already done but produced nothing usable
+   * (F-06 / F-07): refunded from the user's daily budget, charged beyond it. Never throws; on
+   * failure the open reservation is left to lease recovery, like {@link settleUsage}.
+   */
+  private async settleAfterProviderWork(
+    reservation: UsageReservation | undefined,
+    userId: string,
+    reason: string,
+  ): Promise<'refunded' | 'charged' | 'missing'> {
+    if (!reservation) return 'missing';
+    this.dropLease(reservation);
+    try {
+      const outcome = await withRetry(() =>
+        this.usage.settleAfterProviderWork(reservation, userId),
+      );
+      this.logger.log({
+        msg: 'usage.settled_after_provider_work',
+        outcome,
+        reason,
+        operationId: reservation.operationId,
+        metric: reservation.metric,
+      });
+      return outcome;
+    } catch (error) {
+      this.logger.error({
+        msg: 'usage.settlement_failed',
+        action: 'settle_after_provider_work',
+        operationId: reservation.operationId,
+        metric: reservation.metric,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      });
+      return 'missing';
+    }
   }
 
   /**
@@ -1587,6 +1725,12 @@ export class AiService {
           ai.requestTimeoutMs,
           ai.prReview?.requestTimeoutMs ?? DEFAULT_PR_REVIEW_TIMEOUT_MS,
         ),
+      };
+    }
+    if (action === AIAction.ANALYZE_CI_FAILURE) {
+      return {
+        maxOutputTokens: Math.max(this.clampTokens(userTokens), STRUCTURED_OUTPUT_MIN_TOKENS),
+        requestTimeoutMs: ai.requestTimeoutMs,
       };
     }
     return { maxOutputTokens: this.clampTokens(userTokens), requestTimeoutMs: ai.requestTimeoutMs };
@@ -1876,7 +2020,8 @@ export class AiService {
       contextType: request.context?.type ?? null,
       contextHost: this.safeHost(request.context?.url),
       errorName: err.name,
-      errorMessage: err.message,
+      // N-7: provider errors may echo request content.
+      errorMessage: redactErrorMessageForLog(err.message),
     });
   }
 
@@ -1921,6 +2066,13 @@ function inFlightKey(userId: string, action: string, payload: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify([userId, action, payload]))
     .digest('hex');
+}
+
+/** The provider answered, with no text at all (settled as provider work, not as a failure). */
+class EmptyProviderOutput extends ServiceUnavailableException {
+  constructor() {
+    super('Unable to generate a response.');
+  }
 }
 
 /** The caller's `validate` rejected the model output (refunded; rethrown as the cause). */

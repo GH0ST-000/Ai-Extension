@@ -1,7 +1,12 @@
+import { createPrivateKey } from 'node:crypto';
+import { isIP } from 'node:net';
+
 import { z } from 'zod';
 
 import {
+  applyDatabaseSslFlag,
   databaseUrlUsesTls,
+  databaseUrlVerifiesCertificate,
   isLocalDatabaseHost,
   isLocalRedisHost,
   postgresHostFromDatabaseUrl,
@@ -10,12 +15,20 @@ import {
 export {
   applyDatabaseSslFlag,
   databaseUrlUsesTls,
+  databaseUrlVerifiesCertificate,
   isLocalDatabaseHost,
   isLocalRedisHost,
   postgresHostFromDatabaseUrl,
 } from './database-url';
 
 export const nodeEnvSchema = z.enum(['development', 'test', 'production']);
+
+export type NodeEnv = z.infer<typeof nodeEnvSchema>;
+
+/** The only environments allowed to use development conveniences (fallback secrets, open CORS). */
+export function isLocalNodeEnv(nodeEnv: string | undefined): nodeEnv is 'development' | 'test' {
+  return nodeEnv === 'development' || nodeEnv === 'test';
+}
 
 export const aiProviderSchema = z.enum(['openai']);
 
@@ -53,8 +66,22 @@ function envBoolean(defaultValue = false) {
 }
 
 export const apiEnvSchema = z.object({
-  NODE_ENV: nodeEnvSchema.default('development'),
-  API_HOST: z.string().default('0.0.0.0'),
+  /**
+   * Required, never defaulted: an unset NODE_ENV used to mean "development", which silently
+   * enabled the development JWT secret, encryption-key fallback and open CORS. A deployment
+   * that forgets NODE_ENV now fails at startup instead.
+   */
+  NODE_ENV: z.enum(['development', 'test', 'production'], {
+    errorMap: () => ({
+      message: 'NODE_ENV must be set explicitly to "development", "test" or "production".',
+    }),
+  }),
+  /**
+   * Bind address. Unset → `resolveApiHost`: loopback (127.0.0.1) for development and test,
+   * all interfaces (0.0.0.0) for production (container platforms route to it). Setting it
+   * explicitly (e.g. API_HOST=0.0.0.0 for Docker/LAN development) is the opt-in.
+   */
+  API_HOST: z.string().optional(),
   API_PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().url(),
   REDIS_HOST: z.string().default('localhost'),
@@ -62,8 +89,28 @@ export const apiEnvSchema = z.object({
   REDIS_PASSWORD: z.string().optional().default(''),
   /** Enable TLS when connecting to Redis (managed cloud Redis). */
   REDIS_TLS: envBoolean(false),
-  /** When true, append sslmode=require to DATABASE_URL if not already set. */
+  /**
+   * When true, the database connection is made to require TLS: `sslmode=require` is added to
+   * (or replaces a weaker mode in) the URL the API connects with.
+   */
   DATABASE_SSL: envBoolean(false),
+  /**
+   * Deployment stage of a NODE_ENV=production server. `staging` keeps EVERY production
+   * security requirement (secrets, origins, secure cookies, TLS, mail, webhook verification)
+   * and differs in exactly one thing: billing must be the Paddle SANDBOX — sandbox is allowed
+   * and live Paddle is refused, so a staging server can never charge real money. Ignored
+   * outside NODE_ENV=production.
+   */
+  APP_STAGE: z.enum(['production', 'staging']).default('production'),
+  /**
+   * F-26: number of trusted reverse-proxy hops in front of the API (Express `trust proxy`).
+   * The client address used for rate limiting is taken that many hops from the right of
+   * X-Forwarded-For. 0 = no proxy (the header is ignored); 1 = one load balancer / platform
+   * router; 2 = CDN + load balancer. Wrong values either let clients spoof their address
+   * (too high) or put every client behind the proxy's address (too low). Unset: 1 in
+   * production (the previous behaviour), 0 otherwise.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   AI_PROVIDER: aiProviderSchema.default('openai'),
   AI_MODEL: z.string().min(1).default('gpt-4o-mini'),
@@ -217,6 +264,19 @@ export function collectGitHubAppConfigIssues(env: ApiEnv): ProductionSecurityIss
     return issues;
   }
 
+  // Decision D: a malformed private key must fail at startup, not at the first App call.
+  const rawKey = env.GITHUB_APP_PRIVATE_KEY.trim();
+  if (rawKey) {
+    try {
+      createPrivateKey(rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey);
+    } catch {
+      issues.push({
+        code: 'GITHUB_APP_PRIVATE_KEY_INVALID',
+        message: 'GITHUB_APP_PRIVATE_KEY is not a valid PEM private key.',
+      });
+    }
+  }
+
   for (const key of GITHUB_APP_REQUIRED_KEYS) {
     if (!envFieldSet(env, key)) {
       issues.push({
@@ -301,8 +361,10 @@ export type ProductionSecurityIssue = {
  * Call after Zod parse; throws aggregated Error on any issue.
  */
 export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurityIssue[] {
-  if (env.NODE_ENV !== 'production') {
-    return [];
+  // N-6: `test` is no blanket bypass — like `development`, a test-mode server whose public URL
+  // is not local must not run on the known development secrets.
+  if (env.NODE_ENV === 'test' || env.NODE_ENV === 'development') {
+    return collectDevelopmentExposureIssues(env);
   }
 
   const issues: ProductionSecurityIssue[] = [];
@@ -386,10 +448,32 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
     });
   }
 
-  if (env.PADDLE_ENVIRONMENT === 'sandbox') {
+  if (env.APP_STAGE === 'staging') {
+    // Staging: production hardening, sandbox billing only (never real charges).
+    if (env.PADDLE_ENVIRONMENT !== 'sandbox') {
+      issues.push({
+        code: 'PADDLE_PRODUCTION_IN_STAGING',
+        message:
+          'APP_STAGE=staging must use PADDLE_ENVIRONMENT=sandbox: a staging server must never bill real customers.',
+      });
+    }
+    if (/^pdl_live_/i.test(env.PADDLE_API_KEY ?? '')) {
+      issues.push({
+        code: 'PADDLE_LIVE_KEY_IN_STAGING',
+        message: 'PADDLE_API_KEY is a live key; APP_STAGE=staging requires a sandbox key.',
+      });
+    }
+    if (!env.PADDLE_PRICE_PRO_MONTHLY || !env.PADDLE_PRICE_TEAM_MONTHLY) {
+      issues.push({
+        code: 'PADDLE_STAGING_PRICES',
+        message: 'Sandbox Paddle price IDs must be configured for Pro and Team plans in staging.',
+      });
+    }
+  } else if (env.PADDLE_ENVIRONMENT === 'sandbox') {
     issues.push({
       code: 'PADDLE_SANDBOX_IN_PRODUCTION',
-      message: 'PADDLE_ENVIRONMENT=sandbox is forbidden when NODE_ENV=production.',
+      message:
+        'PADDLE_ENVIRONMENT=sandbox is forbidden when NODE_ENV=production (a staging deployment sets APP_STAGE=staging).',
     });
   }
 
@@ -441,13 +525,333 @@ export function collectProductionSecurityIssues(env: ApiEnv): ProductionSecurity
     issues.push({
       code: 'DATABASE_REMOTE_WITHOUT_SSL',
       message:
-        'Remote Postgres in production must use TLS (DATABASE_SSL=true or sslmode=require / verify-* in DATABASE_URL).',
+        'Remote Postgres in production must REQUIRE TLS: set DATABASE_SSL=true, or sslmode=require in DATABASE_URL (prefer, allow and disable permit plaintext; verify-ca / verify-full are not Prisma values — use sslmode=require with sslaccept=strict to verify the certificate).',
     });
   }
 
   issues.push(...collectGitHubAppConfigIssues(env));
   issues.push(...collectMailConfigIssues(env));
+  issues.push(...collectProductionMailIssues(env));
 
+  return issues;
+}
+
+/**
+ * `NODE_ENV=development` is for local machines. If it is served from a public address
+ * (APP_BASE_URL not localhost), the development fallbacks must not be in use: a known JWT
+ * secret would let anyone forge sessions, and the encryption key would fall back to it.
+ * Messages name the keys, never their values.
+ */
+/**
+ * N-6: non-fatal deployment warnings for development/test configurations that look reachable
+ * from other machines (the API binds a non-loopback address) while still using the known
+ * development JWT secret. Not fatal because local Docker setups bind 0.0.0.0 by design; a
+ * public deployment must use NODE_ENV=production (which fails closed on these values).
+ */
+export function collectDeploymentWarnings(env: ApiEnv): ProductionSecurityIssue[] {
+  if (env.NODE_ENV === 'production') {
+    // The extension authenticates from chrome-extension://<id>; without that exact origin in
+    // AI_CORS_ORIGINS its sign-in and refresh are refused (fail closed, but a broken release).
+    const origins = parseOriginList(env.AI_CORS_ORIGINS);
+    const warnings: ProductionSecurityIssue[] = [];
+    if (!origins.some((o) => o.startsWith('chrome-extension://'))) {
+      warnings.push({
+        code: 'EXTENSION_ORIGIN_NOT_CONFIGURED',
+        message:
+          'AI_CORS_ORIGINS has no chrome-extension://<id> entry: browser-extension sign-in will be refused. Add the published extension id.',
+      });
+    }
+    const dbHost = postgresHostFromDatabaseUrl(env.DATABASE_URL);
+    if (
+      !isLocalDatabaseHost(dbHost) &&
+      !databaseUrlVerifiesCertificate(applyDatabaseSslFlag(env.DATABASE_URL, env.DATABASE_SSL))
+    ) {
+      warnings.push({
+        code: 'DATABASE_TLS_CERTIFICATE_NOT_VERIFIED',
+        message:
+          'The database connection is encrypted but the server certificate is not verified (sslmode=require alone). Add sslaccept=strict (with sslcert=<CA file> for a private CA) to DATABASE_URL to protect against an active attacker on the path.',
+      });
+    }
+    if (env.TRUST_PROXY_HOPS === undefined) {
+      warnings.push({
+        code: 'TRUST_PROXY_HOPS_NOT_SET',
+        message:
+          'TRUST_PROXY_HOPS is not set; assuming exactly 1 reverse proxy in front of the API. Set it to the real number of trusted proxies (0 = none) so per-IP rate limits use the right client address.',
+      });
+    }
+    return warnings;
+  }
+  const host = resolveApiHost(env);
+  const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  if (loopback || !INSECURE_JWT_DEFAULTS.has(env.JWT_SECRET)) return [];
+  return [
+    {
+      code: 'INSECURE_DEFAULTS_ON_NETWORK_BIND',
+      message: `NODE_ENV=${env.NODE_ENV} with the default JWT_SECRET while API_HOST=${host} accepts connections from other machines. Never expose this server publicly; deploy with NODE_ENV=production.`,
+    },
+  ];
+}
+
+/**
+ * Decision 3: the address the API binds to. An explicit API_HOST always wins (that is the
+ * opt-in for Docker / LAN development). Otherwise development and test stay on loopback and
+ * production binds all interfaces — production never inherits the local default.
+ */
+/**
+ * F-26: trusted reverse-proxy hops (Express `trust proxy`). Explicit TRUST_PROXY_HOPS wins;
+ * otherwise 1 in production (one platform router / load balancer) and 0 elsewhere. Always a
+ * number — never `true`, which would trust any X-Forwarded-For a client sends.
+ */
+export function resolveTrustProxyHops(env: Pick<ApiEnv, 'TRUST_PROXY_HOPS' | 'NODE_ENV'>): number {
+  if (env.TRUST_PROXY_HOPS !== undefined) return env.TRUST_PROXY_HOPS;
+  return env.NODE_ENV === 'production' ? 1 : 0;
+}
+
+/** `staging` only for a NODE_ENV=production server that set APP_STAGE=staging. */
+export function resolveDeploymentStage(
+  env: Pick<ApiEnv, 'APP_STAGE' | 'NODE_ENV'>,
+): 'production' | 'staging' | 'local' {
+  if (env.NODE_ENV !== 'production') return 'local';
+  return env.APP_STAGE === 'staging' ? 'staging' : 'production';
+}
+
+export function resolveApiHost(env: Pick<ApiEnv, 'API_HOST' | 'NODE_ENV'>): string {
+  const explicit = env.API_HOST?.trim();
+  if (explicit) return explicit;
+  return env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
+}
+
+/**
+ * Decision D: an API_HOST that is a public IP literal or a fully qualified host name binds the
+ * server to a public interface on purpose. `0.0.0.0` / `::` (Docker), loopback and private
+ * network addresses are not treated as explicit public exposure (they get a warning instead).
+ */
+export function isExplicitPublicBind(hostRaw: string): boolean {
+  const host = hostRaw
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase();
+  if (!host || host === 'localhost' || host === '0.0.0.0' || host === '::') return false;
+  // IPv4-mapped IPv6 (::ffff:203.0.113.1) is judged by its IPv4 address.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  if (mapped) return isExplicitPublicBind(mapped[1]!);
+  const family = isIP(host);
+  if (family === 4) {
+    const [a, b] = host.split('.').map(Number) as [number, number];
+    const privateRange =
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254);
+    return !privateRange;
+  }
+  if (family === 6) {
+    return !(host === '::1' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host));
+  }
+  return host.includes('.'); // FQDN; bare names (Docker service names) are local
+}
+
+function collectDevelopmentExposureIssues(env: ApiEnv): ProductionSecurityIssue[] {
+  if (isLocalAppBaseUrl(env.APP_BASE_URL) && !isExplicitPublicBind(resolveApiHost(env))) return [];
+  const issues: ProductionSecurityIssue[] = [];
+  if (INSECURE_JWT_DEFAULTS.has(env.JWT_SECRET) || env.JWT_SECRET.length < 32) {
+    issues.push({
+      code: 'JWT_SECRET_INSECURE',
+      message:
+        'JWT_SECRET must be a unique secret of at least 32 characters when APP_BASE_URL is not local.',
+    });
+  }
+  const encryptionKey = env.TOKEN_ENCRYPTION_KEY?.trim() ?? '';
+  if (!encryptionKey || INSECURE_ENCRYPTION_DEFAULTS.has(encryptionKey)) {
+    issues.push({
+      code: 'TOKEN_ENCRYPTION_KEY_REQUIRED',
+      message: 'TOKEN_ENCRYPTION_KEY must be set when APP_BASE_URL is not local.',
+    });
+  }
+  return issues;
+}
+
+function isLocalAppBaseUrl(raw: string): boolean {
+  try {
+    const host = new URL(raw).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/** Whole words that mark a template host name (matched per token, never as a substring). */
+const PLACEHOLDER_HOST_TOKENS = new Set([
+  'your',
+  'yourdomain',
+  'changeme',
+  'placeholder',
+  'example',
+]);
+
+/** Additional whole words that mark a template secret (`re_your_key_here`, `re_fake_…`). */
+const PLACEHOLDER_SECRET_TOKENS = new Set([
+  ...PLACEHOLDER_HOST_TOKENS,
+  'yourkey',
+  'replace',
+  'replaceme',
+  'dummy',
+  'fake',
+  'sample',
+  'todo',
+  'tbd',
+  'here',
+]);
+
+/**
+ * Obvious template values (`re_your_key_here`, `change-me`, `<key>`, `xxxx`, `re_fake_…`),
+ * case-insensitive. Token-based: `todoist.com`, `yourbank.com`, `counterexample.org` or
+ * `change.org` are not placeholders (adversarial review N5). `kind: 'host'` uses the narrower
+ * list so real domains containing common words are not rejected.
+ */
+export function looksLikePlaceholder(value: string, kind: 'secret' | 'host' = 'secret'): boolean {
+  const lower = value.trim().toLowerCase();
+  if (lower.length === 0 || lower.includes('<') || lower.includes('>')) return true;
+  const tokens = kind === 'host' ? PLACEHOLDER_HOST_TOKENS : PLACEHOLDER_SECRET_TOKENS;
+  return lower
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .some((token) => tokens.has(token) || /^x{3,}$/.test(token));
+}
+
+/** A Resend key whose secret part is too uniform to be real (`re_0000…`, `re_aaaa…`). */
+function isLowEntropyKey(key: string): boolean {
+  const body = key.replace(/^re_/, '').replace(/_/g, '');
+  return new Set(body).size < 8;
+}
+
+/**
+ * Names that can never receive mail or serve the app publicly: RFC 2606 / 6761 reserved names,
+ * `.local`, private-use names (`.internal`, `.home.arpa`, `.lan`, `.corp`, `.home`) and
+ * single-label hosts. A production sender or base URL on one of them is a template value.
+ */
+export function isReservedHostname(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (
+    ['example.com', 'example.net', 'example.org', 'home.arpa'].some(
+      (d) => host === d || host.endsWith(`.${d}`),
+    )
+  ) {
+    return true;
+  }
+  const tld = host.split('.').pop() ?? '';
+  return (
+    [
+      'example',
+      'test',
+      'invalid',
+      'localhost',
+      'local',
+      'internal',
+      'lan',
+      'corp',
+      'home',
+      'intranet',
+    ].includes(tld) || !host.includes('.')
+  );
+}
+
+/**
+ * Resend's shared sandbox sender (`onboarding@resend.dev`) delivers only to the Resend account
+ * owner: production would start and every verification email would be rejected (review N3).
+ */
+const SANDBOX_SENDER_DOMAINS = new Set(['resend.dev']);
+
+/** True for loopback, private, link-local and unspecified IP literals. */
+function isNonPublicIpLiteral(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host) === 0) return false;
+  // Carrier-grade NAT (100.64.0.0/10) is not publicly routable either.
+  const cgnat = /^100\.(\d+)\./.exec(host);
+  if (cgnat && Number(cgnat[1]) >= 64 && Number(cgnat[1]) <= 127) return true;
+  return !isExplicitPublicBind(host);
+}
+
+/**
+ * Decision 2: production must not start with email verification enabled (it always is) but no
+ * usable delivery configuration — otherwise no account can ever be verified and no invitation
+ * accepted. Configuration only: deliverability is NOT checked here (no send at startup); see
+ * docs/email-delivery-staging.md for the live staging procedure.
+ * Messages never include the key's value.
+ */
+export function collectProductionMailIssues(env: ApiEnv): ProductionSecurityIssue[] {
+  const issues: ProductionSecurityIssue[] = [];
+  const key = env.RESEND_API_KEY.trim();
+  const from = env.MAIL_FROM.trim();
+
+  if (!key) {
+    issues.push({
+      code: 'MAIL_API_KEY_REQUIRED',
+      message: 'RESEND_API_KEY is required in production (email verification and invitations).',
+    });
+  } else if (
+    looksLikePlaceholder(key) ||
+    !/^re_[A-Za-z0-9_]{16,}$/.test(key) ||
+    isLowEntropyKey(key)
+  ) {
+    issues.push({
+      code: 'MAIL_API_KEY_INVALID',
+      message:
+        'RESEND_API_KEY is not a Resend API key (expected "re_…"; template values are rejected).',
+    });
+  }
+
+  if (!from) {
+    issues.push({
+      code: 'MAIL_FROM_REQUIRED',
+      message: 'MAIL_FROM is required in production (a sender on your verified sending domain).',
+    });
+  } else if (isValidMailFrom(from)) {
+    const address = from.endsWith('>') ? from.slice(from.lastIndexOf('<') + 1, -1) : from;
+    const domain = address.slice(address.lastIndexOf('@') + 1);
+    const lowerDomain = domain.toLowerCase();
+    const sandbox = [...SANDBOX_SENDER_DOMAINS].some(
+      (d) => lowerDomain === d || lowerDomain.endsWith(`.${d}`),
+    );
+    if (sandbox) {
+      issues.push({
+        code: 'MAIL_FROM_SANDBOX',
+        message:
+          "MAIL_FROM uses Resend's sandbox sender, which only delivers to the Resend account owner; use your verified sending domain.",
+      });
+    } else if (isReservedHostname(domain) || looksLikePlaceholder(domain, 'host')) {
+      issues.push({
+        code: 'MAIL_FROM_PLACEHOLDER',
+        message: 'MAIL_FROM uses a reserved or template domain; use your verified sending domain.',
+      });
+    }
+  }
+
+  let base: URL | null = null;
+  try {
+    base = new URL(env.APP_BASE_URL);
+  } catch {
+    base = null;
+  }
+  if (
+    !base ||
+    base.protocol !== 'https:' ||
+    base.username ||
+    base.password ||
+    base.search ||
+    base.hash ||
+    isLocalAppBaseUrl(env.APP_BASE_URL) ||
+    isNonPublicIpLiteral(base.hostname) ||
+    isReservedHostname(base.hostname) ||
+    looksLikePlaceholder(base.hostname, 'host')
+  ) {
+    issues.push({
+      code: 'APP_BASE_URL_NOT_PUBLIC_HTTPS',
+      message:
+        'APP_BASE_URL must be the public https:// dashboard origin (no credentials, query or fragment); verification and invitation links are built from it.',
+    });
+  }
   return issues;
 }
 

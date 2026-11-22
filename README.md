@@ -80,6 +80,7 @@ pnpm --filter @project-x/extension dev    # load apps/extension/build/chrome-mv3
 | `pnpm lint` | Lint the monorepo |
 | `pnpm typecheck` | TypeScript checks |
 | `pnpm test` | Run unit tests (API + extension) |
+| `pnpm --filter @project-x/api test:integration` | PostgreSQL integration suites against a throwaway Docker database (what the CI `integration` job runs) |
 | `pnpm format` | Prettier write |
 | `pnpm docker:up` | Start Postgres + Redis |
 | `pnpm docker:down` | Stop Docker services |

@@ -2,7 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import type { GitHubFileVersionsRequest, GitHubFileVersionsResponse } from '@project-x/types';
 import { GITHUB_PATCH_MAX_FILE_BYTES } from '@project-x/types';
 
-import { GithubAccessService } from '../github-app/github-access.service';
+import { GithubAccessService, repositoryAccessError } from '../github-app/github-access.service';
 import { GithubErrorNormalizer } from './github-error-normalizer';
 import { normalizeRepositoryPath } from './patch-path';
 
@@ -52,7 +52,7 @@ export class GithubContentService {
       );
     }
 
-    const token = await this.requireToken(userId);
+    const token = await this.requireToken(userId, owner, repository);
     const pull = await this.fetchPullRequest({ token, owner, repository, pullRequestNumber });
     const baseSha = pull.base?.sha?.trim();
     const headSha = pull.head?.sha?.trim();
@@ -89,7 +89,7 @@ export class GithubContentService {
       throw this.errors.toHttpException('PATCH_INVALID', 'baseSha and headSha must be git SHAs.');
     }
 
-    const token = await this.requireToken(userId);
+    const token = await this.requireToken(userId, owner, repository);
     const [baseContent, headContent] = await Promise.all([
       this.fetchTextFileAtRef({ token, owner, repository, path, ref: baseSha }),
       this.fetchTextFileAtRef({ token, owner, repository, path, ref: headSha }),
@@ -152,7 +152,7 @@ export class GithubContentService {
       return null;
     }
 
-    const token = await this.requireToken(userId);
+    const token = await this.requireToken(userId, owner, repository);
     const refTrimmed = typeof ref === 'string' ? ref.trim() : '';
     try {
       return await this.fetchTextFileAtRef({
@@ -185,15 +185,22 @@ export class GithubContentService {
     }
   }
 
-  private async requireToken(userId: string): Promise<string> {
-    const token = await this.githubAccess.getDecryptedToken(userId);
-    if (!token) {
-      throw this.errors.toHttpException(
-        'NOT_CONNECTED',
-        'Connect a GitHub token in dashboard Settings before reading repository files.',
-      );
+  /**
+   * H1: credential for this repository only after the acting user's own GitHub access was
+   * verified (see GithubAccessService.resolveRepositoryAccess). Never falls back to a broader
+   * credential.
+   */
+  private async requireToken(userId: string, owner: string, repository: string): Promise<string> {
+    const resolved = await this.githubAccess.resolveRepositoryAccess(userId, {
+      owner,
+      repository,
+      access: 'read',
+    });
+    if (!resolved.ok) {
+      const { code, message } = repositoryAccessError(resolved.reason);
+      throw this.errors.toHttpException(code, message);
     }
-    return token;
+    return resolved.token;
   }
 
   private githubHeaders(token: string): Record<string, string> {

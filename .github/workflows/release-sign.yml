@@ -32,22 +32,34 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3.9.2
+        # Pinned to the commit behind v3.9.2: this job holds id-token / attestations write.
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
         with:
           cosign-release: v2.4.3
 
       - name: Prepare checksum manifest (tags/releases)
         if: github.event_name != 'workflow_dispatch'
+        # The ref name is attacker-influenced text (a tag can be named `v$(…)`): it reaches the
+        # shell only as an environment variable, validated, never by template interpolation.
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          git archive --format=tar.gz --output=source-${{ github.ref_name }}.tar.gz HEAD
-          sha256sum source-${{ github.ref_name }}.tar.gz > release-checksums.txt
-          echo "source-${{ github.ref_name }}.tar.gz" >> files-to-sign.txt
+          case "$REF_NAME" in
+            *[!A-Za-z0-9._-]*|'') echo "Refusing to sign unexpected ref name." >&2; exit 1 ;;
+          esac
+          git archive --format=tar.gz --output="source-${REF_NAME}.tar.gz" HEAD
+          sha256sum "source-${REF_NAME}.tar.gz" > release-checksums.txt
+          echo "source-${REF_NAME}.tar.gz" >> files-to-sign.txt
 
       - name: Manual dispatch — sign listed files
         if: github.event_name == 'workflow_dispatch'
+        env:
+          ARTIFACT_GLOB: ${{ inputs.artifact_glob }}
         run: |
           : > files-to-sign.txt
-          for f in ${{ inputs.artifact_glob }}; do
+          # Word splitting and globbing of the operator's list are intended; command
+          # substitution is not possible because the value is data in a variable.
+          for f in $ARTIFACT_GLOB; do
             if [ -f "$f" ]; then
               sha256sum "$f" >> release-checksums.txt
               echo "$f" >> files-to-sign.txt

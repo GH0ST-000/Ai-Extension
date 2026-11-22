@@ -22,6 +22,12 @@ import {
 } from '../review-draft';
 import { safeHttpsHref } from '../ci/safe-external-url';
 
+/**
+ * Approving through Project X is not offered: with the workspace GitHub App the review would be
+ * the shared bot's, which the API refuses (REVIEW_ACTION_NOT_ALLOWED). Approve on GitHub.
+ */
+export const SELECTABLE_REVIEW_EVENTS = GITHUB_REVIEW_EVENTS.filter((event) => event !== 'APPROVE');
+
 type ReviewDraftPanelProps = {
   report: PRReviewReport;
   githubConnected?: boolean | null;
@@ -333,7 +339,7 @@ export function ReviewDraftPanel({
           Review event
         </p>
         <div className="mt-1 flex flex-wrap gap-1">
-          {GITHUB_REVIEW_EVENTS.map((event) => (
+          {SELECTABLE_REVIEW_EVENTS.map((event) => (
             <button
               key={event}
               type="button"
@@ -349,7 +355,9 @@ export function ReviewDraftPanel({
             </button>
           ))}
         </div>
-        <p className="mt-1 text-[10px] text-muted">Default is COMMENT. AI never picks this.</p>
+        <p className="mt-1 text-[10px] text-muted">
+          Default is COMMENT. AI never picks this. To approve, use GitHub with your own account.
+        </p>
       </div>
 
       <div>

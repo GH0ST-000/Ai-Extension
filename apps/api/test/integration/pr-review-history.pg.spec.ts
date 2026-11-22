@@ -249,7 +249,9 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
       // A personal token without access to anything (e.g. a replaced, narrower token).
       if (token.startsWith('ghp_none_'))
         return Response.json({ message: 'Not Found' }, { status: 404 });
-      if (token.startsWith('ghp_')) return Response.json({ id: 1, full_name: full });
+      // As GitHub answers an authenticated user: with that user's permissions.
+      if (token.startsWith('ghp_'))
+        return Response.json({ id: 1, full_name: full, permissions: { pull: true, push: true } });
       return Response.json({ message: 'Bad credentials' }, { status: 401 });
     }) as typeof fetch;
   });
@@ -259,7 +261,10 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
   async function seed(opts: {
     roles: Record<string, Role>;
     installation?: string[];
+    /** Members with a personal GitHub token (default: everyone, unless `tokenless`). */
     withPat?: string[];
+    /** H1: nobody connects a personal token (App-only viewers). */
+    tokenless?: boolean;
   }) {
     run += 1;
     const tag = `${run}_${Date.now()}`;
@@ -310,7 +315,9 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
       await prisma.workspaceMembership.create({
         data: { workspaceId: ws, userId: id, role, status: 'active' },
       });
-      if (opts.withPat?.includes(name)) PATS[id] = `ghp_${name}_${tag}`;
+      // H1: with the workspace App a viewer still needs a verified identity (personal token).
+      const hasPat = opts.withPat ? opts.withPat.includes(name) : !opts.tokenless;
+      if (hasPat) PATS[id] = `ghp_${name}_${tag}`;
     }
     return { ws, users };
   }
@@ -739,7 +746,6 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     const { ws, users } = await seed({
       roles: { owner: 'owner', member: 'member', dev: 'member' },
       installation: ['acme/app'],
-      withPat: ['dev'],
     });
     await history.record(recordInput({ workspaceId: ws, userId: users.owner!, repository: 'app' }));
     await history.record(
@@ -1062,8 +1068,9 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     const first = await walk(users.member!, ws);
     expect(first.ids).toEqual(expected); // all accessible reports, in order, no duplicates
     expect(first.hidden).toBe(true);
-    // Bounded GitHub fan-out per request; the walk needed several short pages.
-    expect(Math.max(...first.perRequestGithubCalls)).toBeLessThanOrEqual(20);
+    // Bounded GitHub fan-out per request; the walk needed several short pages. Under H1 each
+    // lookup is two calls (the user's own permission, then the App's view): ≤ 20 lookups.
+    expect(Math.max(...first.perRequestGithubCalls)).toBeLessThanOrEqual(40);
     expect(first.requests).toBeGreaterThan(1);
     // Inaccessible repositories never appear.
     const listed = await prisma.prReviewReport.findMany({ where: { id: { in: first.ids } } });
@@ -1139,7 +1146,7 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
         `/workspaces/${ws}/pr-reviews?limit=10&cursor=${page.body.nextCursor as string}`,
       );
       expect(stuck.status).toBe(503);
-      expect(JSON.stringify(stuck.body)).not.toMatch(/502|Bad gateway|ghs_/);
+      expect(JSON.stringify(stuck.body)).not.toMatch(/\b502\b|Bad gateway|ghs_/);
 
       FLAKY_REPOS.delete('acme/flaky');
       const resumed = await call(
@@ -1328,18 +1335,23 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
       where: { workspaceId: ws },
       data: { status: 'suspended' },
     });
+    // H1: without the App the user's own token decides — under a different credential
+    // identity, so the App-era cached "allowed" is never reused. This member's own token
+    // cannot see the repository: denied by a fresh check.
+    PATS[users.member!] = `ghp_none_${Date.now()}`;
     githubCalls.length = 0;
     expect(await listIds(users.member!, ws)).toEqual([]);
     expect(await openStatus(users.member!, ws, id)).toBe(404);
     expect(await latestStatus(users.member!, ws)).toBe(404);
-    expect(githubCalls).toHaveLength(0); // no credential → denied without any GitHub call
+    expect(githubCalls.length).toBeGreaterThan(0); // decided live, not from the stale entry
 
     await prisma.gitHubAppInstallation.update({
       where: { workspaceId: ws },
       data: { status: 'removed' },
     });
-    expect(await listIds(users.owner!, ws)).toEqual([]);
-    expect(await openStatus(users.owner!, ws, id)).toBe(404);
+    // The owner's own token can read the repository: still exactly what GitHub grants them.
+    expect(await listIds(users.owner!, ws)).toEqual([id]);
+    expect(await openStatus(users.owner!, ws, id)).toBe(200);
   });
 
   it('GitHub App relinked to another installation: answers of the old installation are not reused', async () => {
@@ -1417,11 +1429,27 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     githubCalls.length = 0;
     await listIds(users.member!, ws);
     await listIds(users.member!, ws);
-    expect(githubCalls).toHaveLength(1);
+    // H1: one decision = the user's own permission + the App's view (2 calls), then cached.
+    expect(githubCalls).toHaveLength(2);
     await openStatus(users.member!, ws, id);
     await openStatus(users.member!, ws, id);
-    expect(githubCalls).toHaveLength(3);
+    expect(githubCalls).toHaveLength(6);
     expect(githubCalls.every((c) => c.method === 'GET')).toBe(true);
+  });
+
+  it('H1: an App-only viewer (no personal token) sees nothing, even in installed repositories', async () => {
+    const { ws, users } = await seed({
+      roles: { owner: 'owner', member: 'member' },
+      installation: ['acme/app'],
+      withPat: ['owner'],
+    });
+    const id = await reportIn(ws, users.owner!);
+    expect(await listIds(users.owner!, ws)).toEqual([id]); // verified identity: visible
+    githubCalls.length = 0;
+    expect(await listIds(users.member!, ws)).toEqual([]);
+    expect(await openStatus(users.member!, ws, id)).toBe(404);
+    expect(await latestStatus(users.member!, ws)).toBe(404);
+    expect(githubCalls.some((c) => c.url.includes('/repos/acme/app'))).toBe(false); // App unused
   });
 
   it('cached access never crosses workspaces or users', async () => {
@@ -1429,7 +1457,8 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
       roles: { owner: 'owner', member: 'member' },
       installation: ['acme/app'],
     });
-    const b = await seed({ roles: { owner: 'owner' } }); // no App, no tokens
+    // B's App installation does not cover acme/app: the same user is allowed in A, not in B.
+    const b = await seed({ roles: { owner: 'owner' }, installation: ['acme/other'] });
     // The same person is a member of both workspaces; both have a report for acme/app.
     await prisma.workspaceMembership.create({
       data: { workspaceId: b.ws, userId: a.users.member!, role: 'member', status: 'active' },
@@ -1442,7 +1471,7 @@ describe.skipIf(!URL_ENV)('Persistent PR Review History on PostgreSQL', () => {
     // Another member of A does not inherit this user's cache entry either (own lookup).
     githubCalls.length = 0;
     expect((await listIds(a.users.owner!, a.ws)).length).toBe(1);
-    expect(githubCalls).toHaveLength(1);
+    expect(githubCalls).toHaveLength(2); // own lookup: own permission + App view
   });
 
   it('cache keys are versioned digests: no token, user id, workspace id or repository in clear', async () => {

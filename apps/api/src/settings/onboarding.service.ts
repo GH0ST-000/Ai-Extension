@@ -138,7 +138,12 @@ export class OnboardingService {
   private async hasWorkspaceGithubApp(userId: string): Promise<boolean> {
     if (!this.installations || !this.appTokens?.isAppAuthEnabled()) return false;
     try {
-      const workspaceId = await resolveWorkspaceIdForUser(this.prisma, userId);
+      const workspaceId = await resolveWorkspaceIdForUser(
+        this.prisma,
+        userId,
+        undefined,
+        'workspace:read',
+      );
       return (await this.installations.getActiveInstallationId(workspaceId)) !== null;
     } catch {
       return false;

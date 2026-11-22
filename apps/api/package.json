@@ -15,7 +15,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test:integration": "bash test/integration/run-memory-it.sh"
+    "test:integration": "bash test/integration/run-memory-it.sh",
+    "test:integration:ci": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.18",

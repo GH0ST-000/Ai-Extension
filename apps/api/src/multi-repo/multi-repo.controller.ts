@@ -25,6 +25,9 @@ import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'cl
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthRequestUser } from '../auth/jwt.strategy';
+import { ResolvedWorkspacePermissionGuard } from '../workspaces/resolved-workspace-permission.guard';
+import { RequireWorkspacePermission } from '../workspaces/workspace.decorators';
+import { RateLimit, RateLimitGuard } from '../common/security/rate-limit.guard';
 import { AddRepositoryDto } from './dto/add-repository.dto';
 import { AnalyzeImpactDto } from './dto/analyze-impact.dto';
 import { CompareRequirementDto } from './dto/compare-requirement.dto';
@@ -76,17 +79,46 @@ class ContextQueryDto {
   maxRepos?: number;
 }
 
+/**
+ * Systems API. M4: every route declares its workspace permission and is checked by
+ * ResolvedWorkspacePermissionGuard before the handler runs (active membership, active
+ * workspace, permission). The service re-checks the same permission for internal callers.
+ *
+ * systems:read   — reads, analyses and the caller's own discovery (Discover/Refresh store only
+ *                  the caller's user-scoped findings, never shared configuration).
+ * systems:manage — creating/updating/deleting systems and changing repository associations.
+ */
+/**
+ * N-9: abuse protection for the charged, GitHub-heavy analyses that every role may run
+ * (systems:read). Per user AND per workspace; checked after authorization and before any
+ * GitHub call or usage reservation (plan quota is still enforced atomically by usage).
+ */
+const SYSTEMS_SCAN_LIMIT = {
+  bucket: 'systems_scan',
+  limit: 10,
+  windowSeconds: 60 * 60,
+  perWorkspaceLimit: 40,
+};
+const SYSTEMS_ANALYZE_LIMIT = {
+  bucket: 'systems_analyze',
+  limit: 20,
+  windowSeconds: 60 * 60,
+  perWorkspaceLimit: 80,
+};
+
 @Controller('systems')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResolvedWorkspacePermissionGuard)
 export class MultiRepoController {
   constructor(private readonly multiRepo: MultiRepoService) {}
 
   @Get()
+  @RequireWorkspacePermission('systems:read')
   list(@CurrentUser() user: AuthRequestUser): Promise<ProjectSystem[]> {
     return this.multiRepo.listSystems(user.id);
   }
 
   @Post()
+  @RequireWorkspacePermission('systems:manage')
   create(
     @CurrentUser() user: AuthRequestUser,
     @Body() body: CreateSystemDto,
@@ -95,6 +127,7 @@ export class MultiRepoController {
   }
 
   @Get(':systemId')
+  @RequireWorkspacePermission('systems:read')
   get(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -103,6 +136,7 @@ export class MultiRepoController {
   }
 
   @Patch(':systemId')
+  @RequireWorkspacePermission('systems:manage')
   update(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -112,6 +146,7 @@ export class MultiRepoController {
   }
 
   @Delete(':systemId')
+  @RequireWorkspacePermission('systems:manage')
   delete(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -120,6 +155,7 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/repositories')
+  @RequireWorkspacePermission('systems:manage')
   addRepository(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -129,6 +165,7 @@ export class MultiRepoController {
   }
 
   @Patch(':systemId/repositories/:owner/:repo')
+  @RequireWorkspacePermission('systems:manage')
   updateRepository(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -140,6 +177,7 @@ export class MultiRepoController {
   }
 
   @Delete(':systemId/repositories/:owner/:repo')
+  @RequireWorkspacePermission('systems:manage')
   removeRepository(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -150,6 +188,9 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/refresh')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(SYSTEMS_SCAN_LIMIT)
+  @RequireWorkspacePermission('systems:read')
   refresh(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -164,6 +205,7 @@ export class MultiRepoController {
   }
 
   @Get(':systemId/relationships')
+  @RequireWorkspacePermission('systems:read')
   listRelationships(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -172,6 +214,9 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/relationships/discover')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(SYSTEMS_SCAN_LIMIT)
+  @RequireWorkspacePermission('systems:read')
   discover(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -180,6 +225,7 @@ export class MultiRepoController {
   }
 
   @Get(':systemId/context')
+  @RequireWorkspacePermission('systems:read')
   context(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -192,6 +238,9 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/analyze-change-impact')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(SYSTEMS_ANALYZE_LIMIT)
+  @RequireWorkspacePermission('systems:read')
   analyzeImpact(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -201,6 +250,7 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/trace-system-flow')
+  @RequireWorkspacePermission('systems:read')
   traceFlow(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -227,6 +277,7 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/compare-requirement')
+  @RequireWorkspacePermission('systems:read')
   compareRequirement(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -240,6 +291,7 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/find-api-consumers')
+  @RequireWorkspacePermission('systems:read')
   findApiConsumers(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,
@@ -249,6 +301,7 @@ export class MultiRepoController {
   }
 
   @Post(':systemId/find-event-consumers')
+  @RequireWorkspacePermission('systems:read')
   findEventConsumers(
     @CurrentUser() user: AuthRequestUser,
     @Param('systemId') systemId: string,

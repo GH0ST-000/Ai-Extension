@@ -1,16 +1,19 @@
 'use client';
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
-import type { WorkspaceMembership, WorkspaceRole } from '@project-x/types';
+import type { WorkspaceInvitation, WorkspaceMembership, WorkspaceRole } from '@project-x/types';
 
 import { StudioSelect } from '../../../../components/studio-select';
+import { PendingInvitations } from '../../../../components/workspace/pending-invitations';
 import { ApiError } from '../../../../lib/api';
 import { useWorkspace } from '../../../../lib/workspace-context';
 import {
   changeRole,
   inviteMember,
+  listInvitations,
   listMembers,
   removeMember,
+  revokeInvitation,
   transferOwnership,
 } from '../../../../lib/workspace-api';
 
@@ -39,6 +42,9 @@ export default function WorkspaceMembersPage() {
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [inviting, setInviting] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +72,43 @@ export default function WorkspaceMembersPage() {
     void loadMembers();
   }, [loadMembers]);
 
+  const loadInvitations = useCallback(async () => {
+    if (!workspaceId || !canInvite) {
+      setInvitations([]);
+      return;
+    }
+    setInvitationsLoading(true);
+    try {
+      setInvitations(await listInvitations(workspaceId));
+    } catch (err) {
+      setError(apiMessage(err, 'Unable to load invitations.'));
+    } finally {
+      setInvitationsLoading(false);
+    }
+  }, [workspaceId, canInvite]);
+
+  useEffect(() => {
+    void loadInvitations();
+  }, [loadInvitations]);
+
+  async function onRevokeInvitation(invitationId: string) {
+    if (!workspaceId || !canInvite || revokingId) {
+      return;
+    }
+    setRevokingId(invitationId);
+    setMessage(null);
+    setError(null);
+    try {
+      await revokeInvitation(workspaceId, invitationId);
+      setMessage('Invitation revoked. Its link no longer works.');
+      await loadInvitations();
+    } catch (err) {
+      setError(apiMessage(err, 'Unable to revoke invitation.'));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
   async function onInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!workspaceId || !canInvite) {
@@ -86,11 +129,13 @@ export default function WorkspaceMembersPage() {
       if (invitation.token) {
         const path = `/invite/${invitation.token}`;
         setInviteLink(typeof window !== 'undefined' ? `${window.location.origin}${path}` : path);
-        setMessage('Invitation created. Share the link below before it expires.');
+        setMessage(
+          'Invitation created. Share the link below before it expires. Any earlier link for this email no longer works.',
+        );
       } else {
         setMessage(`Invitation sent to ${invitation.email}.`);
       }
-      await loadMembers();
+      await Promise.all([loadMembers(), loadInvitations()]);
     } catch (err) {
       setError(apiMessage(err, 'Unable to invite member.'));
     } finally {
@@ -231,6 +276,15 @@ export default function WorkspaceMembersPage() {
             </div>
           </form>
         </section>
+      ) : null}
+
+      {canInvite ? (
+        <PendingInvitations
+          invitations={invitations}
+          loading={invitationsLoading}
+          revokingId={revokingId}
+          onRevoke={(id) => void onRevokeInvitation(id)}
+        />
       ) : null}
 
       <section className="rise-in-delay-1 space-y-3">

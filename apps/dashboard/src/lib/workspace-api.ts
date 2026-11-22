@@ -1,4 +1,5 @@
 import type {
+  AcceptWorkspaceInvitationResponse,
   BillingCheckoutResponse,
   BillingPortalResponse,
   ChangeWorkspaceMemberRoleRequest,
@@ -28,6 +29,13 @@ export async function bootstrapWorkspaces(): Promise<WorkspaceBootstrapResponse>
   return apiFetch<WorkspaceBootstrapResponse>(workspacesPath('/bootstrap'));
 }
 
+/** Decision B: the caller's free-workspace usage. */
+export type FreeWorkspaceUsage = { used: number; limit: number; canCreate: boolean };
+
+export async function getWorkspaceLimits(): Promise<FreeWorkspaceUsage> {
+  return apiFetch<FreeWorkspaceUsage>(workspacesPath('/limits'));
+}
+
 export async function listWorkspaces(): Promise<Workspace[]> {
   return apiFetch<Workspace[]>(workspacesPath());
 }
@@ -55,6 +63,19 @@ export async function deleteWorkspace(workspaceId: string): Promise<Workspace> {
   });
 }
 
+/** A workspace the caller owns that is pending deletion (N-2). */
+export type PendingWorkspaceDeletion = {
+  workspaceId: string;
+  name: string;
+  openCancellations: number;
+  lastErrorCode: string | null;
+  nextAttemptAt: string | null;
+};
+
+export async function listPendingDeletions(): Promise<PendingWorkspaceDeletion[]> {
+  return apiFetch<PendingWorkspaceDeletion[]>(workspacesPath('/pending-deletions'));
+}
+
 export async function listMembers(workspaceId: string): Promise<WorkspaceMembership[]> {
   return apiFetch<WorkspaceMembership[]>(
     workspacesPath(`/${encodeURIComponent(workspaceId)}/members`),
@@ -71,6 +92,23 @@ export async function inviteMember(
       method: 'POST',
       body: JSON.stringify(body),
     },
+  );
+}
+
+/** Pending invitations (Owners/Admins). Never includes invitation tokens. */
+export async function listInvitations(workspaceId: string): Promise<WorkspaceInvitation[]> {
+  return apiFetch<WorkspaceInvitation[]>(
+    workspacesPath(`/${encodeURIComponent(workspaceId)}/invitations`),
+  );
+}
+
+/** Revokes a pending invitation; succeeds again when it is already revoked. */
+export async function revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
+  await apiFetch<void>(
+    workspacesPath(
+      `/${encodeURIComponent(workspaceId)}/invitations/${encodeURIComponent(invitationId)}`,
+    ),
+    { method: 'DELETE' },
   );
 }
 
@@ -112,8 +150,8 @@ export async function transferOwnership(
   );
 }
 
-export async function acceptInvitation(token: string): Promise<WorkspaceMembership> {
-  return apiFetch<WorkspaceMembership>(
+export async function acceptInvitation(token: string): Promise<AcceptWorkspaceInvitationResponse> {
+  return apiFetch<AcceptWorkspaceInvitationResponse>(
     `/workspace-invitations/${encodeURIComponent(token)}/accept`,
     { method: 'POST' },
   );

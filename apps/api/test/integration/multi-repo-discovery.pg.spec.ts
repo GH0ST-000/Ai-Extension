@@ -13,11 +13,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { EntitlementService } from '../../src/entitlements/entitlements.service';
 import { FeatureGate } from '../../src/entitlements/feature-gate';
+import { repositoryAccessStub } from '../../src/github-app/github-access.test-helpers';
 import { MultiRepoService } from '../../src/multi-repo/multi-repo.service';
 import { diffApiContracts } from '../../src/openapi/lib/diff';
 import { normalizeOpenApiDocument } from '../../src/openapi/lib/normalize';
 import { parseOpenApiRaw } from '../../src/openapi/lib/parse-raw';
 import { UsageService } from '../../src/usage/usage.service';
+import { WorkspaceAuthorizationService } from '../../src/workspaces/workspace-authorization.service';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 const OWNER = 'gh0st-000';
@@ -267,12 +269,15 @@ describe.skipIf(!URL_ENV)('Systems relationship discovery (PostgreSQL, mocked Gi
     const entitlements = new EntitlementService(prisma as never);
     service = new MultiRepoService(
       prisma as never,
-      { getDecryptedToken: async (userId: string) => tokens.get(userId) ?? null } as never,
+      repositoryAccessStub({
+        getDecryptedToken: async (userId: string) => tokens.get(userId) ?? null,
+      }) as never,
       {} as never,
       {} as never,
       new FeatureGate(entitlements),
       entitlements,
       new UsageService(prisma as never, entitlements),
+      new WorkspaceAuthorizationService(prisma as never),
     );
     global.fetch = fakeGithub as typeof fetch;
   });

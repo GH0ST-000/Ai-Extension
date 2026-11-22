@@ -8,6 +8,7 @@ import { AiService } from './ai.service';
 import { PromptRegistry } from './prompts/prompt.registry';
 import type { AiModelFactory } from './models/ai-model.factory';
 import { usageStub } from './pr-review/pr-review-fixtures';
+import { personalWorkspaceMembership } from '../workspaces/workspace-membership.test-helpers';
 
 const generateTextMock = vi.fn();
 const streamTextMock = vi.fn();
@@ -52,7 +53,7 @@ describe('AiService', () => {
 
   const prisma = {
     user: { findUnique: vi.fn().mockResolvedValue(null) },
-    workspaceMembership: { findFirst: vi.fn().mockResolvedValue(null) },
+    workspaceMembership: { findFirst: vi.fn(personalWorkspaceMembership) },
   };
 
   const featureGate = {
@@ -123,7 +124,7 @@ describe('AiService', () => {
     featureGate.assert.mockClear();
     usage.consume.mockClear();
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.workspaceMembership.findFirst.mockResolvedValue(null);
+    prisma.workspaceMembership.findFirst.mockImplementation(personalWorkspaceMembership);
     service = new AiService(
       promptRegistry,
       modelFactory,
@@ -327,12 +328,17 @@ describe('AiService', () => {
 
     it('a stream that fails or is aborted before any output is refunded', async () => {
       const s = spies();
+      const afterWork = vi.spyOn(usage, 'settleAfterProviderWork');
       await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'A' });
       lastOptions().onError({ error: new Error('boom') });
       await service.streamAction('user-1', { action: AIAction.EXPLAIN, text: 'B' });
       lastOptions().onAbort();
       await vi.waitFor(() => expect(s.release).toHaveBeenCalledTimes(2));
       expect(s.commit).not.toHaveBeenCalled();
+      // F-06: the abort (the model call had started) is settled through the per-user refund
+      // budget; the provider failure is a plain refund.
+      expect(afterWork).toHaveBeenCalledTimes(1);
+      expect(afterWork.mock.calls[0]![1]).toBe('user-1');
     });
 
     it('a stream aborted after output was delivered is charged (partial delivery)', async () => {

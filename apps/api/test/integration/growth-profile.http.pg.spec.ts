@@ -35,6 +35,7 @@ import { GrowthProfileService } from '../../src/settings/growth-profile.service'
 import { OnboardingService } from '../../src/settings/onboarding.service';
 import { SettingsController } from '../../src/settings/settings.controller';
 import { SettingsService } from '../../src/settings/settings.service';
+import { EmailVerificationService } from '../../src/auth/email-verification.service';
 
 const URL_ENV = process.env.MEMORY_IT_DATABASE_URL;
 const CONFIG: Record<string, unknown> = {
@@ -97,6 +98,14 @@ describe.skipIf(!URL_ENV)('Growth profile, consent and attribution (PostgreSQL +
           },
         },
         { provide: PasswordResetService, useValue: { requestReset: () => undefined } },
+        {
+          provide: EmailVerificationService,
+          useValue: {
+            issueInBackground: () => undefined,
+            issue: async () => 'sent',
+            status: async () => ({ verified: false }),
+          },
+        },
         { provide: SettingsService, useValue: {} },
         { provide: GithubConnectionService, useValue: {} },
         { provide: JiraConnectionService, useValue: {} },

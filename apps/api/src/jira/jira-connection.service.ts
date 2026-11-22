@@ -8,6 +8,9 @@ import { ConfigService } from '@nestjs/config';
 import type { JiraConnectionStatus } from '@project-x/types';
 
 import { decryptSecret, encryptSecret } from '../common/crypto/secret-box';
+
+/** F-29: the encryption context of a user's stored Jira API token. */
+export const jiraConnectionContext = (userId: string): string => `jira_connection:${userId}`;
 import { PrismaService } from '../prisma/prisma.service';
 import { jiraSiteBaseUrl, normalizeJiraSiteHost } from './jira-site';
 
@@ -63,7 +66,8 @@ export class JiraConnectionService {
 
     const profile = await this.validateCredentials(email, apiToken, siteHost);
     const encryptionKey = this.getEncryptionKey();
-    const tokenCiphertext = encryptSecret(apiToken, encryptionKey);
+    // F-29: bound to this user's row.
+    const tokenCiphertext = encryptSecret(apiToken, encryptionKey, jiraConnectionContext(userId));
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
@@ -119,7 +123,11 @@ export class JiraConnectionService {
     }
     return {
       email: row.email,
-      apiToken: decryptSecret(row.tokenCiphertext, this.getEncryptionKey()),
+      apiToken: decryptSecret(
+        row.tokenCiphertext,
+        this.getEncryptionKey(),
+        jiraConnectionContext(userId),
+      ),
       siteHost: row.siteHost,
     };
   }

@@ -94,14 +94,25 @@ export class InternalObservabilityController {
   }
 
   @Get('security-events')
-  securityEvents(
+  async securityEvents(
     @Headers('authorization') authorization: string | undefined,
     @Headers('x-internal-token') internalToken: string | undefined,
     @Query('since') sinceRaw: string | undefined,
     @Query('limit') limitRaw: string | undefined,
+    @Query('afterId') afterIdRaw: string | undefined,
     @Res({ passthrough: false }) res: Response,
-  ): void {
+  ): Promise<void> {
     this.assertAuthorized(authorization, internalToken);
+
+    // Cursor for paging: the id of the last event received (used together with `since`).
+    const afterId =
+      typeof afterIdRaw === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(afterIdRaw)
+        ? afterIdRaw
+        : undefined;
+    if (afterIdRaw !== undefined && !afterId) {
+      res.status(400).json({ message: 'Invalid afterId.' });
+      return;
+    }
 
     let since: Date | undefined;
     if (sinceRaw?.trim()) {
@@ -119,7 +130,12 @@ export class InternalObservabilityController {
       return;
     }
 
-    const body = this.securityAudit.exportNdjson({ since, limit });
+    // F-29: from the durable table (complete across restarts and instances).
+    const body = await this.securityAudit.exportPersistedNdjson({
+      since,
+      limit,
+      ...(afterId ? { afterId } : {}),
+    });
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.status(200).send(body);
   }

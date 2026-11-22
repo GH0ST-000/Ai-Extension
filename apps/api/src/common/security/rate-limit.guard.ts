@@ -1,15 +1,9 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  HttpException,
-  HttpStatus,
-  Injectable,
-  SetMetadata,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 import type { AuthRequestUser } from '../../auth/jwt.strategy';
 import { RedisService } from '../../redis/redis.service';
+import { RateLimiter, rateLimitAddressKey } from './rate-limiter';
 
 export const RATE_LIMIT_KEY = 'rate_limit';
 
@@ -20,12 +14,23 @@ export type RateLimitPolicy = {
   limit: number;
   /** Window length in seconds. */
   windowSeconds: number;
+  /**
+   * Optional additional cap shared by the whole workspace (same window). Applies on routes
+   * whose guards resolved the workspace before this guard (request.workspace).
+   */
+  perWorkspaceLimit?: number;
+  /**
+   * Optional second, longer window on the same identity under its own bucket (e.g. a daily
+   * cap on account registrations per IP). It expires like any window: never a permanent ban.
+   */
+  sustained?: { bucket: string; limit: number; windowSeconds: number };
 };
 
 export const RateLimit = (policy: RateLimitPolicy) => SetMetadata(RATE_LIMIT_KEY, policy);
 
 type RateLimitedRequest = {
   user?: AuthRequestUser;
+  workspace?: { workspaceId?: string };
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
   method?: string;
@@ -33,16 +38,20 @@ type RateLimitedRequest = {
 };
 
 /**
- * Redis-backed short-window rate limiter.
- * Authenticated: user id. Unauthenticated: IP (do not trust X-Forwarded-For unless proxy is trusted).
- * Fail-closed for auth endpoints; fail-open for others if Redis is unavailable.
+ * Short-window rate limiter on routes declaring @RateLimit. Authenticated: per user id.
+ * Unauthenticated: per IP (X-Forwarded-For only behind the trusted proxy hop).
+ * Storage and Redis-outage behavior: see RateLimiter (bounded in-process fallback, N-15).
  */
 @Injectable()
 export class RateLimitGuard implements CanActivate {
+  private readonly limiter: RateLimiter;
+
   constructor(
     private readonly reflector: Reflector,
     private readonly redis: RedisService,
-  ) {}
+  ) {
+    this.limiter = new RateLimiter(redis);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const policy = this.reflector.getAllAndOverride<RateLimitPolicy | undefined>(RATE_LIMIT_KEY, [
@@ -56,49 +65,27 @@ export class RateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RateLimitedRequest>();
     const identity = request.user?.id
       ? `u:${request.user.id}`
-      : `ip:${typeof request.ip === 'string' && request.ip ? request.ip : 'unknown'}`;
-    const key = `rl:${policy.bucket}:${identity}`;
-
-    try {
-      if (this.redis.status === 'wait') {
-        await this.redis.connect();
-      }
-      const count = await this.redis.incr(key);
-      if (count === 1) {
-        await this.redis.expire(key, policy.windowSeconds);
-      }
-      if (count > policy.limit) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            code: 'RATE_LIMITED',
-            message: 'Too many requests. Please wait and try again.',
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      return true;
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      // Auth buckets fail closed; other buckets fail open to preserve availability.
-      if (
-        policy.bucket === 'auth' ||
-        policy.bucket === 'billing' ||
-        policy.bucket === 'password_reset' ||
-        policy.bucket === 'password_reset_confirm'
-      ) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.SERVICE_UNAVAILABLE,
-            code: 'RATE_LIMIT_UNAVAILABLE',
-            message: 'Unable to process request right now. Please try again.',
-          },
-          HttpStatus.SERVICE_UNAVAILABLE,
-        );
-      }
-      return true;
+      : `ip:${rateLimitAddressKey(request.ip)}`;
+    await this.limiter.consume(
+      `rl:${policy.bucket}:${identity}`,
+      policy.limit,
+      policy.windowSeconds,
+    );
+    if (policy.sustained) {
+      await this.limiter.consume(
+        `rl:${policy.sustained.bucket}:${identity}`,
+        policy.sustained.limit,
+        policy.sustained.windowSeconds,
+      );
     }
+    const workspaceId = request.workspace?.workspaceId;
+    if (policy.perWorkspaceLimit !== undefined && workspaceId) {
+      await this.limiter.consume(
+        `rl:${policy.bucket}:ws:${workspaceId}`,
+        policy.perWorkspaceLimit,
+        policy.windowSeconds,
+      );
+    }
+    return true;
   }
 }

@@ -7,6 +7,7 @@ import {
   PROJECT_MEMORY_POLICY,
 } from '../prompts/prompt.utils';
 import type { PlannedBatch } from './pr-review-plan';
+import { pathAsShownInPrompt } from './pr-review-prompt-path';
 
 /** System instructions for one structured review batch (identical for every batch). */
 export const PR_REVIEW_BATCH_INSTRUCTIONS = [
@@ -41,6 +42,16 @@ export function neutralizeDelimiters(text: string): string {
   );
 }
 
+/** A file path as inert single-line text inside the untrusted block. */
+export function neutralizePath(path: string): string {
+  return pathAsShownInPrompt(path);
+}
+
+function singleLine(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ');
+}
+
 export type BatchPromptContext = {
   owner: string;
   repository: string;
@@ -63,7 +74,7 @@ function otherPathsList(allPaths: string[], inBatch: Set<string>): string {
       omitted += 1;
       continue;
     }
-    lines.push(`- ${path}`);
+    lines.push(`- ${singleLine(path)}`);
     chars += path.length + 3;
   }
   if (omitted > 0) lines.push(`- … and ${omitted} more`);
@@ -99,7 +110,9 @@ export function buildBatchUserContent(
   const inBatch = new Set(batch.units.map((u) => u.path));
   const fileBlocks = batch.units.map((unit) => {
     const label = unit.chunkCount > 1 ? ` (part ${unit.chunkIndex + 1} of ${unit.chunkCount})` : '';
-    return `### file: ${unit.path}${label}\n${neutralizeDelimiters(unit.chunk.text)}`;
+    // F-20: the path is repository-controlled text too (git allows `<`, `>` and newlines in
+    // file names): neutralized and kept on one line so it cannot close the untrusted block.
+    return `### file: ${neutralizePath(unit.path)}${label}\n${neutralizeDelimiters(unit.chunk.text)}`;
   });
   const meta = [
     `repo: ${ctx.owner}/${ctx.repository}`,
@@ -109,7 +122,7 @@ export function buildBatchUserContent(
       : null,
     `batch: ${batchIndex + 1} of ${ctx.batchCount}`,
     'reviewFiles:',
-    ...[...inBatch].map((p) => `- ${p}`),
+    ...[...inBatch].map((p) => `- ${singleLine(p)}`),
     'otherChangedFiles:',
     otherPathsList(ctx.allPaths, inBatch),
   ]

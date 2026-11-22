@@ -16,8 +16,11 @@ export function buildPasswordResetEmail(input: {
   resetUrl: string;
   name: string | null;
 }): { subject: string; html: string; text: string } {
-  const greetingName = input.name?.trim().slice(0, 120) || null;
-  const greeting = greetingName ? `Hi ${greetingName},` : 'Hi,';
+  // Never echo the account name: it is free text chosen by whoever registered, and this mail
+  // can reach an address that registrant does not own (phishing text from our domain).
+  // `input.name` is accepted for compatibility and intentionally unused.
+  void input.name;
+  const greeting = 'Hi,';
   const subject = `Reset your ${input.appName} password`;
   const text = [
     greeting,

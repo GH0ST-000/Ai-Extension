@@ -29,6 +29,7 @@ import {
   PR_REVIEW_VERIFY_INSTRUCTIONS,
   type VerificationOutput,
 } from '../../src/ai/pr-review/pr-review-verify';
+import { personalWorkspaceMembership } from '../../src/workspaces/workspace-membership.test-helpers';
 
 export const BENCH_DIR = __dirname;
 const CORPUS = join(BENCH_DIR, 'corpus');
@@ -217,7 +218,8 @@ function buildService(opts: {
     } as never,
     {
       user: { findUnique: vi.fn(async () => null) },
-      workspaceMembership: { findFirst: vi.fn(async () => null) },
+      // N-1: the acting user is the active owner of their personal workspace.
+      workspaceMembership: { findFirst: vi.fn(personalWorkspaceMembership) },
     } as never,
     { require: vi.fn(async () => undefined) } as never,
     usage as never,

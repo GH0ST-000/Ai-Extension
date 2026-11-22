@@ -15,6 +15,9 @@ import { OpenApiDocumentService } from './openapi-document.service';
 
 @Controller('openapi')
 @UseGuards(JwtAuthGuard, RateLimitGuard)
+// F-01: every route parses an untrusted document synchronously; each is rate limited (the
+// class policy covers the content routes, parse-url keeps its own stricter outbound limit).
+@RateLimit({ bucket: 'openapi_content', limit: 60, windowSeconds: 60 })
 export class OpenApiController {
   constructor(private readonly documents: OpenApiDocumentService) {}
 

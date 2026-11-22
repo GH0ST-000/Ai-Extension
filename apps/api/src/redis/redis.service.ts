@@ -3,20 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 import type { ApiConfig } from '../config/configuration';
+import { redisConnectionOptions } from './redis-connection';
 
 @Injectable()
 export class RedisService extends Redis implements OnModuleDestroy {
   constructor(config: ConfigService<ApiConfig, true>) {
     const redis = config.get('redis', { infer: true });
 
-    super({
-      host: redis.host,
-      port: redis.port,
-      password: redis.password || undefined,
-      tls: redis.tls ? {} : undefined,
-      lazyConnect: true,
-      maxRetriesPerRequest: null,
-    });
+    super({ ...redisConnectionOptions(redis, 'commands'), lazyConnect: true });
   }
 
   async onModuleDestroy(): Promise<void> {

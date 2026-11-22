@@ -307,6 +307,10 @@ export async function streamAiAction(
         { code: parsed.code, requestId },
       );
     }
+    if (parsed.code === 'EMAIL_VERIFICATION_REQUIRED') {
+      // Decision 1: actionable (confirm the email); nothing was charged and no model ran.
+      throw new AiClientError(parsed.message, { code: parsed.code, requestId });
+    }
     if (parsed.code === PR_DIFF_UNAVAILABLE_CODE) {
       // Actionable (connect GitHub / open a PR); the AI was not called.
       throw new AiClientError(parsed.message, { code: parsed.code, requestId });

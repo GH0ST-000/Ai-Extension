@@ -3,10 +3,14 @@ import { ConfigService } from '@nestjs/config';
 
 import type { ApiConfig } from '../config/configuration';
 import { decryptSecret, encryptSecret } from '../common/crypto/secret-box';
+
+/** F-29: the encryption context of one installation's cached access token. */
+const installationTokenContext = (installationId: string): string =>
+  `github_app_installation_token:${installationId}`;
 import { RedisService } from '../redis/redis.service';
 import { createGitHubAppJwt } from './github-app-jwt';
 
-const INSTALLATION_TOKEN_CACHE_PREFIX = 'gh:app:installation-token:';
+export const INSTALLATION_TOKEN_CACHE_PREFIX = 'gh:app:installation-token:';
 /** GitHub tokens last 60m — cache slightly less. */
 const INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
 
@@ -37,7 +41,7 @@ export class GithubAppTokenService {
     const cacheKey = `${INSTALLATION_TOKEN_CACHE_PREFIX}${installationId}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
-      const decrypted = this.tryDecryptCachedToken(cached);
+      const decrypted = this.tryDecryptCachedToken(cached, installationId);
       if (decrypted) {
         return decrypted;
       }
@@ -75,7 +79,8 @@ export class GithubAppTokenService {
     const encryptionKey = this.config.getOrThrow('secrets.encryptionKey', { infer: true });
     await this.redis.set(
       cacheKey,
-      encryptSecret(body.token, encryptionKey),
+      // F-29: bound to this installation's cache entry.
+      encryptSecret(body.token, encryptionKey, installationTokenContext(installationId)),
       'EX',
       INSTALLATION_TOKEN_CACHE_TTL_SECONDS,
     );
@@ -86,10 +91,12 @@ export class GithubAppTokenService {
     await this.redis.del(`${INSTALLATION_TOKEN_CACHE_PREFIX}${installationId}`);
   }
 
-  private tryDecryptCachedToken(cached: string): string | null {
+  private tryDecryptCachedToken(cached: string, installationId: string): string | null {
     try {
       const encryptionKey = this.config.getOrThrow('secrets.encryptionKey', { infer: true });
-      return decryptSecret(cached, encryptionKey);
+      // A cached value of another installation (or a legacy unbound one) fails here and a
+      // fresh token is minted.
+      return decryptSecret(cached, encryptionKey, installationTokenContext(installationId));
     } catch {
       return null;
     }

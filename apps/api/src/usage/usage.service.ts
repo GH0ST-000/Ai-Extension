@@ -1,4 +1,10 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { usagePeriodKey, usagePeriodResetAt } from '@project-x/shared';
 import type {
   ProductEntitlements,
@@ -9,8 +15,12 @@ import type {
 import { Prisma } from '@prisma/client';
 
 import { EntitlementService } from '../entitlements/entitlements.service';
+import { SecurityAuditService } from '../observability/security-audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { workspaceException } from '../workspaces/workspace.errors';
+
+/** Metrics whose units are AI model executions (multi-repo analysis is deterministic). */
+const FREE_AI_METRICS: ReadonlySet<UsageMetric> = new Set(['ai_action', 'workflow_run']);
 
 const METRIC_LIMIT_KEY: Record<Exclude<UsageMetric, 'pr_review'>, keyof ProductEntitlements> = {
   ai_action: 'monthlyAiActions',
@@ -26,6 +36,7 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementService,
+    @Optional() private readonly securityAudit?: SecurityAuditService,
   ) {}
 
   /**
@@ -147,6 +158,7 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
     const planId = await this.entitlements.getPlanId(workspaceId);
     return {
       period,
+      planId,
       limit,
       resetAt: usagePeriodResetAt(period),
       upgradeAvailable: planId !== 'team',
@@ -286,6 +298,10 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
     }
     const quantity = input.quantity ?? 1;
     const ctx = await this.limitContext(input.workspaceId, input.metric);
+    // Decision 1: before any quota is touched (and so before any model call).
+    if (ctx.planId === 'free' && FREE_AI_METRICS.has(input.metric)) {
+      await this.assertVerifiedForFreeAi(input.workspaceId, input.userId);
+    }
     await this.recoverExpiredReservations(input.workspaceId);
     const idempotencyKey = `op:${input.operationId}`;
     let charged: { allowed: boolean; current: number };
@@ -323,7 +339,15 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
       }
       throw error;
     }
-    if (!charged.allowed) throw this.limitReached(input.metric, ctx, charged.current);
+    if (!charged.allowed) {
+      if (ctx.planId === 'free' && FREE_AI_METRICS.has(input.metric)) {
+        this.recordFreeAiEvent('ai.free_quota.exhausted', input.workspaceId, input.userId, {
+          metric: input.metric,
+          used: charged.current,
+        });
+      }
+      throw this.limitReached(input.metric, ctx, charged.current);
+    }
     return {
       workspaceId: input.workspaceId,
       metric: input.metric,
@@ -331,6 +355,124 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
       operationId: input.operationId,
       quantity,
     };
+  }
+
+  /**
+   * Decision 1: free AI quota is consumed only by a verified account, in a workspace whose
+   * owner(s) verified too. Read fresh (never cached) so verifying unlocks usage at once.
+   * The owner rule closes the multiplication path where one verified account is invited into
+   * many throwaway, unverified accounts' free workspaces and burns each one's pool.
+   * The rejection names no other user and no workspace data.
+   */
+  private async assertVerifiedForFreeAi(workspaceId: string, userId: string): Promise<void> {
+    const [actor, owners] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId }, select: { emailVerifiedAt: true } }),
+      this.prisma.workspaceMembership.findMany({
+        where: { workspaceId, role: 'owner', status: 'active' },
+        select: { user: { select: { emailVerifiedAt: true } } },
+      }),
+    ]);
+    let reason: 'account' | 'workspace_owner' | null = null;
+    if (!actor?.emailVerifiedAt) reason = 'account';
+    else if (owners.length === 0 || owners.some((o) => !o.user.emailVerifiedAt)) {
+      reason = 'workspace_owner';
+    }
+    if (!reason) return;
+    this.recordFreeAiEvent('ai.free_quota.verification_required', workspaceId, userId, {
+      reason,
+    });
+    throw workspaceException(
+      'EMAIL_VERIFICATION_REQUIRED',
+      reason === 'account'
+        ? 'Confirm your email address to use free AI actions. Check your inbox or request a new verification link.'
+        : "This workspace's owner must confirm their email address before its free AI actions can be used.",
+      { reason },
+    );
+  }
+
+  /** Abuse-monitoring signal: structured log + durable security audit (never throws). */
+  private recordFreeAiEvent(
+    type: 'ai.free_quota.verification_required' | 'ai.free_quota.exhausted',
+    workspaceId: string,
+    userId: string,
+    detail: Record<string, string | number>,
+  ): void {
+    this.logger.warn({ msg: type, workspaceId, userId, ...detail });
+    try {
+      this.securityAudit?.record({
+        type,
+        outcome: 'blocked',
+        actorUserId: userId,
+        workspaceId,
+        detail: Object.entries(detail)
+          .map(([key, value]) => `${key}=${value}`)
+          .join(' '),
+      });
+    } catch {
+      // monitoring never blocks the request path
+    }
+  }
+
+  /**
+   * F-06 / F-07 — settle an operation for which the AI provider has ALREADY done work (a model
+   * call was started or completed) but the user got no usable result: the client disconnected
+   * mid-review, or the model output could not be used.
+   *
+   * Refunding these unconditionally made provider spend free and unlimited: start a review,
+   * hang up before the end, repeat — the monthly counter never moved. Charging them always
+   * would bill an honest user for every network drop or model hiccup. So the refund is kept
+   * but BUDGETED: each user gets {@link PROVIDER_WORK_REFUNDS_PER_PERIOD} such refunds per
+   * workspace per usage period (the same monthly period as the quota — a daily budget would
+   * refill thirty times against one monthly quota); past that the unit is charged. The budget is one conditional
+   * UPDATE on a counter row (same mechanism as the quota), so concurrent settlements cannot
+   * overspend it, and it is durable across restarts and instances.
+   *
+   * Never used when no provider call was made (those are plain refunds).
+   */
+  async settleAfterProviderWork(
+    reservation: UsageReservation,
+    userId: string,
+    now = new Date(),
+  ): Promise<'refunded' | 'charged' | 'missing'> {
+    const key = {
+      workspaceId: reservation.workspaceId,
+      metric: `${PROVIDER_WORK_REFUND_METRIC}:${userId}`,
+      periodKey: usagePeriodKey(now),
+    };
+    const granted = await this.prisma.$transaction(async (tx) => {
+      await tx.workspaceUsageCounter.createMany({
+        data: [{ ...key, count: 0 }],
+        skipDuplicates: true,
+      });
+      const updated = await tx.workspaceUsageCounter.updateMany({
+        where: { ...key, count: { lte: PROVIDER_WORK_REFUNDS_PER_PERIOD - 1 } },
+        data: { count: { increment: 1 } },
+      });
+      return updated.count === 1;
+    });
+    if (granted) {
+      const released = await this.releaseReservation(reservation);
+      if (!released) {
+        // Nothing to refund (already settled): hand the budget unit back.
+        await this.prisma.workspaceUsageCounter.updateMany({
+          where: { ...key, count: { gte: 1 } },
+          data: { count: { decrement: 1 } },
+        });
+        return 'missing';
+      }
+      return 'refunded';
+    }
+    const charged = await this.commit(reservation);
+    if (charged) {
+      this.logger.warn({
+        msg: 'usage.provider_work.charged',
+        workspaceId: reservation.workspaceId,
+        userId,
+        metric: reservation.metric,
+        operationId: reservation.operationId,
+      });
+    }
+    return charged ? 'charged' : 'missing';
   }
 
   /** Heartbeat: extend the lease of a running operation. False when it is no longer open. */
@@ -580,6 +722,15 @@ export class UsageService implements OnModuleInit, OnModuleDestroy {
     });
   }
 }
+
+/**
+ * F-06 / F-07: refunds per user, per workspace, per usage period (calendar month, UTC) for
+ * operations whose provider work was already done (cancelled mid-run, unusable output). Past
+ * it, the unit is charged.
+ */
+export const PROVIDER_WORK_REFUNDS_PER_PERIOD = 5;
+/** Internal counter key (never listed with the plan metrics). */
+export const PROVIDER_WORK_REFUND_METRIC = 'provider_work_refund';
 
 /** Lease of a running operation; the holder renews it every {@link LEASE_RENEW_MS}. */
 export const LEASE_MS = 2 * 60 * 1000;

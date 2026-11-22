@@ -127,9 +127,10 @@ function stripMarkup(text: string): string {
     previous = out;
     // Comments first (they may contain `>`), then tags, then stray comment delimiters.
     out = out
-      .replace(/<!--[\s\S]{0,2000}?-->/g, '')
+      // A comment ends at `-->` and, per the HTML parser, also at `--!>`.
+      .replace(/<!--[\s\S]{0,2000}?--!?>/g, '')
       .replace(/<[^>]{0,200}>/g, '')
-      .replace(/<!--|-->/g, '');
+      .replace(/<!--|--!?>/g, '');
   }
   return out;
 }

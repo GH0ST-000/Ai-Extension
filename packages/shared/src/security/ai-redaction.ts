@@ -398,7 +398,8 @@ export function redactSecretLines(input: readonly string[]): string[] {
       }
       if (keyLines < MAX_PEM_LINES) {
         if (!sawMaterial && headerLines < MAX_KEY_HEADER_LINES && KEY_HEADER_RE.test(rest)) {
-          out.push(prefix + rest.replace(/:[ \t].*$/, `: ${AI_PRIVATE_KEY_PLACEHOLDER}`));
+          // KEY_HEADER_RE guarantees `Name: value`: cut at the first colon (no regex scan).
+          out.push(`${prefix}${rest.slice(0, rest.indexOf(':'))}: ${AI_PRIVATE_KEY_PLACEHOLDER}`);
           keyLines += 1;
           headerLines += 1;
           continue;

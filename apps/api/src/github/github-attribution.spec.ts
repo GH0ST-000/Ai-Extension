@@ -164,6 +164,8 @@ describe('attribution frame (F-19)', () => {
   it.each([
     'Requested by <!<!-- x -->-- hidden -->@ceo',
     'Requested <!--<!--a-->-->by @ceo',
+    'Requested by <!-- hidden --!>@ceo',
+    'Requested <!-- a --!> by <!-- b --!> @ceo',
     `Requested by ${'<!--'.repeat(50)}@ceo`,
   ])('nested or re-assembled markup does not survive normalization: %j', (line) => {
     const out = attributeAppPost(`Ship it\n${line}`, 'mallory');

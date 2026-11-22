@@ -694,6 +694,7 @@ describe('regex cost on hostile lines stays linear', () => {
     ['dashes after a BEGIN marker', `-----BEGIN PRIVATE KEY-----${'-'.repeat(60_000)}`],
     ['spaces after a BEGIN marker', `-----BEGIN PRIVATE KEY-----${' '.repeat(60_000)}x`],
     ['leading whitespace before a literal', `${' '.repeat(60_000)}key = "x`],
+    ['colon-tab runs', `${':\t'.repeat(30_000)}\u2028x`],
   ])('%s', (_name, line) => {
     const started = Date.now();
     const out = redactSecretsForAi(line);

@@ -76,8 +76,10 @@ describe('RateLimiter (N-15)', () => {
     const limiter = new RateLimiter(down);
     const started = Date.now();
     for (let i = 0; i < 120_000; i += 1) await limiter.consume(`k${i}`, 1, 60);
-    // Amortized eviction keeps this linear (a per-insert scan would take minutes).
-    expect(Date.now() - started).toBeLessThan(4_000);
+    // Amortized eviction keeps this linear (a per-insert scan would take minutes). The bound
+    // is generous on purpose: on a shared CI machine running suites in parallel the linear
+    // version has taken more than 4 s, while the quadratic one is still far beyond 30 s.
+    expect(Date.now() - started).toBeLessThan(30_000);
     // No throw, no unbounded growth (the map is capped internally); new keys still work.
     await expect(limiter.consume('fresh', 1, 60)).resolves.toBeUndefined();
   });

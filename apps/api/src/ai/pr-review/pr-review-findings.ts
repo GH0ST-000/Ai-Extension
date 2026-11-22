@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { z } from 'zod';
+// zod 4's v3-compatible API: the JSON schema sent to the model stays exactly as pinned.
+import { z } from 'zod/v3';
 import type { PRReviewFindingSeverity, PRReviewRiskLevel } from '@project-x/types';
 
 import {

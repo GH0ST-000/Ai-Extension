@@ -1,5 +1,6 @@
 import { PROMPT_INJECTION_GUARD, escapeRegExp } from '@project-x/shared';
-import { z } from 'zod';
+// zod 4's v3-compatible API: the JSON schema sent to the model stays exactly as pinned.
+import { z } from 'zod/v3';
 
 import { PAGE_CONTEXT_CLOSE, PAGE_CONTEXT_OPEN } from '../constants/ai.constants';
 import { BASE_RULES } from '../prompts/prompt.utils';

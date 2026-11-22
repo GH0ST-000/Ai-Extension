@@ -72,9 +72,7 @@ export const apiEnvSchema = z.object({
    * that forgets NODE_ENV now fails at startup instead.
    */
   NODE_ENV: z.enum(['development', 'test', 'production'], {
-    errorMap: () => ({
-      message: 'NODE_ENV must be set explicitly to "development", "test" or "production".',
-    }),
+    error: 'NODE_ENV must be set explicitly to "development", "test" or "production".',
   }),
   /**
    * Bind address. Unset → `resolveApiHost`: loopback (127.0.0.1) for development and test,

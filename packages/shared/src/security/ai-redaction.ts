@@ -32,7 +32,7 @@ const TOKEN_RULES: ReadonlyArray<{
     // Between the markers only what a key consists of (base64, whitespace, `\n` / `\r`
     // escapes, armor-header punctuation) — never code: `"-----BEGIN…"; steal(); "-----END…"`
     // on one line is two string literals with a statement between them, not a key.
-    re: /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=\s:,.-]|\\[nr]){0,16384}?-----END [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----/g,
+    re: /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=\s:,.]|-(?!----)|\\[nr]){0,16384}?-----END [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----/g,
     replace: () => AI_PRIVATE_KEY_PLACEHOLDER,
   },
   // Authorization header values (keep the scheme).
@@ -230,7 +230,7 @@ const QUOTED_ASSIGNMENT_RE =
   /(["']?)([A-Za-z_][A-Za-z0-9_.-]{0,63})\1([ \t]{0,8}(?::=|=>|[:=])[ \t]{0,8})(["'`])([^"'`\n]{1,512})\4/g;
 // `KEY=value` / `key: value` ending the line (env files, YAML), optionally with a # comment.
 const BARE_ASSIGNMENT_RE =
-  /(^|[\s{,(+-])([A-Za-z_][A-Za-z0-9_.-]{0,63})([ \t]{0,8}(?::=|=>|[:=])[ \t]{0,8})([^\s"'`,;{}()[\]<>]{8,512})(?=[ \t]*;?[ \t]*(?:#.*)?$)/g;
+  /(^|[\s{,(+-])([A-Za-z_][A-Za-z0-9_.-]{0,63})([ \t]{0,8}(?::=|=>|[:=])[ \t]{0,8})([^\s"'`,;{}()[\]<>]{8,512})(?=[ \t]*(?:;[ \t]*)?(?:#.*)?$)/g;
 
 function redactAssignments(line: string): string {
   let out = line.replace(
@@ -306,7 +306,7 @@ function keyMaterialOf(rest: string): string | null {
   const text = rest
     // `key = `, `key += `, `"key": ` before the literal.
     .replace(
-      /^[ \t]*(?:["']?[A-Za-z_][\w.-]{0,63}["']?[ \t]*(?:\+?=|:)[ \t]*)(?=[bBrRfFuU@$]{0,2}["'`(])/,
+      /^[ \t]{0,64}["']?[A-Za-z_][\w.-]{0,63}["']?[ \t]{0,8}(?:\+?=|:)[ \t]{0,8}(?=[bBrRfFuU@$]{0,2}["'`(])/,
       '',
     )
     // String-literal prefixes: b"…", rb'…', f"…", @"…", $"…".

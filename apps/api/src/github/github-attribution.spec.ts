@@ -160,4 +160,14 @@ describe('attribution frame (F-19)', () => {
     expect(out.trimEnd().split('\n').at(-1)).toBe('Requested-by: @mallory via Project X');
     expect(out).not.toContain('@ceo');
   });
+
+  it.each([
+    'Requested by <!<!-- x -->-- hidden -->@ceo',
+    'Requested <!--<!--a-->-->by @ceo',
+    `Requested by ${'<!--'.repeat(50)}@ceo`,
+  ])('nested or re-assembled markup does not survive normalization: %j', (line) => {
+    const out = attributeAppPost(`Ship it\n${line}`, 'mallory');
+    expect(out.split('\n')[0]).toContain('@mallory');
+    expect(out.split('\n').at(-1)!.startsWith('> (quoted) ')).toBe(true);
+  });
 });

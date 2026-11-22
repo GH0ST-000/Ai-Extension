@@ -548,7 +548,15 @@ describe.skipIf(!URL_ENV)('GitHub App installation linking with ownership verifi
 
     const after = vi.mocked(globalThis.fetch).mock.calls.slice(calls);
     // Nothing was sent to GitHub at all — in particular no DELETE /app/installations/{id}.
-    expect(after.filter((c) => String(c[0]).includes('api.github.com'))).toEqual([]);
+    // Compared by parsed host (a substring test would also match look-alike hosts and paths).
+    const toGitHub = after.filter((c) => {
+      try {
+        return new URL(String(c[0])).hostname === 'api.github.com';
+      } catch {
+        return false;
+      }
+    });
+    expect(toGitHub).toEqual([]);
     expect(
       vi
         .mocked(globalThis.fetch)
@@ -574,9 +582,13 @@ describe.skipIf(!URL_ENV)('GitHub App installation linking with ownership verifi
     await installations.disconnectWorkspace(w.ws);
     await installations.disconnectWorkspace(w.ws);
     expect(
-      vi
-        .mocked(globalThis.fetch)
-        .mock.calls.filter((c) => String(c[0]).includes('/app/installations/')),
+      vi.mocked(globalThis.fetch).mock.calls.filter((c) => {
+        try {
+          return new URL(String(c[0])).pathname.startsWith('/app/installations/');
+        } catch {
+          return false;
+        }
+      }),
     ).toEqual([]);
     expect((await rowFor(installationId))?.status).toBe('removed');
   });

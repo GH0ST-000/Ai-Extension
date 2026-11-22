@@ -686,3 +686,26 @@ describe('adversarial review: keys inside prefixed string literals are still red
     expect(out).not.toContain(BODY[1]);
   });
 });
+
+describe('regex cost on hostile lines stays linear', () => {
+  it.each([
+    ['whitespace after a bare assignment', `API_TOKEN=abc123def456${' '.repeat(60_000)}x`],
+    ['tabs and semicolons', `password=hunter2abcdef${'\t ;'.repeat(20_000)}`],
+    ['dashes after a BEGIN marker', `-----BEGIN PRIVATE KEY-----${'-'.repeat(60_000)}`],
+    ['spaces after a BEGIN marker', `-----BEGIN PRIVATE KEY-----${' '.repeat(60_000)}x`],
+    ['leading whitespace before a literal', `${' '.repeat(60_000)}key = "x`],
+  ])('%s', (_name, line) => {
+    const started = Date.now();
+    const out = redactSecretsForAi(line);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(out.split('\n')).toHaveLength(1);
+  });
+
+  it('the rewritten patterns still redact what they did', () => {
+    expect(redactSecretsForAi('API_TOKEN=abc123def456ghi  ;  # note')).toBe(
+      `API_TOKEN=${AI_SECRET_PLACEHOLDER}  ;  # note`,
+    );
+    const oneLine = `K="-----BEGIN RSA PRIVATE KEY-----\\nProc-Type: 4,ENCRYPTED\\nDEK-Info: AES-256-CBC,0123ABCD\\n${BODY[0]}\\n-----END RSA PRIVATE KEY-----"`;
+    expect(redactSecretsForAi(oneLine)).not.toContain(BODY[0]);
+  });
+});

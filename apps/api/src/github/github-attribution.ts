@@ -115,22 +115,37 @@ const NAMED_ENTITIES: Record<string, string> = {
  * by a space: `Req<b></b>uested` renders as one word), Markdown emphasis / escapes / link
  * brackets removed, and common Cyrillic / Greek homoglyphs mapped to Latin.
  */
-function normalizeForDetection(text: string): string {
-  return (
-    text
-      .replace(/&#x([0-9a-f]{1,6});?/gi, (_m, hex: string) => safeChar(parseInt(hex, 16)))
-      .replace(/&#(\d{1,7});?/g, (_m, dec: string) => safeChar(Number(dec)))
-      .replace(/&([a-z]{2,20});/gi, (m, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? m)
-      .normalize('NFKC')
-      .replace(/[\u200B-\u200F\u2060-\u2064\uFEFF\u00AD\u180E]/g, '')
-      .replace(/\u034F/g, '') // combining grapheme joiner (own pattern: lint misleading-class)
-      // Comments first (they may contain `>`), then tags.
+/**
+ * Remove HTML comments and tags as a renderer would drop them. Repeated until nothing changes:
+ * one pass can leave a new comment or tag assembled from what surrounded the removed text
+ * (`<!<!-- -->-- x -->`, `<<b>b>`), and any comment opener left over (an unclosed `<!--`)
+ * is removed as well, so the result never contains markup that hides or splits a phrase.
+ */
+function stripMarkup(text: string): string {
+  let out = text;
+  for (let previous = ''; previous !== out;) {
+    previous = out;
+    // Comments first (they may contain `>`), then tags, then stray comment delimiters.
+    out = out
       .replace(/<!--[\s\S]{0,2000}?-->/g, '')
       .replace(/<[^>]{0,200}>/g, '')
-      .replace(/[*_~`\\[\]]/g, '')
-      .toLowerCase()
-      .replace(/[\u0080-\uFFFF]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
-  );
+      .replace(/<!--|-->/g, '');
+  }
+  return out;
+}
+
+function normalizeForDetection(text: string): string {
+  const decoded = text
+    .replace(/&#x([0-9a-f]{1,6});?/gi, (_m, hex: string) => safeChar(parseInt(hex, 16)))
+    .replace(/&#(\d{1,7});?/g, (_m, dec: string) => safeChar(Number(dec)))
+    .replace(/&([a-z]{2,20});/gi, (m, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? m)
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200F\u2060-\u2064\uFEFF\u00AD\u180E]/g, '')
+    .replace(/\u034F/g, ''); // combining grapheme joiner (own pattern: lint misleading-class)
+  return stripMarkup(decoded)
+    .replace(/[*_~`\\[\]]/g, '')
+    .toLowerCase()
+    .replace(/[\u0080-\uFFFF]/g, (ch) => HOMOGLYPHS[ch] ?? ch);
 }
 
 function safeChar(code: number): string {
